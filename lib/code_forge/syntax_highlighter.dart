@@ -284,8 +284,9 @@ class SyntaxHighlighter {
     String lineText,
     ui.ParagraphStyle paragraphStyle,
     double fontSize,
-    String? fontFamily,
-  ) {
+    String? fontFamily, {
+    double? width,
+  }) {
     final span = getLineSpan(lineIndex, lineText);
     final builder = ui.ParagraphBuilder(paragraphStyle);
 
@@ -294,14 +295,14 @@ class SyntaxHighlighter {
       builder.pushStyle(style);
       builder.addText(lineText.isEmpty ? ' ' : lineText);
       final p = builder.build();
-      p.layout(const ui.ParagraphConstraints(width: double.infinity));
+      p.layout(ui.ParagraphConstraints(width: width ?? double.infinity));
       return p;
     }
 
     _addTextSpanToBuilder(builder, span, fontSize, fontFamily);
 
     final p = builder.build();
-    p.layout(const ui.ParagraphConstraints(width: double.infinity));
+    p.layout(ui.ParagraphConstraints(width: width ?? double.infinity));
     return p;
   }
 
