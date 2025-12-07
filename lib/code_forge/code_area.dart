@@ -24,6 +24,7 @@ import 'package:flutter/services.dart';
 //TODO: Rangse wise LSP semantic highlight.
 //TODO: Keyboard shortcuts
 //TODO: Public API methods in controller.
+//FIXME: LSP Completion empty for large files.
 //FIXME: Dart analyzer not returning completions.
 
 class CodeForge extends StatefulWidget {
@@ -257,7 +258,7 @@ class _CodeForgeState extends State<CodeForge>
           setState(() {
             _lspReady = true;
           });
-          _fetchSemanticTokens();
+          await _fetchSemanticTokens();
         } catch (e) {
           debugPrint('Error initializing LSP: $e');
         }
@@ -461,9 +462,9 @@ class _CodeForgeState extends State<CodeForge>
     final now = DateTime.now();
     if (_lastSemanticTokenFetch == null ||
         now.difference(_lastSemanticTokenFetch!) > _semanticTokenDebounce) {
-      Future.delayed(_semanticTokenDebounce, () {
+      Future.delayed(_semanticTokenDebounce, () async{
         if (mounted && _lspReady) {
-          _fetchSemanticTokens();
+          await _fetchSemanticTokens();
         }
       });
     }
@@ -1005,6 +1006,7 @@ class _CodeForgeState extends State<CodeForge>
                                     editorTheme: _editorTheme,
                                     language: _language,
                                     languageId: widget.lspConfig?.languageId,
+                                    lspConfig: widget.lspConfig,
                                     semanticTokens: _semanticTokens,
                                     innerPadding: widget.innerPadding,
                                     vscrollController: _vscrollController,
@@ -1322,6 +1324,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final Map<String, TextStyle> editorTheme;
   final Mode language;
   final String? languageId;
+  final LspConfig? lspConfig;
   final List<LspSemanticToken>? semanticTokens;
   final EdgeInsets? innerPadding;
   final ScrollController vscrollController, hscrollController;
@@ -1369,6 +1372,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.lineWrap,
     this.textStyle,
     this.languageId,
+    this.lspConfig,
     this.semanticTokens,
     this.innerPadding,
   });
@@ -1381,6 +1385,7 @@ class _CodeField extends LeafRenderObjectWidget {
       editorTheme: editorTheme,
       language: language,
       languageId: languageId,
+      lspConfig: lspConfig,
       innerPadding: innerPadding,
       vscrollController: vscrollController,
       hscrollController: hscrollController,
@@ -1470,6 +1475,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   late final ui.ParagraphStyle _paragraphStyle;
   late final ui.TextStyle _uiTextStyle;
   late final SyntaxHighlighter _syntaxHighlighter;
+  final LspConfig? lspConfig;
   late double _gutterWidth;
   List<LspErrors> _diagnostics;
   int _cachedLineCount = 0;
@@ -1561,6 +1567,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.context,
     required bool lineWrap,
     this.languageId,
+    this.lspConfig,
     EdgeInsets? innerPadding,
     TextStyle? textStyle,
   }) : _editorTheme = editorTheme,
@@ -2949,13 +2956,13 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         canvas.drawParagraph(
           lineNumPara,
           offset +
-              Offset(
-                (_gutterWidth - numWidth) / 2 -
-                    (enableFolding ? (lineNumberStyle.fontSize ?? 14) / 2 : 0),
-                (innerPadding?.top ?? 0) +
-                    contentTop -
-                    vscrollController.offset,
-              ),
+            Offset(
+              (_gutterWidth - numWidth) / 2 -
+                  (enableFolding ? (lineNumberStyle.fontSize ?? 14) / 2 : 0),
+              (innerPadding?.top ?? 0) +
+                  contentTop -
+                  vscrollController.offset,
+            ),
         );
 
         if (enableFolding) {
@@ -2995,20 +3002,20 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
   ui.Paragraph _buildLineNumberParagraph(String text, TextStyle style) {
     final builder =
-        ui.ParagraphBuilder(
-            ui.ParagraphStyle(
-              fontSize: style.fontSize,
-              fontFamily: style.fontFamily,
-            ),
-          )
-          ..pushStyle(
-            ui.TextStyle(
-              color: style.color,
-              fontSize: style.fontSize,
-              fontFamily: style.fontFamily,
-            ),
-          )
-          ..addText(text);
+      ui.ParagraphBuilder(
+          ui.ParagraphStyle(
+            fontSize: style.fontSize,
+            fontFamily: style.fontFamily,
+          ),
+        )
+        ..pushStyle(
+          ui.TextStyle(
+            color: style.color,
+            fontSize: style.fontSize,
+            fontFamily: style.fontFamily,
+          ),
+        )
+        ..addText(text);
     final p = builder.build();
     p.layout(const ui.ParagraphConstraints(width: double.infinity));
     return p;
@@ -3038,12 +3045,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     iconPainter.paint(
       canvas,
       offset +
-          Offset(
-            _gutterWidth - iconPainter.width - 2,
-            (innerPadding?.top ?? 0) +
-                y +
-                (_lineHeight - iconPainter.height) / 2,
-          ),
+      Offset(
+        _gutterWidth - iconPainter.width - 2,
+        (innerPadding?.top ?? 0)
+        + y
+        + (_lineHeight - iconPainter.height) / 2,
+      ),
     );
   }
 
@@ -3428,13 +3435,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               box.left -
               (lineWrap ? 0 : hscrollController.offset);
           final screenY =
-              offset.dy +
-              (innerPadding?.top ?? 0) +
-              lineY +
-              box.top +
-              _lineHeight -
-              3 -
-              vscrollController.offset;
+              offset.dy
+              + (innerPadding?.top ?? 0)
+              + lineY
+              + box.top
+              + _lineHeight
+              - vscrollController.offset;
 
           final width = box.right - box.left;
           _drawSquigglyLine(canvas, screenX, screenY, width, paint);

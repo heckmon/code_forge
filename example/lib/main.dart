@@ -23,7 +23,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final _controller = CodeForgeController();
 
-/*   Future<LspConfig> getLsp() async{
+  Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/flutter/flutter/bin//dart",
       args: ["language-server", "--protocol=lsp"],
@@ -32,18 +32,18 @@ class _MyAppState extends State<MyApp> {
       languageId: "dart"
     );
     return data;
-  } */
+  }
 
-   Future<LspConfig> getLsp() async{
+   /* Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/.nvm/versions/node/v20.19.2/bin/basedpyright-langserver",
       args: ["--stdio"],
-      filePath: "/home/athul/Projects/EhEh/numpy_source.py",
+      filePath: "/home/athul/Projects/EhEh/sample.py",
       workspacePath: "/home/athul/Projects/EhEh",
       languageId: "dart"
     );
     return data;
-  }
+  } */
 
   @override
   void initState(){
@@ -62,7 +62,7 @@ class _MyAppState extends State<MyApp> {
               return CircularProgressIndicator();
             }
             return CodeForge(
-              language: langPython,
+              language: langDart,
               // filePath: "/home/athul/Projects/EhEh/sample.py",
               controller: _controller,
               textStyle: GoogleFonts.jetBrainsMono(),
@@ -77,13 +77,13 @@ class _MyAppState extends State<MyApp> {
                 serverUrl: "ws://0.0.0.0:3031",
                 workspacePath: "/home/athul/Projects/EhEh",
               ), */
-              // lspConfig: snapshot.data,
-              filePath: "/home/athul/Projects/EhEh/numpy_source.py",
+              lspConfig: snapshot.data,
+              filePath: "/home/athul/Projects/code_forge/lib/code_forge/code_area.dart",
+              // filePath: "/home/athul/Projects/EhEh/numpy_source.py",
               gutterStyle: GutterStyle(
-                backgroundColor: Color(0xFF252526),
+                // backgroundColor: Color(0xFF252526),
                 lineNumberStyle: TextStyle(
-                  color: Color(0xFF858585),
-                  fontSize: 12,
+                  fontSize: 13,
                 ),
                 foldedIconColor: Color(0xFFD4D4D4),
                 unfoldedIconColor: Color(0xFF858585),

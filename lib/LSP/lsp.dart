@@ -35,9 +35,24 @@ sealed class LspConfig {
   int _nextId = 1;
   final _openDocuments = <String, int>{};
 
+  /// The semantic token types legend from the server.
+  /// This is populated during initialization and used to decode token type indices.
+  List<String>? _serverTokenTypes;
+  
+  /// The semantic token modifiers legend from the server.
+  List<String>? _serverTokenModifiers;
+
   /// Stream of responses from the LSP server.
   /// Use this to listen for notifications like diagnostics.
   Stream<Map<String, dynamic>> get responses => _responseController.stream;
+  
+  /// The server's semantic token types legend.
+  /// Returns null if not yet initialized.
+  List<String>? get serverTokenTypes => _serverTokenTypes;
+  
+  /// The server's semantic token modifiers legend.
+  /// Returns null if not yet initialized.
+  List<String>? get serverTokenModifiers => _serverTokenModifiers;
 
   LspConfig({
     required this.filePath,
@@ -87,8 +102,13 @@ sealed class LspConfig {
               'tokenTypes': sematicMap['tokenTypes'],
               'tokenModifiers': sematicMap['tokenModifiers'],
               'formats': ['relative'],
-              'requests': {'full': true, 'range': true},
+              'requests': {
+                'full': {'delta': false},
+                'range': true,
+              },
               'multilineTokenSupport': true,
+              'overlappingTokenSupport': false,
+              'augmentsSyntaxTokens': true,
             },
           },
         },
@@ -97,6 +117,16 @@ sealed class LspConfig {
 
     if (response['error'] != null) {
       throw Exception('Initialization failed: ${response['error']}');
+    }
+
+    final capabilities = response['result']?['capabilities'];
+    final semanticTokensProvider = capabilities?['semanticTokensProvider'];
+    if (semanticTokensProvider != null) {
+      final legend = semanticTokensProvider['legend'];
+      if (legend != null) {
+        _serverTokenTypes = List<String>.from(legend['tokenTypes'] ?? []);
+        _serverTokenModifiers = List<String>.from(legend['tokenModifiers'] ?? []);
+      }
     }
 
     await _sendNotification(method: 'initialized', params: {});
@@ -190,12 +220,16 @@ sealed class LspConfig {
   /// This method is used internally by the [CodeCrafter], calling this with appropriate parameters will returns a [List] of [LspCompletion].
   Future<List<LspCompletion>> getCompletions(int line, int character) async {
     List<LspCompletion> completion = [];
+    print("Requested");
     final response = await _sendRequest(
       method: 'textDocument/completion',
       params: _commonParams(line, character),
     );
+    print("Got response");
+    print(response);
     try {
       for (var item in response['result']['items']) {
+        print(item);
         completion.add(
           LspCompletion(
             label: item['label'],
@@ -269,7 +303,6 @@ sealed class LspConfig {
 
     final tokens = response['result']?['data'];
     if (tokens is! List) return [];
-
     return _decodeSemanticTokens(tokens);
   }
 
@@ -298,9 +331,7 @@ sealed class LspConfig {
 
   List<LspSemanticToken> _decodeSemanticTokens(List<dynamic> data) {
     final result = <LspSemanticToken>[];
-
-    int line = 0;
-    int start = 0;
+    int line = 0, start = 0;
 
     for (int i = 0; i < data.length; i += 5) {
       final deltaLine = data[i];
@@ -312,6 +343,12 @@ sealed class LspConfig {
       line += deltaLine as int;
       start = deltaLine == 0 ? start + deltaStart : deltaStart;
 
+      // Get the token type name from the server's legend
+      String? tokenTypeName;
+      if (_serverTokenTypes != null && tokenType < _serverTokenTypes!.length) {
+        tokenTypeName = _serverTokenTypes![tokenType];
+      }
+
       result.add(
         LspSemanticToken(
           line: line,
@@ -319,6 +356,7 @@ sealed class LspConfig {
           length: length,
           typeIndex: tokenType,
           modifierBitmask: tokenModifiers,
+          tokenTypeName: tokenTypeName,
         ),
       );
     }
@@ -490,6 +528,10 @@ class LspSemanticToken {
   final int length;
   final int typeIndex;
   final int modifierBitmask;
+  
+  /// The actual token type name from the server's legend (e.g., 'namespace', 'function', etc.)
+  /// This is populated from the server's semanticTokensProvider.legend.tokenTypes list.
+  final String? tokenTypeName;
 
   LspSemanticToken({
     required this.line,
@@ -497,6 +539,7 @@ class LspSemanticToken {
     required this.length,
     required this.typeIndex,
     required this.modifierBitmask,
+    this.tokenTypeName,
   });
 
   int get end => start + length;
@@ -507,6 +550,7 @@ class LspSemanticToken {
       'start': start,
       'length': length,
       'typeIndex': typeIndex,
+      'tokenTypeName': tokenTypeName,
       'modifierBitmask': modifierBitmask,
     };
   }
@@ -563,8 +607,8 @@ const Map<String, List<String>> semanticToHljs = {
   'interface': ['built_in', 'type'],
   'struct': ['attr', 'attribute'],
   'enum': ['built_in', 'type'],
-  'function': ['section' ,'bullet', 'selector-tag', 'selector-id'],
-  'method': ['section', 'bullet', 'selector-tag', 'selector-id'],
+  'function': ['section', 'function', 'bullet', 'selector-tag', 'selector-id'],
+  'method': ['section', 'function', 'bullet', 'selector-tag', 'selector-id'],
   'decorator': ['meta', 'meta-keyword'],
   'variable': ['attr', 'attribute'],
   'parameter': ['attr', 'attribute'],
@@ -584,10 +628,12 @@ const Map<String, List<String>> semanticToHljs = {
 
 /// Pyright-specific overrides for semantic token mappings.
 /// Pyright uses some token types differently than the LSP standard.
-const Map<String, List<String>> pyrightSemanticOverrides = {
-  // Pyright uses 'enumMember' for function/method names
-  'enumMember': ['section', 'bullet', 'selector-tag', 'selector-id'],
-};
+///```dart
+///const Map<String, List<String>> pyrightSemanticOverrides = {
+///  // Pyright uses 'enumMember' for function/method names
+///  'method': ['attr', 'attribute'],
+///};
+///```
 
 /// Get the semantic token mapping for a specific language server.
 /// Returns the standard mapping with any server-specific overrides applied.
@@ -596,11 +642,6 @@ Map<String, List<String>> getSemanticMapping(String languageId) {
 
   // Apply language-specific overrides
   switch (languageId) {
-    case 'python':
-      // Pyright/Pylance specific overrides
-      baseMap.addAll(pyrightSemanticOverrides);
-      break;
-    // Add other language servers as needed:
     // case 'rust':
     //   baseMap.addAll(rustAnalyzerOverrides);
     //   break;

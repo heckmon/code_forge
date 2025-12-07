@@ -24,10 +24,6 @@ class _SpanData {
   _SpanData(this.text, this.scope, [this.children = const []]);
 }
 
-/// List of semantic token type names (must match sematicMap['tokenTypes'] order)
-final List<String> _semanticTokenTypes = (sematicMap['tokenTypes'] as List)
-    .cast<String>();
-
 /// Efficient syntax highlighter with caching, LSP semantic tokens, and optional isolate support
 class SyntaxHighlighter {
   final Mode language;
@@ -159,22 +155,15 @@ class SyntaxHighlighter {
       _collectStyles(grammarSpan, styles, 0, grammarSpan.style);
     }
 
-    final defaultColor = editorTheme['root']?.color ?? Colors.white;
-
     for (final token in lineTokens) {
-      final semanticStyle = _resolveSemanticStyle(token.typeIndex);
+      final semanticStyle = _resolveSemanticStyle(token.tokenTypeName);
       if (semanticStyle == null) continue;
 
       final start = token.start;
       final end = (token.start + token.length).clamp(0, lineText.length);
 
       for (int i = start; i < end && i < styles.length; i++) {
-        final currentStyle = styles[i];
-        if (currentStyle == null ||
-            currentStyle.color == null ||
-            currentStyle.color == defaultColor) {
-          styles[i] = semanticStyle;
-        }
+        styles[i] = semanticStyle;
       }
     }
 
@@ -250,11 +239,10 @@ class SyntaxHighlighter {
         a.fontStyle == b.fontStyle;
   }
 
-  TextStyle? _resolveSemanticStyle(int typeIndex) {
-    if (typeIndex < 0 || typeIndex >= _semanticTokenTypes.length) return null;
+  TextStyle? _resolveSemanticStyle(String? tokenTypeName) {
+    if (tokenTypeName == null) return null;
 
-    final tokenType = _semanticTokenTypes[typeIndex];
-    final hljsKeys = _semanticMapping[tokenType];
+    final hljsKeys = _semanticMapping[tokenTypeName];
     if (hljsKeys == null) return null;
 
     for (final key in hljsKeys) {
@@ -440,7 +428,6 @@ class SyntaxHighlighter {
   }
 }
 
-/// Data class for background highlighting
 class _BackgroundHighlightData {
   final String langId;
   final Map<int, String> lines;
@@ -488,7 +475,6 @@ Map<int, _SpanData?> _highlightLinesInBackground(
   return results;
 }
 
-/// Convert TextSpan to serializable span data
 _SpanData _textSpanToSpanData(TextSpan span) {
   final children = <_SpanData>[];
 
