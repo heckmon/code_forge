@@ -252,7 +252,7 @@ class _CodeForgeState extends State<CodeForge>
           }
           await lspConfig!.initialize();
           await Future.delayed(const Duration(milliseconds: 300));
-          await lspConfig.openDocument();
+          await lspConfig.openDocument(initialContent: _controller.text);
           setState(() {
             _lspReady = true;
           });
@@ -314,9 +314,21 @@ class _CodeForgeState extends State<CodeForge>
         _hoverNotifier.value = null;
       }
 
-      if (widget.lspConfig != null && _lspReady && text != _previousValue) {
+      if (
+        widget.lspConfig != null &&
+        _lspReady &&
+        text != _previousValue
+      ) {
         _previousValue = text;
-        (() async => await widget.lspConfig!.updateDocument(text))();
+        (() async {
+          final lspConfig = widget.lspConfig!;
+          await lspConfig.updateDocument(text);
+          final suggestion = await lspConfig.getCompletions(
+            line,
+            character,
+          );
+          _suggestions = suggestion;
+        })();
         _scheduleSemantictokenRefresh();
       }
 
@@ -388,15 +400,6 @@ class _CodeForgeState extends State<CodeForge>
                   .where((s) => s.startsWith(prefix))
                   .toList();
             }
-          } else if (_lspReady) {
-            final lspConfig = widget.lspConfig!;
-            (() async {
-              final suggestion = await lspConfig.getCompletions(
-                line,
-                character,
-              );
-              _suggestions = suggestion;
-            })();
           }
           _sortSuggestions(prefix);
           final triggerChar = text[cursorPosition - 1];
@@ -431,18 +434,54 @@ class _CodeForgeState extends State<CodeForge>
     return match?.group(0) ?? '';
   }
 
+  int _scoreMatch(String label, String prefix) {
+    if (prefix.isEmpty) return 0;
+    
+    final lowerLabel = label.toLowerCase();
+    final lowerPrefix = prefix.toLowerCase();
+    
+    if (!lowerLabel.contains(lowerPrefix)) return -1000000;
+    
+    int score = 0;
+    
+    if (label.startsWith(prefix)) {
+      score += 100000;
+    } else if (lowerLabel.startsWith(lowerPrefix)) {
+      score += 50000;
+    } else {
+      score += 10000;
+    }
+    
+    final matchIndex = lowerLabel.indexOf(lowerPrefix);
+    score -= matchIndex * 100;
+    
+    if (matchIndex > 0) {
+      final charBefore = label[matchIndex - 1];
+      final matchChar = label[matchIndex];
+      if (charBefore.toLowerCase() == charBefore && matchChar.toUpperCase() == matchChar) {
+        score += 5000;
+      } else if (charBefore == '_' || charBefore == '-') {
+        score += 5000;
+      }
+    }
+    
+    score -= label.length;
+    
+    return score;
+  }
+
   void _sortSuggestions(String prefix) {
     _suggestions.sort((a, b) {
-      final aStartsWith = a is LspCompletion
-        ? a.label.toLowerCase().startsWith(prefix.toLowerCase())
-        : a.toLowerCase().startsWith(prefix.toLowerCase());
-      final bStartsWith = b is LspCompletion
-        ? b.label.toLowerCase().startsWith(prefix.toLowerCase())
-        : b.toLowerCase().startsWith(prefix.toLowerCase());
-      if (aStartsWith && !bStartsWith) return -1;
-      if (!aStartsWith && bStartsWith) return 1;
-
-      return a is LspCompletion ? b.label.compareTo(a.label) : b.compareTo(a);
+      final aLabel = a is LspCompletion ? a.label : a.toString();
+      final bLabel = b is LspCompletion ? b.label : b.toString();
+      final aScore = _scoreMatch(aLabel, prefix);
+      final bScore = _scoreMatch(bLabel, prefix);
+      
+      if (aScore != bScore) {
+        return bScore.compareTo(aScore);
+      }
+      
+      return aLabel.compareTo(bLabel);
     });
   }
 
@@ -1088,7 +1127,7 @@ class _CodeForgeState extends State<CodeForge>
                             child: ListView.builder(
                               itemExtent: (widget.textStyle?.fontSize ?? 14) + 6.5,
                               controller: _suggScrollController,
-                              padding: EdgeInsets.all(6),
+                              padding: EdgeInsets.only(right: 5),
                               shrinkWrap: true,
                               itemCount: sugg.length,
                               itemBuilder: (_, indx) {
@@ -1113,15 +1152,28 @@ class _CodeForgeState extends State<CodeForge>
                                         if (item is LspCompletion) ...[
                                           item.icon,
                                           const SizedBox(width: 10),
-                                          Text(
-                                            item.label,
-                                            style: _suggestionStyle.textStyle,
+                                          Expanded(
+                                            child: Text(
+                                              item.label,
+                                              style: _suggestionStyle.textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
+                                          if(item.importUri?[0] != null)
+                                          Text(
+                                            item.importUri![0],
+                                            style: _suggestionStyle.textStyle.copyWith(
+                                              color: _suggestionStyle.textStyle.color?.withAlpha(150)
+                                            )
+                                          )
                                         ],
                                         if (item is String)
-                                          Text(
-                                            item,
-                                            style: _suggestionStyle.textStyle,
+                                          Expanded(
+                                            child: Text(
+                                              item,
+                                              style: _suggestionStyle.textStyle,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                       ],
                                     ),
@@ -3855,8 +3907,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
       
       if(
-        (hoverNotifier.value == null || !isHoveringPopup.value) && _isOffsetOverWord(textOffset)
-        ){
+        (hoverNotifier.value == null || !isHoveringPopup.value) &&
+        _isOffsetOverWord(textOffset)
+      ){
         _hoverTimer?.cancel();
         _hoverTimer = Timer(Duration(milliseconds: 1500), (){
           final lineChar = _offsetToLineChar(textOffset);

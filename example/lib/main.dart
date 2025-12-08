@@ -23,7 +23,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final _controller = CodeForgeController();
 
-  Future<LspConfig> getLsp() async{
+/*   Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/flutter/flutter/bin//dart",
       args: ["language-server", "--protocol=lsp"],
@@ -32,7 +32,7 @@ class _MyAppState extends State<MyApp> {
       languageId: "dart"
     );
     return data;
-  }
+  } */
 
    /* Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
@@ -45,17 +45,17 @@ class _MyAppState extends State<MyApp> {
     return data;
   } */
 
-/*   Future<LspConfig> getLsp() async{
+  Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/flutter/flutter/bin//dart",
       args: ["language-server", "--protocol=lsp"],
       filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
-      workspacePath: "/home/athul/Projects/EhEh/server/lib",
+      workspacePath: "/home/athul/Projects/EhEh/server",
       languageId: "dart"
     );
     return data;
   }
- */
+
   @override
   void initState(){
     // _controller.text = small_code;
@@ -74,6 +74,7 @@ class _MyAppState extends State<MyApp> {
             }
             return CodeForge(
               language: langDart,
+              // language: langPython,
               // filePath: "/home/athul/Projects/EhEh/sample.py",
               controller: _controller,
               textStyle: GoogleFonts.jetBrainsMono(),
@@ -89,9 +90,9 @@ class _MyAppState extends State<MyApp> {
                 workspacePath: "/home/athul/Projects/EhEh",
               ), */
               lspConfig: snapshot.data,
-              filePath: "/home/athul/Projects/code_forge/lib/code_forge/code_area.dart",
+              // filePath: "/home/athul/Projects/code_forge/lib/code_forge/code_area.dart",
               // filePath: "/home/athul/Projects/EhEh/numpy_source.py",
-              // filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
+              filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
               gutterStyle: GutterStyle(
                 // backgroundColor: Color(0xFF252526),
                 lineNumberStyle: TextStyle(

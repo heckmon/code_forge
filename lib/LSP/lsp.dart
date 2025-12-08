@@ -142,10 +142,13 @@ sealed class LspConfig {
   /// Opens the document in the LSP server.
   ///
   /// This method is used internally by the [CodeCrafter] widget and calling it directly is not recommended.
-  Future<void> openDocument() async {
+  /// 
+  /// If [initialContent] is provided, it will be used as the document content.
+  /// Otherwise, the content will be read from [filePath].
+  Future<void> openDocument({String? initialContent}) async {
     final version = (_openDocuments[filePath] ?? 0) + 1;
     _openDocuments[filePath] = version;
-    final String text = await File(filePath).readAsString();
+    final String text = initialContent ?? await File(filePath).readAsString();
     await _sendNotification(
       method: 'textDocument/didOpen',
       params: {
@@ -220,16 +223,23 @@ sealed class LspConfig {
   /// This method is used internally by the [CodeCrafter], calling this with appropriate parameters will returns a [List] of [LspCompletion].
   Future<List<LspCompletion>> getCompletions(int line, int character) async {
     List<LspCompletion> completion = [];
-    print("Requested");
     final response = await _sendRequest(
       method: 'textDocument/completion',
       params: _commonParams(line, character),
     );
-    print("Got response");
-    print(response);
     try {
-      for (var item in response['result']['items']) {
-        print(item);
+      final result = response['result'];
+      if (result == null) return completion;
+      
+      final items = result['items'];
+      if (items == null || items is! List) return completion;
+      
+      for (var item in items) {
+        final importUris = item['data']?['importUris'];
+        final List<String>? importUriList = importUris != null 
+            ? (importUris as List).map((e) => e.toString()).toList()
+            : null;
+            
         completion.add(
           LspCompletion(
             label: item['label'],
@@ -237,6 +247,8 @@ sealed class LspConfig {
               (type) => type.value == item['kind'],
               orElse: () => CompletionItemType.text,
             ),
+            importUri: importUriList,
+            reference: item["data"]?["ref"]
           ),
         );
       }
@@ -279,7 +291,7 @@ sealed class LspConfig {
       params: _commonParams(line, character),
     );
     if (response['result'] == null) return {};
-    return response['result'][0] ?? '';
+    return response['result']?[0] ?? '';
   }
 
   Future<List<dynamic>> getReferences(int line, int character) async {
@@ -490,12 +502,33 @@ class LspCompletion {
   /// The icon associated with the completion item, determined by its type.
   final Icon icon;
 
-  LspCompletion({required this.label, required this.itemType})
+  /// [reference] specifies the symbol or entity within the codebase that this item refers to.
+  final String? reference;
+
+  /// [importUri] provides the URI needed to import the file where the referenced item is defined.
+  final List<String>? importUri;
+
+  LspCompletion({
+    required this.label,
+    required this.itemType,
+    this.reference,
+    this.importUri
+  })
     : icon = Icon(
         completionItemIcons[itemType]!.icon,
         color: completionItemIcons[itemType]!.color,
         size: 18,
       );
+
+  Map<String, dynamic> toJson ()=> {
+    "label": label,
+    "itemType": itemType,
+    "reference": reference,
+    "importUri": importUri
+  };
+
+  @override
+  String toString ()=> toJson().toString();
 }
 
 /// Represents an error in the LSP (Language Server Protocol).
