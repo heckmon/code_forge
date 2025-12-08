@@ -19,10 +19,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
-//TODO: Arrow key navigation in suggestion bar.
 //TODO: Store text in a buffer.
 //TODO: Rangse wise LSP semantic highlight.
 //TODO: Keyboard shortcuts
+//TODO: Implement undo redo functionality
 //TODO: Public API methods in controller.
 
 class CodeForge extends StatefulWidget {
@@ -425,6 +425,30 @@ class _CodeForgeState extends State<CodeForge>
         _focusNode.requestFocus();
       }
     });
+  }
+
+  void _scrollToSelectedSuggestion() {
+    if (!_suggScrollController.hasClients) return;
+    
+    final itemExtent = (widget.textStyle?.fontSize ?? 14) + 6.5;
+    final selectedOffset = _sugSelIndex * itemExtent;
+    final currentScroll = _suggScrollController.offset;
+    final viewportHeight = _suggScrollController.position.viewportDimension;
+    
+    double? targetOffset;
+    
+    if (selectedOffset < currentScroll) {
+      targetOffset = selectedOffset;
+    } else if (selectedOffset + itemExtent > currentScroll + viewportHeight) {
+      targetOffset = selectedOffset - viewportHeight + itemExtent;
+    }
+    
+    if (targetOffset != null) {
+      _suggScrollController.jumpTo(targetOffset.clamp(
+        _suggScrollController.position.minScrollExtent,
+        _suggScrollController.position.maxScrollExtent,
+      ));
+    }
   }
 
   String _getCurrentWordPrefix(String text, int offset) {
@@ -920,31 +944,31 @@ class _CodeForgeState extends State<CodeForge>
                                     if (event is KeyDownEvent || event is KeyRepeatEvent) {
                                       final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
                                       final isCtrlPressed = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
-                                      if (_suggestionNotifier.value != null && _suggestionNotifier.value!.isNotEmpty) {
-                                        switch (event.logicalKey) {
-                                          case LogicalKeyboardKey.arrowDown:
-                                            setState(() {
-                                              _sugSelIndex = (_sugSelIndex + 1) % _suggestionNotifier.value!.length;
-                                            });
-                                            return KeyEventResult.handled;
-                                          case LogicalKeyboardKey.arrowUp:
-                                            setState(() {
-                                              _sugSelIndex = (_sugSelIndex - 1 + _suggestionNotifier .value! .length) % _suggestionNotifier.value!.length;
-                                            });
-                                            return KeyEventResult.handled;
-                                          case LogicalKeyboardKey.enter:
-                                          case LogicalKeyboardKey.tab:
-                                            _acceptSuggestion();
-                                            return KeyEventResult.handled;
-                                          case LogicalKeyboardKey.escape:
-                                            _suggestionNotifier.value = null;
-                                            return KeyEventResult.handled;
-                                          default:
-                                            break;
-                                        }
-                                      }
-                        
-                                      if (isCtrlPressed) {
+                                        if (_suggestionNotifier.value != null && _suggestionNotifier.value!.isNotEmpty) {
+                                          switch (event.logicalKey) {
+                                            case LogicalKeyboardKey.arrowDown:
+                                              setState(() {
+                                                _sugSelIndex = (_sugSelIndex + 1) % _suggestionNotifier.value!.length;
+                                                _scrollToSelectedSuggestion();
+                                              });
+                                              return KeyEventResult.handled;
+                                            case LogicalKeyboardKey.arrowUp:
+                                              setState(() {
+                                                _sugSelIndex = (_sugSelIndex - 1 + _suggestionNotifier .value! .length) % _suggestionNotifier.value!.length;
+                                                _scrollToSelectedSuggestion();
+                                              });
+                                              return KeyEventResult.handled;
+                                            case LogicalKeyboardKey.enter:
+                                            case LogicalKeyboardKey.tab:
+                                              _acceptSuggestion();
+                                              return KeyEventResult.handled;
+                                            case LogicalKeyboardKey.escape:
+                                              _suggestionNotifier.value = null;
+                                              return KeyEventResult.handled;
+                                            default:
+                                              break;
+                                          }
+                                        }                                      if (isCtrlPressed) {
                                         switch (event.logicalKey) {
                                           case LogicalKeyboardKey.keyC:
                                             _copy();
