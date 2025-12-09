@@ -6,7 +6,20 @@ import 'package:re_highlight/re_highlight.dart';
 
 import '../LSP/lsp.dart';
 
-/// Cached highlighting result for a single line
+class SemanticWordSpan {
+  final int startChar;
+  final int endChar;
+  final String word;
+  final TextStyle style;
+
+  SemanticWordSpan({
+    required this.startChar,
+    required this.endChar,
+    required this.word,
+    required this.style,
+  });
+}
+
 class HighlightedLine {
   final String text;
   final TextSpan? span;
@@ -15,7 +28,6 @@ class HighlightedLine {
   HighlightedLine(this.text, this.span, this.version);
 }
 
-/// Serializable span data for isolate communication
 class _SpanData {
   final String text;
   final String? scope;
@@ -24,7 +36,6 @@ class _SpanData {
   _SpanData(this.text, this.scope, [this.children = const []]);
 }
 
-/// Efficient syntax highlighter with caching, LSP semantic tokens, and optional isolate support
 class SyntaxHighlighter {
   final Mode language;
   final Map<String, TextStyle> editorTheme;
@@ -35,12 +46,14 @@ class SyntaxHighlighter {
   late final Map<String, List<String>> _semanticMapping;
   final Map<int, HighlightedLine> _grammarCache = {};
   final Map<int, HighlightedLine> _mergedCache = {};
-  List<LspSemanticToken> _semanticTokens = [];
-  List<int> _lineOffsets = [0];
-
+  final Map<int, List<SemanticWordSpan>> _lineSemanticSpans = {};
+  final Map<String, TextSpan?> _lineSpanCache = {};
+  bool _isEditing = false;
   int _version = 0;
+  int _documentVersion = 0;
   static const int isolateThreshold = 500;
   VoidCallback? onHighlightComplete;
+  int get documentVersion => _documentVersion;
 
   SyntaxHighlighter({
     required this.language,
@@ -55,33 +68,68 @@ class SyntaxHighlighter {
     _semanticMapping = getSemanticMapping(languageId ?? '');
   }
 
-  /// Update semantic tokens from LSP (call after getSemanticTokensFull or getSemanticTokensRange)
   void updateSemanticTokens(List<LspSemanticToken> tokens, String fullText) {
-    _semanticTokens = tokens;
-    _updateLineOffsets(fullText);
-    _mergedCache.clear(); // Force re-merge
+    _lineSemanticSpans.clear();
+    final lines = fullText.split('\n');
+
+    for (final token in tokens) {
+      if (token.line < lines.length) {
+        final lineText = lines[token.line];
+        final start = token.start.clamp(0, lineText.length);
+        final end = (token.start + token.length).clamp(0, lineText.length);
+
+        if (start < end) {
+          final word = lineText.substring(start, end);
+          final style = _resolveSemanticStyle(token.tokenTypeName);
+
+          if (style != null && word.isNotEmpty) {
+            final lineSpans = _lineSemanticSpans.putIfAbsent(
+              token.line,
+              () => [],
+            );
+            lineSpans.add(
+              SemanticWordSpan(
+                startChar: start,
+                endChar: end,
+                word: word,
+                style: style,
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    for (final lineSpans in _lineSemanticSpans.values) {
+      lineSpans.sort((a, b) => a.startChar.compareTo(b.startChar));
+    }
+
+    _isEditing = false;
+    _lineSpanCache.clear();
+    _mergedCache.clear();
+    _grammarCache.clear();
     _version++;
     onHighlightComplete?.call();
   }
 
-  void _updateLineOffsets(String text) {
-    _lineOffsets = [0];
-    final lines = text.split('\n');
-    for (int i = 0; i < lines.length; i++) {
-      _lineOffsets.add(
-        _lineOffsets.last + lines[i].length + 1,
-      ); // +1 for newline
-    }
-  }
-
-  /// Mark all lines as dirty (full rehighlight needed)
-  void invalidateAll() {
-    _grammarCache.clear();
-    _mergedCache.clear();
+  void applyDocumentEdit(
+    int editStart,
+    int oldEnd,
+    String insertedText,
+    String fullText,
+  ) {
+    _documentVersion++;
+    _isEditing = true;
     _version++;
   }
 
-  /// Mark specific lines as dirty
+  void invalidateAll() {
+    _grammarCache.clear();
+    _mergedCache.clear();
+    _documentVersion++;
+    _version++;
+  }
+
   void invalidateLines(Set<int> lines) {
     for (final line in lines) {
       _grammarCache.remove(line);
@@ -90,7 +138,6 @@ class SyntaxHighlighter {
     _version++;
   }
 
-  /// Mark a range of lines as dirty (for insertions/deletions)
   void invalidateRange(int startLine, int endLine) {
     for (int i = startLine; i <= endLine; i++) {
       _grammarCache.remove(i);
@@ -104,124 +151,94 @@ class SyntaxHighlighter {
     _version++;
   }
 
-  /// Get highlighted TextSpan for a line, using cache if available
-  /// This returns merged grammar + semantic highlighting
   TextSpan? getLineSpan(int lineIndex, String lineText) {
-    final mergedCached = _mergedCache[lineIndex];
-    if (mergedCached != null &&
-        mergedCached.text == lineText &&
-        mergedCached.version == _version) {
-      return mergedCached.span;
+    if (_lineSpanCache.containsKey(lineText)) {
+      return _lineSpanCache[lineText];
     }
 
-    TextSpan? grammarSpan;
-    final grammarCached = _grammarCache[lineIndex];
-    if (grammarCached != null && grammarCached.text == lineText) {
-      grammarSpan = grammarCached.span;
-    } else {
-      grammarSpan = _highlightLine(lineText);
-      _grammarCache[lineIndex] = HighlightedLine(
-        lineText,
-        grammarSpan,
-        _version,
-      );
+    final grammarSpan = _highlightLine(lineText);
+
+    if (_isEditing) {
+      _lineSpanCache[lineText] = grammarSpan;
+      return grammarSpan;
     }
 
-    TextSpan? mergedSpan;
-    if (_semanticTokens.isNotEmpty && lineText.isNotEmpty) {
-      mergedSpan = _applySemanticTokensToLine(lineIndex, lineText, grammarSpan);
-    } else {
-      mergedSpan = grammarSpan;
-    }
+    final semanticSpans = _lineSemanticSpans[lineIndex];
+    final mergedSpan = _mergeGrammarAndSemantic(
+      lineText,
+      grammarSpan,
+      semanticSpans,
+    );
 
+    _lineSpanCache[lineText] = mergedSpan;
     _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
+
     return mergedSpan;
   }
 
-  TextSpan? _applySemanticTokensToLine(
-    int lineIndex,
+  TextSpan? _mergeGrammarAndSemantic(
     String lineText,
     TextSpan? grammarSpan,
+    List<SemanticWordSpan>? semanticSpans,
   ) {
-    if (lineText.isEmpty) return grammarSpan;
-
-    final lineTokens = _semanticTokens
-        .where((t) => t.line == lineIndex)
-        .toList();
-    if (lineTokens.isEmpty) return grammarSpan;
-
-    final styles = List<TextStyle?>.filled(lineText.length, null);
-    if (grammarSpan != null) {
-      _collectStyles(grammarSpan, styles, 0, grammarSpan.style);
+    if (lineText.isEmpty) {
+      return grammarSpan;
     }
 
-    for (final token in lineTokens) {
-      final semanticStyle = _resolveSemanticStyle(token.tokenTypeName);
-      if (semanticStyle == null) continue;
-
-      final start = token.start;
-      final end = (token.start + token.length).clamp(0, lineText.length);
-
-      for (int i = start; i < end && i < styles.length; i++) {
-        styles[i] = semanticStyle;
-      }
+    if (semanticSpans == null || semanticSpans.isEmpty) {
+      return grammarSpan;
     }
 
-    return _buildSpanFromStyles(lineText, styles);
-  }
-
-  int _collectStyles(
-    TextSpan span,
-    List<TextStyle?> styles,
-    int offset,
-    TextStyle? parentStyle,
-  ) {
-    final effectiveStyle = span.style ?? parentStyle;
-
-    if (span.text != null) {
-      for (
-        int i = 0;
-        i < span.text!.length && offset + i < styles.length;
-        i++
-      ) {
-        styles[offset + i] = effectiveStyle;
-      }
-      offset += span.text!.length;
-    }
-
-    if (span.children != null) {
-      for (final child in span.children!) {
-        if (child is TextSpan) {
-          offset = _collectStyles(child, styles, offset, effectiveStyle);
-        }
-      }
-    }
-
-    return offset;
-  }
-
-  TextSpan _buildSpanFromStyles(String text, List<TextStyle?> styles) {
-    if (text.isEmpty) return TextSpan(style: baseTextStyle);
+    final grammarSegments = <({String text, TextStyle? style})>[];
+    _flattenGrammarSpan(grammarSpan, grammarSegments, baseTextStyle);
 
     final children = <TextSpan>[];
-    int start = 0;
+    int currentPos = 0;
 
-    while (start < text.length) {
-      final currentStyle = styles[start];
-      int end = start + 1;
+    for (final semantic in semanticSpans) {
+      // Clamp semantic boundaries to line length
+      final semanticStart = semantic.startChar.clamp(0, lineText.length);
+      final semanticEnd = semantic.endChar.clamp(0, lineText.length);
 
-      while (end < text.length && _stylesEqual(styles[end], currentStyle)) {
-        end++;
+      if (semanticStart > currentPos) {
+        _addGrammarSegments(
+          children,
+          grammarSegments,
+          currentPos,
+          semanticStart,
+          lineText,
+        );
       }
 
-      children.add(
-        TextSpan(
-          text: text.substring(start, end),
-          style: currentStyle ?? baseTextStyle,
-        ),
-      );
+      if (semanticStart < semanticEnd) {
+        final actualText = lineText.substring(semanticStart, semanticEnd);
 
-      start = end;
+        final grammarStyle = _getStyleAtPosition(
+          grammarSegments,
+          semanticStart,
+        );
+        if (_isStringOrCommentStyle(grammarStyle)) {
+          children.add(TextSpan(text: actualText, style: grammarStyle));
+        } else {
+          children.add(TextSpan(text: actualText, style: semantic.style));
+        }
+      }
+
+      currentPos = semanticEnd;
+    }
+
+    if (currentPos < lineText.length) {
+      _addGrammarSegments(
+        children,
+        grammarSegments,
+        currentPos,
+        lineText.length,
+        lineText,
+      );
+    }
+
+    if (children.isEmpty) {
+      return grammarSpan;
     }
 
     if (children.length == 1) {
@@ -231,12 +248,111 @@ class SyntaxHighlighter {
     return TextSpan(style: baseTextStyle, children: children);
   }
 
-  bool _stylesEqual(TextStyle? a, TextStyle? b) {
-    if (a == null && b == null) return true;
-    if (a == null || b == null) return false;
-    return a.color == b.color &&
-        a.fontWeight == b.fontWeight &&
-        a.fontStyle == b.fontStyle;
+  void _flattenGrammarSpan(
+    TextSpan? span,
+    List<({String text, TextStyle? style})> segments,
+    TextStyle? parentStyle,
+  ) {
+    if (span == null) return;
+
+    final effectiveStyle = span.style ?? parentStyle;
+
+    if (span.text != null && span.text!.isNotEmpty) {
+      segments.add((text: span.text!, style: effectiveStyle));
+    }
+
+    if (span.children != null) {
+      for (final child in span.children!) {
+        if (child is TextSpan) {
+          _flattenGrammarSpan(child, segments, effectiveStyle);
+        }
+      }
+    }
+  }
+
+  void _addGrammarSegments(
+    List<TextSpan> children,
+    List<({String text, TextStyle? style})> grammarSegments,
+    int startPos,
+    int endPos,
+    String lineText,
+  ) {
+    int segmentOffset = 0;
+    int addedLength = 0;
+
+    for (final segment in grammarSegments) {
+      final segmentStart = segmentOffset;
+      final segmentEnd = segmentOffset + segment.text.length;
+
+      if (segmentEnd > startPos && segmentStart < endPos) {
+        final overlapStart = segmentStart < startPos
+            ? startPos - segmentStart
+            : 0;
+        final overlapEnd = segmentEnd > endPos
+            ? segment.text.length - (segmentEnd - endPos)
+            : segment.text.length;
+
+        if (overlapEnd > overlapStart) {
+          final text = segment.text.substring(overlapStart, overlapEnd);
+          children.add(
+            TextSpan(text: text, style: segment.style ?? baseTextStyle),
+          );
+          addedLength += text.length;
+        }
+      }
+
+      segmentOffset = segmentEnd;
+
+      if (segmentOffset >= endPos) break;
+    }
+
+    final expectedLength = endPos - startPos;
+    if (addedLength < expectedLength) {
+      // Clamp indices to avoid range errors
+      final subStart = (startPos + addedLength).clamp(0, lineText.length);
+      final subEnd = endPos.clamp(0, lineText.length);
+      if (subEnd > subStart) {
+        final remaining = lineText.substring(subStart, subEnd);
+        if (remaining.isNotEmpty) {
+          children.add(TextSpan(text: remaining, style: baseTextStyle));
+        }
+      }
+    }
+  }
+
+  TextStyle? _getStyleAtPosition(
+    List<({String text, TextStyle? style})> grammarSegments,
+    int position,
+  ) {
+    int offset = 0;
+    for (final segment in grammarSegments) {
+      final segmentEnd = offset + segment.text.length;
+      if (position >= offset && position < segmentEnd) {
+        return segment.style;
+      }
+      offset = segmentEnd;
+    }
+    return baseTextStyle;
+  }
+
+  bool _isStringOrCommentStyle(TextStyle? style) {
+    if (style == null) return false;
+
+    final stringStyle = editorTheme['string'];
+    final commentStyle = editorTheme['comment'];
+    final numberStyle = editorTheme['number'];
+    final regexpStyle = editorTheme['regexp'];
+    final metaStringStyle = editorTheme['meta-string'];
+    final styleColor = style.color;
+
+    if (styleColor == null) return false;
+    if (stringStyle?.color == styleColor) return true;
+    if (commentStyle?.color == styleColor) return true;
+    if (numberStyle?.color == styleColor) return true;
+    if (regexpStyle?.color == styleColor) return true;
+    if (metaStringStyle?.color == styleColor) return true;
+
+    return false;
   }
 
   TextStyle? _resolveSemanticStyle(String? tokenTypeName) {
@@ -266,7 +382,6 @@ class SyntaxHighlighter {
     }
   }
 
-  /// Build a ui.Paragraph for a line with syntax highlighting
   ui.Paragraph buildHighlightedParagraph(
     int lineIndex,
     String lineText,
@@ -351,8 +466,6 @@ class SyntaxHighlighter {
     );
   }
 
-  /// Pre-highlight visible lines asynchronously (for smoother scrolling)
-  /// Note: This only does grammar-based highlighting. Call updateSemanticTokens separately.
   Future<void> preHighlightLines(
     int startLine,
     int endLine,
@@ -424,7 +537,8 @@ class SyntaxHighlighter {
   void dispose() {
     _grammarCache.clear();
     _mergedCache.clear();
-    _semanticTokens.clear();
+    _lineSemanticSpans.clear();
+    _lineSpanCache.clear();
   }
 }
 

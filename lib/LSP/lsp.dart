@@ -318,34 +318,6 @@ sealed class LspConfig {
     return _decodeSemanticTokens(tokens);
   }
 
-  Future<List<LspSemanticToken>> getSemanticTokensRange(
-    int startLine,
-    int startChar,
-    int endLine,
-    int endChar,
-  ) async {
-    final response = await _sendRequest(
-      method: 'textDocument/semanticTokens/range',
-      params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
-        'range': {
-          'start': {'line': startLine, 'character': startChar},
-          'end': {'line': endLine, 'character': endChar},
-        },
-      },
-    );
-
-    if(response['error'] != null){
-      throw UnsupportedError(
-        "The LSP server doesn't support the textDocument/semanticTokens/range: ${response['error']?['message']}"
-      );
-    }
-    final tokens = response['result']?['data'];
-    if (tokens is! List) return [];
-
-    return _decodeSemanticTokens(tokens);
-  }
-
   List<LspSemanticToken> _decodeSemanticTokens(List<dynamic> data) {
     final result = <LspSemanticToken>[];
     int line = 0, start = 0;
@@ -360,7 +332,6 @@ sealed class LspConfig {
       line += deltaLine as int;
       start = deltaLine == 0 ? start + deltaStart : deltaStart;
 
-      // Get the token type name from the server's legend
       String? tokenTypeName;
       if (_serverTokenTypes != null && tokenType < _serverTokenTypes!.length) {
         tokenTypeName = _serverTokenTypes![tokenType];

@@ -19,7 +19,7 @@ class CodeForgeController implements DeltaTextInputClient {
   int _cachedTextVersion = -1, _currentVersion = 0;
   int? dirtyLine, _bufferLineIndex;
   bool readOnly = false;
-
+  bool lineStructureChanged = false;
   String? _lastSentText;
   TextSelection? _lastSentSelection;
 
@@ -146,7 +146,6 @@ class CodeForgeController implements DeltaTextInputClient {
 
     _flushBuffer();
 
-    // Clamp selection to valid range after buffer flush
     final textLength = text.length;
     final clampedBase = newSelection.baseOffset.clamp(0, textLength);
     final clampedExtent = newSelection.extentOffset.clamp(0, textLength);
@@ -288,6 +287,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _currentVersion++;
       _selection = actualSelection;
       dirtyLine = _rope.getLineAtOffset(offset);
+      lineStructureChanged = true;
       dirtyRegion = TextRange(start: offset, end: offset + actualInsertedText.length);
       
       if (connection != null && connection!.attached) {
@@ -432,6 +432,7 @@ class CodeForgeController implements DeltaTextInputClient {
             _currentVersion++;
             _selection = newSelection;
             dirtyLine = _rope.getLineAtOffset(range.start);
+            lineStructureChanged = true;
             dirtyRegion = TextRange(start: range.start, end: range.start);
             return;
           }
@@ -465,6 +466,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _currentVersion++;
       _selection = newSelection;
       dirtyLine = _rope.getLineAtOffset(range.start);
+      lineStructureChanged = true;
       dirtyRegion = TextRange(start: range.start, end: range.start);
       return;
     }
@@ -562,6 +564,7 @@ class CodeForgeController implements DeltaTextInputClient {
   void clearDirtyRegion() {
     dirtyRegion = null;
     dirtyLine = null;
+    lineStructureChanged = false;
   }
 
   /// Insert text at the current cursor position (or replace selection).
@@ -707,7 +710,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.delete(
         safeStart,
         safeEnd,
-      ); // Fixed: Rope.delete takes (start, end), not (start, length)
+      );
     }
     if (replacement.isNotEmpty) {
       _rope.insert(safeStart, replacement);
