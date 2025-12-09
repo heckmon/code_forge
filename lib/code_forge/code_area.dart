@@ -20,7 +20,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
-//TODO: Keyboard shortcuts
 //TODO: Public API methods in controller.
 
 class CodeForge extends StatefulWidget {
@@ -272,7 +271,9 @@ class _CodeForgeState extends State<CodeForge>
           });
           await _fetchSemanticTokensFull();
         } catch (e) {
-          debugPrint('Error initializing LSP: $e');
+          if (mounted) {
+            debugPrint('Error initializing LSP: $e');
+          }
         }
       })();
 
@@ -532,10 +533,12 @@ class _CodeForgeState extends State<CodeForge>
 
     try {
       final tokens = await widget.lspConfig!.getSemanticTokensFull();
-      setState(() {
-        _semanticTokens = tokens;
-        _semanticTokensVersion++;
-      });
+      if (mounted) {
+        setState(() {
+          _semanticTokens = tokens;
+          _semanticTokensVersion++;
+        });
+      }
     } catch (e) {
       debugPrint('Error fetching semantic tokens: $e');
     }
@@ -910,6 +913,309 @@ class _CodeForgeState extends State<CodeForge>
     _resetCursorBlink();
   }
 
+  void _indent() {
+    if (_controller.selection.baseOffset != _controller.selection.extentOffset) {
+      final selection = _controller.selection;
+      final text = _controller.text;
+      final selStart = selection.start;
+      final selEnd = selection.end;
+
+      final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
+      int lineEnd = text.indexOf('\n', selEnd);
+      if (lineEnd == -1) lineEnd = text.length;
+
+      final selectedBlock = text.substring(lineStart, lineEnd);
+      final indentedBlock = selectedBlock
+          .split('\n')
+          .map((line) => '   $line')
+          .join('\n');
+
+      final lines = selectedBlock.split('\n');
+      final addedChars = 3 * lines.length;
+      final newSelection = TextSelection(
+        baseOffset: selection.baseOffset + 3,
+        extentOffset: selection.extentOffset + addedChars,
+      );
+
+      _controller.replaceRange(lineStart, lineEnd, indentedBlock);
+      _controller.setSelectionSilently(newSelection);
+    } else {
+      _controller.insertAtCurrentCursor('   ');
+    }
+  }
+
+  void _unindent() {
+    final selection = _controller.selection;
+    final text = _controller.text;
+
+    if (selection.baseOffset != selection.extentOffset) {
+      final selStart = selection.start;
+      final selEnd = selection.end;
+
+      final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
+      int lineEnd = text.indexOf('\n', selEnd);
+      if (lineEnd == -1) lineEnd = text.length;
+
+      final selectedBlock = text.substring(lineStart, lineEnd);
+      final unindentedBlock = selectedBlock
+          .split('\n')
+          .map((line) => line.startsWith('   ')
+              ? line.substring(3)
+              : line.replaceFirst(RegExp(r'^ +'), ''))
+          .join('\n');
+
+      final lines = selectedBlock.split('\n');
+      int removedChars = 0;
+      for (final line in lines) {
+        if (line.startsWith('   ')) {
+          removedChars += 3;
+        } else {
+          removedChars += RegExp(r'^ +').stringMatch(line)?.length ?? 0;
+        }
+      }
+
+      final newSelection = TextSelection(
+        baseOffset: selection.baseOffset -
+            (lines.first.startsWith('   ')
+                ? 3
+                : (RegExp(r'^ +').stringMatch(lines.first)?.length ?? 0)),
+        extentOffset: selection.extentOffset - removedChars,
+      );
+
+      _controller.replaceRange(lineStart, lineEnd, unindentedBlock);
+      _controller.setSelectionSilently(newSelection);
+    } else {
+      final caret = selection.start;
+      final prevNewline = text.lastIndexOf('\n', caret - 1);
+      final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
+      final nextNewline = text.indexOf('\n', caret);
+      final lineEnd = nextNewline == -1 ? text.length : nextNewline;
+      final line = text.substring(lineStart, lineEnd);
+
+      int removeCount = 0;
+      if (line.startsWith('   ')) {
+        removeCount = 3;
+      } else {
+        removeCount = RegExp(r'^ +').stringMatch(line)?.length ?? 0;
+      }
+
+      final newLine = line.substring(removeCount);
+      final newOffset =
+          caret - removeCount > lineStart ? caret - removeCount : lineStart;
+
+      _controller.replaceRange(lineStart, lineEnd, newLine);
+      _controller.setSelectionSilently(
+        TextSelection.collapsed(offset: newOffset),
+      );
+    }
+  }
+
+  void _deleteWordBackward() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+
+    if (!selection.isCollapsed) {
+      _controller.replaceRange(selection.start, selection.end, '');
+      return;
+    }
+
+    int caret = selection.extentOffset;
+    if (caret <= 0) return;
+
+    final prevChar = text[caret - 1];
+    if (prevChar == '\n') {
+      _controller.replaceRange(caret - 1, caret, '');
+      return;
+    }
+
+    final before = text.substring(0, caret);
+    final lineStart = text.lastIndexOf('\n', caret - 1) + 1;
+    final lineText = before.substring(lineStart);
+
+    final match = RegExp(r'(\w+|[^\w\s]+)\s*$').firstMatch(lineText);
+    int deleteFrom = caret;
+    if (match != null) {
+      deleteFrom = lineStart + match.start;
+    } else {
+      deleteFrom = caret - 1;
+    }
+
+    _controller.replaceRange(deleteFrom, caret, '');
+  }
+
+  void _deleteWordForward() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+
+    if (!selection.isCollapsed) {
+      _controller.replaceRange(selection.start, selection.end, '');
+      return;
+    }
+
+    int caret = selection.extentOffset;
+    if (caret >= text.length) return;
+
+    final after = text.substring(caret);
+    final match = RegExp(r'^(\s*\w+|\s*[^\w\s]+)').firstMatch(after);
+    int deleteTo = caret;
+    if (match != null) {
+      deleteTo = caret + match.end;
+    } else {
+      deleteTo = caret + 1;
+    }
+
+    _controller.replaceRange(caret, deleteTo, '');
+  }
+
+  void _moveWordLeft(bool withShift) {
+    final selection = _controller.selection;
+    final text = _controller.text;
+    int caret = selection.extentOffset;
+
+    if (caret <= 0) return;
+
+    final prevNewline = text.lastIndexOf('\n', caret - 1);
+    final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
+    if (caret == lineStart && lineStart > 0) {
+      final newOffset = lineStart - 1;
+      _controller.setSelectionSilently(
+        withShift
+            ? TextSelection(
+                baseOffset: selection.baseOffset, extentOffset: newOffset)
+            : TextSelection.collapsed(offset: newOffset),
+      );
+      return;
+    }
+
+    final lineText = text.substring(lineStart, caret);
+    final wordMatches = RegExp(r'\w+|[^\w\s]+').allMatches(lineText).toList();
+
+    int newOffset = lineStart;
+    for (final match in wordMatches) {
+      if (match.end >= lineText.length) break;
+      newOffset = lineStart + match.start;
+    }
+
+    _controller.setSelectionSilently(
+      withShift
+          ? TextSelection(
+              baseOffset: selection.baseOffset, extentOffset: newOffset)
+          : TextSelection.collapsed(offset: newOffset),
+    );
+  }
+
+  void _moveWordRight(bool withShift) {
+    final selection = _controller.selection;
+    final text = _controller.text;
+    int caret = selection.extentOffset;
+
+    if (caret >= text.length) return;
+
+    if (caret < text.length && text[caret] == '\n') {
+      final newOffset = caret + 1;
+      _controller.setSelectionSilently(
+        withShift
+            ? TextSelection(
+                baseOffset: selection.baseOffset, extentOffset: newOffset)
+            : TextSelection.collapsed(offset: newOffset),
+      );
+      return;
+    }
+
+    final regex = RegExp(r'\w+|[^\w\s]+|\s+');
+    final matches = regex.allMatches(text, caret);
+
+    int newOffset = caret;
+    for (final match in matches) {
+      if (match.start > caret) {
+        newOffset = match.start;
+        break;
+      }
+    }
+    if (newOffset == caret) newOffset = text.length;
+
+    _controller.setSelectionSilently(
+      withShift
+          ? TextSelection(
+              baseOffset: selection.baseOffset, extentOffset: newOffset)
+          : TextSelection.collapsed(offset: newOffset),
+    );
+  }
+
+  void _moveLineUp() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+    final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
+    int lineEnd = text.indexOf('\n', selEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+    if (lineStart == 0) return;
+
+    final prevLineEnd = lineStart - 1;
+    final prevLineStart = text.lastIndexOf('\n', prevLineEnd - 1) + 1;
+    final prevLine = text.substring(prevLineStart, prevLineEnd);
+    final currentLines = text.substring(lineStart, lineEnd);
+
+    _controller.replaceRange(
+        prevLineStart, lineEnd, '$currentLines\n$prevLine');
+
+    final prevLineLen = prevLineEnd - prevLineStart;
+    final offsetDelta = prevLineLen + 1;
+    final newSelection = TextSelection(
+      baseOffset: selection.baseOffset - offsetDelta,
+      extentOffset: selection.extentOffset - offsetDelta,
+    );
+    _controller.setSelectionSilently(newSelection);
+  }
+
+  void _moveLineDown() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+    final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
+    int lineEnd = text.indexOf('\n', selEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+    final nextLineStart = lineEnd + 1;
+    if (nextLineStart >= text.length) return;
+    int nextLineEnd = text.indexOf('\n', nextLineStart);
+    if (nextLineEnd == -1) nextLineEnd = text.length;
+
+    final currentLines = text.substring(lineStart, lineEnd);
+    final nextLine = text.substring(nextLineStart, nextLineEnd);
+
+    _controller.replaceRange(lineStart, nextLineEnd, '$nextLine\n$currentLines');
+
+    final offsetDelta = nextLine.length + 1;
+    final newSelection = TextSelection(
+      baseOffset: selection.baseOffset + offsetDelta,
+      extentOffset: selection.extentOffset + offsetDelta,
+    );
+    _controller.setSelectionSilently(newSelection);
+  }
+
+  void _duplicateLine() {
+    if (widget.readOnly) return;
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final caret = selection.extentOffset;
+    final prevNewline = (caret > 0) ? text.lastIndexOf('\n', caret - 1) : -1;
+    final nextNewline = text.indexOf('\n', caret);
+    final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
+    final lineEnd = nextNewline == -1 ? text.length : nextNewline;
+    final lineText = text.substring(lineStart, lineEnd);
+
+    _controller.replaceRange(lineEnd, lineEnd, '\n$lineText');
+    _controller.setSelectionSilently(
+      TextSelection.collapsed(offset: lineEnd + 1),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -931,8 +1237,12 @@ class _CodeForgeState extends State<CodeForge>
                   thumbVisibility: _isHovering,
                   controller: _hscrollController,
                   child: MouseRegion(
-                    onEnter: (event) => setState(() => _isHovering = true),
-                    onExit: (event) => setState(() => _isHovering = false),
+                    onEnter: (event) {
+                      if (mounted) setState(() => _isHovering = true);
+                    },
+                    onExit: (event) {
+                      if (mounted) setState(() => _isHovering = false);
+                    },
                     child: ValueListenableBuilder(
                       valueListenable: _selectionActiveNotifier,
                       builder: (context, selVal, child) {
@@ -983,28 +1293,32 @@ class _CodeForgeState extends State<CodeForge>
                                                   .isNotEmpty) {
                                             switch (event.logicalKey) {
                                               case LogicalKeyboardKey.arrowDown:
-                                                setState(() {
-                                                  _sugSelIndex =
-                                                      (_sugSelIndex + 1) %
-                                                      _suggestionNotifier
-                                                          .value!
-                                                          .length;
-                                                  _scrollToSelectedSuggestion();
-                                                });
+                                                if (mounted) {
+                                                  setState(() {
+                                                    _sugSelIndex =
+                                                        (_sugSelIndex + 1) %
+                                                        _suggestionNotifier
+                                                            .value!
+                                                            .length;
+                                                    _scrollToSelectedSuggestion();
+                                                  });
+                                                }
                                                 return KeyEventResult.handled;
                                               case LogicalKeyboardKey.arrowUp:
-                                                setState(() {
-                                                  _sugSelIndex =
-                                                      (_sugSelIndex -
-                                                          1 +
-                                                          _suggestionNotifier
-                                                              .value!
-                                                              .length) %
-                                                      _suggestionNotifier
-                                                          .value!
-                                                          .length;
-                                                  _scrollToSelectedSuggestion();
-                                                });
+                                                if (mounted) {
+                                                  setState(() {
+                                                    _sugSelIndex =
+                                                        (_sugSelIndex -
+                                                            1 +
+                                                            _suggestionNotifier
+                                                                .value!
+                                                                .length) %
+                                                        _suggestionNotifier
+                                                            .value!
+                                                            .length;
+                                                    _scrollToSelectedSuggestion();
+                                                  });
+                                                }
                                                 return KeyEventResult.handled;
                                               case LogicalKeyboardKey.enter:
                                               case LogicalKeyboardKey.tab:
@@ -1013,6 +1327,29 @@ class _CodeForgeState extends State<CodeForge>
                                               case LogicalKeyboardKey.escape:
                                                 _suggestionNotifier.value =
                                                     null;
+                                                return KeyEventResult.handled;
+                                              default:
+                                                break;
+                                            }
+                                          }
+
+                                          if (isCtrlPressed && isShiftPressed) {
+                                            switch (event.logicalKey) {
+                                              case LogicalKeyboardKey.arrowUp:
+                                                _moveLineUp();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowDown:
+                                                _moveLineDown();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowLeft:
+                                                _moveWordLeft(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowRight:
+                                                _moveWordRight(true);
+                                                _commonKeyFunctions();
                                                 return KeyEventResult.handled;
                                               default:
                                                 break;
@@ -1032,6 +1369,73 @@ class _CodeForgeState extends State<CodeForge>
                                                 return KeyEventResult.handled;
                                               case LogicalKeyboardKey.keyA:
                                                 _selectAll();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.keyD:
+                                                _duplicateLine();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.keyZ:
+                                                if (_undoRedoController.canUndo) {
+                                                  _undoRedoController.undo();
+                                                  _commonKeyFunctions();
+                                                }
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.keyY:
+                                                if (_undoRedoController.canRedo) {
+                                                  _undoRedoController.redo();
+                                                  _commonKeyFunctions();
+                                                }
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.backspace:
+                                                _deleteWordBackward();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.delete:
+                                                _deleteWordForward();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowLeft:
+                                                _moveWordLeft(false);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowRight:
+                                                _moveWordRight(false);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              default:
+                                                break;
+                                            }
+                                          }
+
+                                          if (isShiftPressed && !isCtrlPressed) {
+                                            switch (event.logicalKey) {
+                                              case LogicalKeyboardKey.tab:
+                                                _unindent();
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowLeft:
+                                                _handleArrowLeft(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowRight:
+                                                _handleArrowRight(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowUp:
+                                                _handleArrowUp(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.arrowDown:
+                                                _handleArrowDown(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.home:
+                                                _handleHome(true);
+                                                _commonKeyFunctions();
+                                                return KeyEventResult.handled;
+                                              case LogicalKeyboardKey.end:
+                                                _handleEnd(true);
+                                                _commonKeyFunctions();
                                                 return KeyEventResult.handled;
                                               default:
                                                 break;
@@ -1114,10 +1518,8 @@ class _CodeForgeState extends State<CodeForge>
                                               } else if (_suggestionNotifier
                                                       .value ==
                                                   null) {
-                                                _controller
-                                                    .insertAtCurrentCursor(
-                                                      '\t',
-                                                    );
+                                                _indent();
+                                                _commonKeyFunctions();
                                               }
                                               return KeyEventResult.handled;
 
@@ -1237,17 +1639,21 @@ class _CodeForgeState extends State<CodeForge>
                                     hoverColor: _suggestionStyle.hoverColor,
                                     focusColor: _suggestionStyle.focusColor,
                                     splashColor: _suggestionStyle.splashColor,
-                                    onTap: () => setState(() {
-                                      _sugSelIndex = indx;
-                                      final text = item is LspCompletion
-                                          ? item.label
-                                          : item as String;
-                                      _controller.insertAtCurrentCursor(
-                                        text,
-                                        replaceTypedChar: true,
-                                      );
-                                      _suggestionNotifier.value = null;
-                                    }),
+                                    onTap: () {
+                                      if (mounted) {
+                                        setState(() {
+                                          _sugSelIndex = indx;
+                                          final text = item is LspCompletion
+                                              ? item.label
+                                              : item as String;
+                                          _controller.insertAtCurrentCursor(
+                                            text,
+                                            replaceTypedChar: true,
+                                          );
+                                          _suggestionNotifier.value = null;
+                                        });
+                                      }
+                                    },
                                     child: Row(
                                       children: [
                                         if (item is LspCompletion) ...[
