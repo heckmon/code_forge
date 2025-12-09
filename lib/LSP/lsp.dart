@@ -335,6 +335,11 @@ sealed class LspConfig {
       },
     );
 
+    if(response['error'] != null){
+      throw UnsupportedError(
+        "The LSP server doesn't support the textDocument/semanticTokens/range: ${response['error']?['message']}"
+      );
+    }
     final tokens = response['result']?['data'];
     if (tokens is! List) return [];
 

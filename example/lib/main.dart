@@ -34,7 +34,7 @@ class _MyAppState extends State<MyApp> {
     return data;
   } */
 
-   /* Future<LspConfig> getLsp() async{
+   Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/.nvm/versions/node/v20.19.2/bin/basedpyright-langserver",
       args: ["--stdio"],
@@ -43,9 +43,9 @@ class _MyAppState extends State<MyApp> {
       languageId: "python"
     );
     return data;
-  } */
+  }
 
-  Future<LspConfig> getLsp() async{
+  /* Future<LspConfig> getLsp() async{
     final data = await LspStdioConfig.start(
       executable: "/home/athul/flutter/flutter/bin//dart",
       args: ["language-server", "--protocol=lsp"],
@@ -54,7 +54,7 @@ class _MyAppState extends State<MyApp> {
       languageId: "dart"
     );
     return data;
-  }
+  } */
 
   @override
   void initState(){
@@ -73,9 +73,9 @@ class _MyAppState extends State<MyApp> {
               return CircularProgressIndicator();
             }
             return CodeForge(
-              language: langDart,
-              // language: langPython,
-              // filePath: "/home/athul/Projects/EhEh/sample.py",
+              // language: langDart,
+              language: langPython,
+              filePath: "/home/athul/Projects/EhEh/sample.py",
               controller: _controller,
               textStyle: GoogleFonts.jetBrainsMono(),
               /* aiCompletion: AiCompletion(
@@ -92,7 +92,7 @@ class _MyAppState extends State<MyApp> {
               lspConfig: snapshot.data,
               // filePath: "/home/athul/Projects/code_forge/lib/code_forge/code_area.dart",
               // filePath: "/home/athul/Projects/EhEh/numpy_source.py",
-              filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
+              // filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
               gutterStyle: GutterStyle(
                 // backgroundColor: Color(0xFF252526),
                 lineNumberStyle: TextStyle(

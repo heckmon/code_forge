@@ -229,13 +229,139 @@ class CodeForgeController implements DeltaTextInputClient {
       return;
     }
 
-    if (insertedText.contains('\n')) {
+    String actualInsertedText = insertedText;
+    TextSelection actualSelection = newSelection;
+    
+    if (insertedText.length == 1) {
+      final char = insertedText[0];
+      const pairs = {'(': ')', '{': '}', '[': ']', '"': '"', "'": "'"};
+      final openers = pairs.keys.toSet();
+      final closers = pairs.values.toSet();
+      
+      if (openers.contains(char)) {
+        final closing = pairs[char]!;
+        actualInsertedText = '$char$closing';
+        actualSelection = TextSelection.collapsed(offset: offset + 1);
+      }
+      else if (closers.contains(char)) {
+        final currentText = text;
+        if (offset < currentText.length && currentText[offset] == char) {
+          _selection = TextSelection.collapsed(offset: offset + 1);
+          notifyListeners();
+          return;
+        }
+      }
+    }
+    
+    if (actualInsertedText.contains('\n')) {
+      final currentText = text;
+      final textBeforeCursor = currentText.substring(0, offset);
+      final textAfterCursor = currentText.substring(offset);
+      final lines = textBeforeCursor.split('\n');
+
+      if (lines.isNotEmpty) {
+        final prevLine = lines[lines.length - 1];
+        final indentMatch = RegExp(r'^\s*').firstMatch(prevLine);
+        final prevIndent = indentMatch?.group(0) ?? '';
+        final shouldIndent = RegExp(r'[:{[(]\s*$').hasMatch(prevLine);
+        final extraIndent = shouldIndent ? '  ' : '';
+        final indent = prevIndent + extraIndent;
+        final openToClose = {'{': '}', '(': ')', '[': ']'};
+        final trimmedPrev = prevLine.trimRight();
+        final lastChar = trimmedPrev.isNotEmpty ? trimmedPrev[trimmedPrev.length - 1] : null;
+        final trimmedNext = textAfterCursor.trimLeft();
+        final nextChar = trimmedNext.isNotEmpty ? trimmedNext[0] : null;
+        final isBracketOpen = openToClose.containsKey(lastChar);
+        final isNextClosing = isBracketOpen && openToClose[lastChar] == nextChar;
+        
+        if (isBracketOpen && isNextClosing) {
+          actualInsertedText = '\n$indent\n$prevIndent';
+          actualSelection = TextSelection.collapsed(offset: offset + 1 + indent.length);
+        } else {
+          actualInsertedText = '\n$indent';
+          actualSelection = TextSelection.collapsed(offset: offset + actualInsertedText.length);
+        }
+      }
+      
       _flushBuffer();
-      _rope.insert(offset, insertedText);
+      _rope.insert(offset, actualInsertedText);
       _currentVersion++;
-      _selection = newSelection;
+      _selection = actualSelection;
       dirtyLine = _rope.getLineAtOffset(offset);
-      dirtyRegion = TextRange(start: offset, end: offset + insertedText.length);
+      dirtyRegion = TextRange(start: offset, end: offset + actualInsertedText.length);
+      
+      if (connection != null && connection!.attached) {
+        _lastSentText = text;
+        _lastSentSelection = _selection;
+        connection!.setEditingState(
+          TextEditingValue(text: _lastSentText!, selection: _selection),
+        );
+      }
+      
+      notifyListeners();
+      return;
+    }
+
+    if (actualInsertedText.length == 2 && actualInsertedText[0] != actualInsertedText[1]) {
+      if (_bufferLineIndex != null && _bufferDirty) {
+        final bufferEnd = _bufferLineRopeStart + _bufferLineText!.length;
+
+        if (offset >= _bufferLineRopeStart && offset <= bufferEnd) {
+          final localOffset = offset - _bufferLineRopeStart;
+          if (localOffset >= 0 && localOffset <= _bufferLineText!.length) {
+            _bufferLineText =
+                _bufferLineText!.substring(0, localOffset) +
+                actualInsertedText +
+                _bufferLineText!.substring(localOffset);
+            _selection = actualSelection;
+            _currentVersion++;
+            dirtyLine = _bufferLineIndex;
+
+            bufferNeedsRepaint = true;
+
+            if (connection != null && connection!.attached) {
+              _lastSentText = text;
+              _lastSentSelection = _selection;
+              connection!.setEditingState(
+                TextEditingValue(text: _lastSentText!, selection: _selection),
+              );
+            }
+
+            _scheduleFlush();
+            notifyListeners();
+            return;
+          }
+        }
+        _flushBuffer();
+      }
+
+      final lineIndex = _rope.getLineAtOffset(offset);
+      _initBuffer(lineIndex);
+
+      final localOffset = offset - _bufferLineRopeStart;
+      if (localOffset >= 0 && localOffset <= _bufferLineText!.length) {
+        _bufferLineText =
+            _bufferLineText!.substring(0, localOffset) +
+            actualInsertedText +
+            _bufferLineText!.substring(localOffset);
+        _bufferDirty = true;
+        _selection = actualSelection;
+        _currentVersion++;
+        dirtyLine = lineIndex;
+
+        bufferNeedsRepaint = true;
+
+        if (connection != null && connection!.attached) {
+          _lastSentText = text;
+          _lastSentSelection = _selection;
+          connection!.setEditingState(
+            TextEditingValue(text: _lastSentText!, selection: _selection),
+          );
+        }
+
+        _scheduleFlush();
+        notifyListeners();
+      }
       return;
     }
 
@@ -247,9 +373,9 @@ class CodeForgeController implements DeltaTextInputClient {
         if (localOffset >= 0 && localOffset <= _bufferLineText!.length) {
           _bufferLineText =
               _bufferLineText!.substring(0, localOffset) +
-              insertedText +
+              actualInsertedText +
               _bufferLineText!.substring(localOffset);
-          _selection = newSelection;
+          _selection = actualSelection;
           _currentVersion++;
 
           bufferNeedsRepaint = true;
@@ -268,11 +394,12 @@ class CodeForgeController implements DeltaTextInputClient {
     if (localOffset >= 0 && localOffset <= _bufferLineText!.length) {
       _bufferLineText =
           _bufferLineText!.substring(0, localOffset) +
-          insertedText +
+          actualInsertedText +
           _bufferLineText!.substring(localOffset);
       _bufferDirty = true;
-      _selection = newSelection;
+      _selection = actualSelection;
       _currentVersion++;
+      dirtyLine = lineIndex;
 
       bufferNeedsRepaint = true;
 

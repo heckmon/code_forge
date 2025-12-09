@@ -107,14 +107,18 @@ class _CodeForgeState extends State<CodeForge>
   final _isMobile = Platform.isAndroid || Platform.isIOS;
   final _suggScrollController = ScrollController();
   TextInputConnection? _connection;
+  StreamSubscription? _lspResponsesSubscription;
   bool _lspReady = false, _isHovering = false, _isTyping = false;
   String _previousValue = "";
   List<LspSemanticToken>? _semanticTokens;
   DateTime? _lastSemanticTokenFetch;
   int _sugSelIndex = 0;
-  Timer? _hoverTimer, _aiDebounceTimer;
+  Timer? _hoverTimer, _aiDebounceTimer, _semanticTokenTimer;
   List<dynamic> _suggestions = [];
   TextSelection _prevSelection = TextSelection.collapsed(offset: 0);
+  bool _supportsSemanticTokenRange = true;
+  int? _pendingDirtyStartLine;
+  int? _pendingDirtyEndLine;
 
   @override
   void initState() {
@@ -180,7 +184,13 @@ class _CodeForgeState extends State<CodeForge>
               width: 0.2,
             ),
           ),
-          backgroundColor: _editorTheme['root']!.backgroundColor!,
+          backgroundColor: ((){
+            final lightnessDelta = -0.06;
+            final base = _editorTheme['root']!.backgroundColor!;
+            final hsl = HSLColor.fromColor(base);
+            final newLightness = (hsl.lightness + lightnessDelta).clamp(0.0, 1.0);
+            return hsl.withLightness(newLightness).toColor();            
+          })(),
           focusColor: Colors.blueAccent.withAlpha(50),
           hoverColor: Colors.grey.withAlpha(15),
           splashColor: Colors.blueAccent.withAlpha(50),
@@ -256,13 +266,13 @@ class _CodeForgeState extends State<CodeForge>
           setState(() {
             _lspReady = true;
           });
-          await _fetchSemanticTokens();
+          await _fetchSemanticTokensFull();
         } catch (e) {
           debugPrint('Error initializing LSP: $e');
         }
       })();
 
-      widget.lspConfig!.responses.listen((data) {
+      _lspResponsesSubscription = widget.lspConfig!.responses.listen((data) {
         if (data['method'] == 'textDocument/publishDiagnostics') {
           final diagnostics = data['params']['diagnostics'] as List;
           if (diagnostics.isNotEmpty) {
@@ -311,6 +321,7 @@ class _CodeForgeState extends State<CodeForge>
       final oldSelection = _prevSelection;
 
       if(_hoverNotifier.value != null){
+        _hoverTimer?.cancel();
         _hoverNotifier.value = null;
       }
 
@@ -329,7 +340,13 @@ class _CodeForgeState extends State<CodeForge>
           );
           _suggestions = suggestion;
         })();
-        _scheduleSemantictokenRefresh();
+        
+        if (_controller.dirtyLine != null) {
+          _scheduleSemantictokenRefresh(
+            dirtyStartLine: _controller.dirtyLine,
+            dirtyEndLine: _controller.dirtyLine,
+          );
+        }
       }
 
       _aiDebounceTimer?.cancel();
@@ -418,6 +435,12 @@ class _CodeForgeState extends State<CodeForge>
 
       _previousValue = text;
       _prevSelection = currentSelection;
+    });
+
+    _isHoveringPopup.addListener(() {
+      if (!_isHoveringPopup.value && _hoverNotifier.value != null) {
+        _hoverNotifier.value = null;
+      }
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_){
@@ -509,7 +532,7 @@ class _CodeForgeState extends State<CodeForge>
     });
   }
 
-  Future<void> _fetchSemanticTokens() async {
+  Future<void> _fetchSemanticTokensFull() async {
     if (widget.lspConfig == null || !_lspReady) return;
 
     try {
@@ -523,16 +546,92 @@ class _CodeForgeState extends State<CodeForge>
     }
   }
 
-  void _scheduleSemantictokenRefresh() {
-    final now = DateTime.now();
-    if (_lastSemanticTokenFetch == null ||
-        now.difference(_lastSemanticTokenFetch!) > _semanticTokenDebounce) {
-      Future.delayed(_semanticTokenDebounce, () async{
-        if (mounted && _lspReady) {
-          await _fetchSemanticTokens();
+  Future<void> _fetchSemanticTokensForDirtyRegion(int startLine, int endLine) async {
+    if (widget.lspConfig == null || !_lspReady) return;
+
+    try {
+      if (_supportsSemanticTokenRange) {
+        try {
+          final rangeTokens = await widget.lspConfig!.getSemanticTokensRange(
+            startLine,
+            0,
+            endLine,
+            9999,
+          );
+
+          setState(() {
+            _mergeSemanticTokens(rangeTokens, startLine, endLine);
+            _lastSemanticTokenFetch = DateTime.now();
+          });
+          return;
+        } on UnsupportedError catch (e) {
+          debugPrint(
+            'Range tokens not supported: $e \nFalling back to full tokens fetch'
+          );
+          _supportsSemanticTokenRange = false;
         }
-      });
+      }
+
+      final now = DateTime.now();
+      final shouldRefetch = _lastSemanticTokenFetch == null ||
+          now.difference(_lastSemanticTokenFetch!) > const Duration(seconds: 2);
+
+      if (shouldRefetch) {
+        await _fetchSemanticTokensFull();
+      }
+    } catch (e) {
+      debugPrint('Error fetching semantic tokens for dirty region: $e');
     }
+  }
+
+  void _mergeSemanticTokens(List<LspSemanticToken> newTokens, int startLine, int endLine) {
+    if (_semanticTokens == null) {
+      _semanticTokens = newTokens;
+      return;
+    }
+
+    _semanticTokens!.removeWhere((token) => 
+      token.line >= startLine && token.line <= endLine
+    );
+    
+    _semanticTokens!.addAll(newTokens);
+    
+    _semanticTokens!.sort((a, b) {
+      if (a.line != b.line) return a.line.compareTo(b.line);
+      return a.start.compareTo(b.start);
+    });
+  }
+
+  void _scheduleSemantictokenRefresh({int? dirtyStartLine, int? dirtyEndLine}) {
+    _semanticTokenTimer?.cancel();
+    
+    if (dirtyStartLine != null && dirtyEndLine != null) {
+      if (_pendingDirtyStartLine == null) {
+        _pendingDirtyStartLine = dirtyStartLine;
+        _pendingDirtyEndLine = dirtyEndLine;
+      } else {
+        _pendingDirtyStartLine = min(_pendingDirtyStartLine!, dirtyStartLine);
+        _pendingDirtyEndLine = max(_pendingDirtyEndLine!, dirtyEndLine);
+      }
+    }
+    
+    _semanticTokenTimer = Timer(_semanticTokenDebounce, () async {
+      if (!mounted || !_lspReady) return;
+      
+      if (_pendingDirtyStartLine != null && _pendingDirtyEndLine != null) {
+        final expandedStart = max(0, _pendingDirtyStartLine! - 2);
+        final expandedEnd = min(
+          _controller.lineCount - 1,
+          _pendingDirtyEndLine! + 2,
+        );
+        
+        await _fetchSemanticTokensForDirtyRegion(expandedStart, expandedEnd);
+        _pendingDirtyStartLine = null;
+        _pendingDirtyEndLine = null;
+      } else {
+        await _fetchSemanticTokensFull();
+      }
+    });
   }
 
   void _resetCursorBlink() {
@@ -547,6 +646,7 @@ class _CodeForgeState extends State<CodeForge>
   void dispose() {
     _controller.removeListener(_resetCursorBlink);
     _connection?.close();
+    _lspResponsesSubscription?.cancel();
     _caretBlinkController.dispose();
     _suggestionNotifier.dispose();
     _hoverNotifier.dispose();
@@ -558,6 +658,7 @@ class _CodeForgeState extends State<CodeForge>
     _isHoveringPopup.dispose();
     _hoverTimer?.cancel();
     _aiDebounceTimer?.cancel();
+    _semanticTokenTimer?.cancel();
     super.dispose();
   }
 
@@ -968,7 +1069,9 @@ class _CodeForgeState extends State<CodeForge>
                                             default:
                                               break;
                                           }
-                                        }                                      if (isCtrlPressed) {
+                                        }
+
+                                      if (isCtrlPressed) {
                                         switch (event.logicalKey) {
                                           case LogicalKeyboardKey.keyC:
                                             _copy();
@@ -1041,10 +1144,12 @@ class _CodeForgeState extends State<CodeForge>
                                           return KeyEventResult.handled;
                         
                                         case LogicalKeyboardKey.escape:
+                                          _hoverTimer?.cancel();
                                           _contextMenuOffsetNotifier.value =
                                               const Offset(-1, -1);
                                           _aiNotifier.value = null;
                                           _suggestionNotifier.value = null;
+                                          _hoverNotifier.value = null;
                                           return KeyEventResult.handled;
                         
                                         case LogicalKeyboardKey.tab:
@@ -1353,8 +1458,14 @@ class _CodeForgeState extends State<CodeForge>
                             children: [
                               if (diagnosticMessage.isNotEmpty)
                                 Card(
+                                  surfaceTintColor: diagnosticColor,
                                   color: _hoverDetailsStyle.backgroundColor,
-                                  shape: _hoverDetailsStyle.shape,
+                                  shape: BeveledRectangleBorder(
+                                    side: BorderSide(
+                                      color: diagnosticColor,
+                                      width: 0.2
+                                    )
+                                  ),
                                   margin: EdgeInsets.only(bottom: hoverMessage.isNotEmpty ? 4 : 0),
                                   child: Padding(
                                     padding: const EdgeInsets.all(8.0),
@@ -1397,10 +1508,10 @@ class _CodeForgeState extends State<CodeForge>
                                             config: MarkdownConfig.darkConfig.copy(
                                               configs: [
                                                 PConfig(
-                                                  textStyle: _hoverDetailsStyle.textStyle
+                                                  textStyle: _hoverDetailsStyle.textStyle,
                                                 ),
                                                 PreConfig(
-                                                  language: widget.lspConfig?.languageId ?? "dart",
+                                                  language: widget.lspConfig?.languageId.toLowerCase() ?? "dart",
                                                   theme: _editorTheme,
                                                   textStyle: TextStyle(
                                                     fontSize: _hoverDetailsStyle.textStyle.fontSize
@@ -1409,6 +1520,7 @@ class _CodeForgeState extends State<CodeForge>
                                                     color: _editorTheme['root']!.color
                                                   ),
                                                   decoration: BoxDecoration(
+                                                    color: _editorTheme['root']!.backgroundColor!,
                                                     borderRadius: BorderRadius.zero,
                                                     border: Border.all(
                                                       width: 0.2,
@@ -1837,6 +1949,13 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     });
     caretBlinkController.addListener(markNeedsPaint);
     controller.addListener(_onControllerChange);
+    
+    hoverNotifier.addListener(() {
+      if (hoverNotifier.value == null) {
+        _hoverTimer?.cancel();
+      }
+    });
+    
     aiNotifier.addListener((){
       final previousAiResponse = _aiResponse;
       _aiResponse = aiNotifier.value;
@@ -4023,6 +4142,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final textOffset = _getTextOffsetFromPosition(contentPosition);
 
     if(event is PointerHoverEvent){
+      if (hoverNotifier.value == null) {
+        _hoverTimer?.cancel();
+      }
+      
       if(!(hoverNotifier.value != null && isHoveringPopup.value)){
         hoverNotifier.value = null;
       }
@@ -4037,6 +4160,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           hoverNotifier.value = [event.localPosition, lineChar];
         });
       } else {
+        _hoverTimer?.cancel();
         hoverNotifier.value = null;
       }
     }
