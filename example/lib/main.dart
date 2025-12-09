@@ -38,7 +38,7 @@ class _MyAppState extends State<MyApp> {
     final data = await LspStdioConfig.start(
       executable: "/home/athul/.nvm/versions/node/v20.19.2/bin/basedpyright-langserver",
       args: ["--stdio"],
-      filePath: "/home/athul/Projects/EhEh/sample.py",
+      filePath: "/home/athul/Projects/EhEh/numpy_source.py",
       workspacePath: "/home/athul/Projects/EhEh",
       languageId: "python"
     );
@@ -75,7 +75,7 @@ class _MyAppState extends State<MyApp> {
             return CodeForge(
               // language: langDart,
               language: langPython,
-              filePath: "/home/athul/Projects/EhEh/sample.py",
+              // filePath: "/home/athul/Projects/EhEh/sample.py",
               controller: _controller,
               textStyle: GoogleFonts.jetBrainsMono(),
               /* aiCompletion: AiCompletion(
@@ -91,7 +91,7 @@ class _MyAppState extends State<MyApp> {
               ), */
               lspConfig: snapshot.data,
               // filePath: "/home/athul/Projects/code_forge/lib/code_forge/code_area.dart",
-              // filePath: "/home/athul/Projects/EhEh/numpy_source.py",
+              filePath: "/home/athul/Projects/EhEh/numpy_source.py",
               // filePath: "/home/athul/Projects/EhEh/server/lib/server.dart",
               gutterStyle: GutterStyle(
                 // backgroundColor: Color(0xFF252526),

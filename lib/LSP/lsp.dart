@@ -558,6 +558,15 @@ class LspErrors {
     required this.range,
     required this.message,
   });
+
+  Map<String, dynamic> toJson() => {
+    'severity': severity,
+    'range': range,
+    'message': message,
+  };
+
+  @override
+  String toString() => toJson().toString();
 }
 
 class LspSemanticToken {
@@ -582,8 +591,7 @@ class LspSemanticToken {
 
   int get end => start + length;
 
-  Map<String, dynamic> toJson() {
-    return {
+  Map<String, dynamic> toJson() => {
       'line': line,
       'start': start,
       'length': length,
@@ -591,7 +599,6 @@ class LspSemanticToken {
       'tokenTypeName': tokenTypeName,
       'modifierBitmask': modifierBitmask,
     };
-  }
 
   @override
   String toString() => toJson().toString();

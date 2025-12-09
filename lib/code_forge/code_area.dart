@@ -20,7 +20,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 //TODO: Store text in a buffer.
-//TODO: Rangse wise LSP semantic highlight.
 //TODO: Keyboard shortcuts
 //TODO: Implement undo redo functionality
 //TODO: Public API methods in controller.
@@ -1446,6 +1445,7 @@ class _CodeForgeState extends State<CodeForge>
                         }
                         
                         final hoverScrollController = ScrollController();
+                        final errorSCrollController = ScrollController();
                         
                         return ConstrainedBox(
                           constraints: BoxConstraints(
@@ -1469,23 +1469,30 @@ class _CodeForgeState extends State<CodeForge>
                                   margin: EdgeInsets.only(bottom: hoverMessage.isNotEmpty ? 4 : 0),
                                   child: Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Icon(
-                                          diagnosticIcon,
-                                          color: diagnosticColor,
-                                          size: 16,
+                                    child: RawScrollbar(
+                                      controller: errorSCrollController,
+                                      thumbVisibility: true,
+                                      thumbColor: _editorTheme['root']!.color!.withAlpha(100),
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        controller: errorSCrollController,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(
+                                              diagnosticIcon,
+                                              color: diagnosticColor,
+                                              size: 16,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              diagnosticMessage,
+                                              style: _hoverDetailsStyle.textStyle,
+                                            ),
+                                          ],
                                         ),
-                                        SizedBox(width: 8),
-                                        Flexible(
-                                          child: Text(
-                                            diagnosticMessage,
-                                            style: _hoverDetailsStyle.textStyle,
-                                          ),
-                                        ),
-                                      ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -3640,11 +3647,13 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   ) {
     if (_diagnostics.isEmpty) return;
 
-    for (final diagnostic in _diagnostics) {
+    final sortedDiagnostics = List<LspErrors>.from(_diagnostics)
+      ..sort((a, b) => (b.severity).compareTo(a.severity));
+
+    for (final diagnostic in sortedDiagnostics) {
       final range = diagnostic.range;
       final startPos = range['start'] as Map<String, dynamic>;
       final endPos = range['end'] as Map<String, dynamic>;
-
       final startLine = startPos['line'] as int;
       final startChar = startPos['character'] as int;
       final endLine = endPos['line'] as int;
@@ -4145,7 +4154,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       if (hoverNotifier.value == null) {
         _hoverTimer?.cancel();
       }
-      
       if(!(hoverNotifier.value != null && isHoveringPopup.value)){
         hoverNotifier.value = null;
       }
@@ -4183,9 +4191,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       if (enableFolding && enableGutter && localPosition.dx < _gutterWidth) {
         final clickY =
-            localPosition.dy +
-            vscrollController.offset -
-            (innerPadding?.top ?? 0);
+          localPosition.dy +
+          vscrollController.offset -
+          (innerPadding?.top ?? 0);
         final hasActiveFolds = _foldRanges.any((f) => f.isFolded);
         int clickedLine;
 
