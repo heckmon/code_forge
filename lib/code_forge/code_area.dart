@@ -13,7 +13,7 @@ import 'undo_redo.dart';
 
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/vs2015.dart';
-import 'package:re_highlight/languages/python.dart';
+import 'package:re_highlight/languages/dart.dart';
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +21,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 //TODO: More lsp features
+// TODO: Tokenized input to the AI model for efficient completion.
 
 /// A highly customizable code editor widget for Flutter.
 ///
@@ -85,6 +86,23 @@ class CodeForge extends StatefulWidget {
   ///
   /// When provided, enables AI suggestions while typing.
   final AiCompletion? aiCompletion;
+
+  /// The text style for AI completion ghost text.
+  ///
+  /// This style is applied to the semi-transparent AI suggestion text
+  /// that appears inline as the user types. If not specified, defaults
+  /// to the editor's base text style with reduced opacity.
+  ///
+  /// Example:
+  /// ```dart
+  /// CodeForge(
+  ///   aiCompletionTextStyle: TextStyle(
+  ///     color: Colors.grey.withOpacity(0.5),
+  ///     fontStyle: FontStyle.italic,
+  ///   ),
+  /// )
+  /// ```
+  final TextStyle? aiCompletionTextStyle;
 
   /// Configuration for Language Server Protocol integration.
   ///
@@ -169,6 +187,7 @@ class CodeForge extends StatefulWidget {
     this.editorTheme,
     this.language,
     this.aiCompletion,
+    this.aiCompletionTextStyle,
     this.lspConfig,
     this.filePath,
     this.initialText,
@@ -239,7 +258,7 @@ class _CodeForgeState extends State<CodeForge>
         widget.horizontalScrollController ?? ScrollController();
     _vscrollController = widget.verticalScrollController ?? ScrollController();
     _editorTheme = widget.editorTheme ?? vs2015Theme;
-    _language = widget.language ?? langPython;
+    _language = widget.language ?? langDart;
     _suggestionNotifier = ValueNotifier(null);
     _hoverNotifier = ValueNotifier(null);
     _diagnosticsNotifier = ValueNotifier<List<LspErrors>>([]);
@@ -1768,6 +1787,8 @@ class _CodeForgeState extends State<CodeForge>
                                     aiOffsetNotifier: _aiOffsetNotifier,
                                     isHoveringPopup: _isHoveringPopup,
                                     suggestionNotifier: _suggestionNotifier,
+                                    aiCompletionTextStyle:
+                                        widget.aiCompletionTextStyle,
                                   ),
                                 );
                               },
@@ -2174,6 +2195,64 @@ class _CodeForgeState extends State<CodeForge>
                 );
               },
             ),
+            ValueListenableBuilder<Offset?>(
+              valueListenable: _aiOffsetNotifier,
+              builder: (context, offvalue, child) {
+                return _isMobile && _aiNotifier.value != null && offvalue != null && _aiNotifier.value!.isNotEmpty ? Positioned(
+                  top: offvalue.dy + (widget.textStyle?.fontSize ?? 14) * _aiNotifier.value!.split('\n').length + 15,
+                  left: offvalue.dx + (_aiNotifier.value!.split('\n')[0].length * (widget.textStyle?.fontSize ?? 14) / 2),
+                  child: Row(
+                    children: [
+                      InkWell(
+                        onTap: (){
+                          if(_aiNotifier.value == null) return;
+                          _controller.insertAtCurrentCursor(_aiNotifier.value!);
+                          _aiNotifier.value = null;
+                          _aiOffsetNotifier.value = null;
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: _editorTheme['root']?.backgroundColor,
+                            borderRadius: BorderRadius.all(Radius.circular(8)),
+                            border: BoxBorder.all(
+                              width: 1.5,
+                              color: Color(0xff64b5f6)
+                            )
+                          ),
+                          child: Icon(
+                            Icons.check,
+                            color: _editorTheme['root']?.color,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 30,
+                      ),
+                      InkWell(
+                        onTap: () {
+                          _aiNotifier.value = null;
+                          _aiOffsetNotifier.value = null;
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: _editorTheme['root']?.backgroundColor,
+                            borderRadius: BorderRadius.all(Radius.circular(8)),
+                            border: BoxBorder.all(
+                              width: 1.5,
+                              color: Colors.red
+                            )
+                          ),
+                          child: Icon(
+                            Icons.close,
+                            color: _editorTheme['root']?.color,
+                          ),
+                        )
+                      )
+                    ],
+                  ),
+                ) : SizedBox.shrink();
+              }
+            ),
           ],
         );
       },
@@ -2259,6 +2338,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final ValueNotifier<String?> aiNotifier;
   final ValueNotifier<Offset?> aiOffsetNotifier;
   final BuildContext context;
+  final TextStyle? aiCompletionTextStyle;
 
   const _CodeField({
     required this.controller,
@@ -2293,6 +2373,7 @@ class _CodeField extends LeafRenderObjectWidget {
     this.semanticTokens,
     this.semanticTokensVersion = 0,
     this.innerPadding,
+    this.aiCompletionTextStyle,
   });
 
   @override
@@ -2328,6 +2409,7 @@ class _CodeField extends LeafRenderObjectWidget {
       aiOffsetNotifier: aiOffsetNotifier,
       isHoveringPopup: isHoveringPopup,
       suggestionNotifier: suggestionNotifier,
+      aiCompletionTextStyle: aiCompletionTextStyle,
     );
   }
 
@@ -2352,7 +2434,8 @@ class _CodeField extends LeafRenderObjectWidget {
       ..enableGutter = enableGutter
       ..enableGutterDivider = enableGutterDivider
       ..gutterStyle = gutterStyle
-      ..selectionStyle = selectionStyle;
+      ..selectionStyle = selectionStyle
+      ..aiCompletionTextStyle = aiCompletionTextStyle;
   }
 }
 
@@ -2379,6 +2462,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final ValueNotifier<Offset?> aiOffsetNotifier;
   final ValueNotifier<String?> aiNotifier;
   final BuildContext context;
+  TextStyle? _aiCompletionTextStyle;
   final Map<int, double> _lineWidthCache = {};
   final Map<int, String> _lineTextCache = {};
   final Map<int, ui.Paragraph> _paragraphCache = {};
@@ -2504,7 +2588,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     this.lspConfig,
     EdgeInsets? innerPadding,
     TextStyle? textStyle,
+    TextStyle? aiCompletionTextStyle,
   }) : _editorTheme = editorTheme,
+       _aiCompletionTextStyle = aiCompletionTextStyle,
        _language = language,
        _readOnly = readOnly,
        _enableFolding = enableFolding,
@@ -2686,6 +2772,13 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool get enableGutter => _enableGutter;
   bool get enableGutterDivider => _enableGutterDivider;
   GutterStyle get gutterStyle => _gutterStyle;
+  TextStyle? get aiCompletionTextStyle => _aiCompletionTextStyle;
+  set aiCompletionTextStyle(TextStyle? value) {
+    if (_aiCompletionTextStyle == value) return;
+    _aiCompletionTextStyle = value;
+    markNeedsPaint();
+  }
+
   CodeSelectionStyle get selectionStyle => _selectionStyle;
 
   set editorTheme(Map<String, TextStyle> theme) {
@@ -5100,14 +5193,19 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final cursorY = _getLineYOffset(cursorLine, hasActiveFolds) + cursorYInLine;
 
-    final ghostColor =
+    final defaultGhostColor =
         (textStyle?.color ?? editorTheme['root']?.color ?? Colors.white)
             .withAlpha(100);
     final ghostStyle = ui.TextStyle(
-      color: ghostColor,
-      fontSize: textStyle?.fontSize ?? 14.0,
-      fontFamily: textStyle?.fontFamily,
-      fontStyle: FontStyle.italic,
+      color: _aiCompletionTextStyle?.color ?? defaultGhostColor,
+      fontSize: _aiCompletionTextStyle?.fontSize ?? textStyle?.fontSize ?? 14.0,
+      fontFamily: _aiCompletionTextStyle?.fontFamily ?? textStyle?.fontFamily,
+      fontStyle: _aiCompletionTextStyle?.fontStyle ?? FontStyle.italic,
+      fontWeight: _aiCompletionTextStyle?.fontWeight,
+      letterSpacing: _aiCompletionTextStyle?.letterSpacing,
+      wordSpacing: _aiCompletionTextStyle?.wordSpacing,
+      decoration: _aiCompletionTextStyle?.decoration,
+      decorationColor: _aiCompletionTextStyle?.decorationColor,
     );
 
     final aiLines = _aiResponse?.split('\n') ?? [];
