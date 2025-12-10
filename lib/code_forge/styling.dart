@@ -87,6 +87,11 @@ class GutterStyle {
   });
 }
 
+/// Base class for overlay styling options used in various popup elements.
+///
+/// This sealed class provides common styling options for overlays such as
+/// suggestion popups and hover details. Extend this class to create specific
+/// overlay styles.
 sealed class OverlayStyle {
   /// The elevation of the overlay, which determines the shadow depth.
   /// Defaults to 6.
@@ -122,7 +127,24 @@ sealed class OverlayStyle {
   });
 }
 
+/// Styling options for the code completion suggestion popup.
+///
+/// This class extends [OverlayStyle] to provide specific styling for the
+/// autocomplete suggestion list that appears while typing in the editor.
+///
+/// Example:
+/// ```dart
+/// SuggestionStyle(
+///   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+///   backgroundColor: Colors.grey[900]!,
+///   focusColor: Colors.blue.withOpacity(0.3),
+///   hoverColor: Colors.blue.withOpacity(0.1),
+///   splashColor: Colors.blue.withOpacity(0.2),
+///   textStyle: TextStyle(color: Colors.white),
+/// )
+/// ```
 class SuggestionStyle extends OverlayStyle {
+  /// Creates a [SuggestionStyle] with the specified options.
   SuggestionStyle({
     super.elevation,
     required super.shape,
@@ -134,7 +156,25 @@ class SuggestionStyle extends OverlayStyle {
   });
 }
 
+/// Styling options for the hover details popup.
+///
+/// This class extends [OverlayStyle] to provide specific styling for the
+/// popup that shows documentation or type information when hovering over
+/// code elements (requires LSP integration).
+///
+/// Example:
+/// ```dart
+/// HoverDetailsStyle(
+///   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+///   backgroundColor: Colors.grey[850]!,
+///   focusColor: Colors.blue.withOpacity(0.3),
+///   hoverColor: Colors.blue.withOpacity(0.1),
+///   splashColor: Colors.blue.withOpacity(0.2),
+///   textStyle: TextStyle(color: Colors.white),
+/// )
+/// ```
 class HoverDetailsStyle extends OverlayStyle {
+  /// Creates a [HoverDetailsStyle] with the specified options.
   HoverDetailsStyle({
     super.elevation,
     required super.shape,

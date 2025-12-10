@@ -20,33 +20,148 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+//TODO: More lsp features
+
+/// A highly customizable code editor widget for Flutter.
+///
+/// [CodeForge] provides a feature-rich code editing experience with support for:
+/// - Syntax highlighting for multiple languages
+/// - Code folding
+/// - Line numbers and gutter
+/// - Auto-indentation and bracket matching
+/// - LSP (Language Server Protocol) integration
+/// - AI code completion
+/// - Undo/redo functionality
+/// - Search highlighting
+///
+/// Example:
+/// ```dart
+/// final controller = CodeForgeController();
+///
+/// CodeForge(
+///   controller: controller,
+///   language: langDart,
+///   enableFolding: true,
+///   enableGutter: true,
+///   textStyle: TextStyle(
+///     fontFamily: 'JetBrains Mono',
+///     fontSize: 14,
+///   ),
+/// )
+/// ```
 class CodeForge extends StatefulWidget {
+  /// The controller for managing the editor's text content and selection.
+  ///
+  /// If not provided, an internal controller will be created.
   final CodeForgeController? controller;
+
+  /// The controller for managing undo/redo operations.
+  ///
+  /// If provided, enables undo/redo functionality in the editor.
   final UndoRedoController? undoController;
+
+  /// The syntax highlighting theme as a map of token types to [TextStyle].
+  ///
+  /// Uses VS2015 dark theme by default if not specified.
   final Map<String, TextStyle>? editorTheme;
+
+  /// The programming language mode for syntax highlighting.
+  ///
+  /// Determines which language syntax rules to apply. Uses Python mode
+  /// by default if not specified.
   final Mode? language;
+
+  /// The focus node for managing keyboard focus.
+  ///
+  /// If not provided, an internal focus node will be created.
   final FocusNode? focusNode;
+
+  /// The base text style for the editor content.
+  ///
+  /// Defines the font family, size, and other text properties.
   final TextStyle? textStyle;
+
+  /// Configuration for AI-powered code completion.
+  ///
+  /// When provided, enables AI suggestions while typing.
   final AiCompletion? aiCompletion;
+
+  /// Configuration for Language Server Protocol integration.
+  ///
+  /// Enables advanced features like hover documentation, diagnostics,
+  /// and semantic highlighting.
   final LspConfig? lspConfig;
+
+  /// Padding inside the editor content area.
   final EdgeInsets? innerPadding;
+
+  /// Custom scroll controller for vertical scrolling.
   final ScrollController? verticalScrollController;
+
+  /// Custom scroll controller for horizontal scrolling.
   final ScrollController? horizontalScrollController;
+
+  /// Styling options for text selection and cursor.
   final CodeSelectionStyle? selectionStyle;
+
+  /// Styling options for the gutter (line numbers and fold icons).
   final GutterStyle? gutterStyle;
+
+  /// Styling options for the autocomplete suggestion popup.
   final SuggestionStyle? suggestionStyle;
+
+  /// Styling options for hover documentation popup.
   final HoverDetailsStyle? hoverDetailsStyle;
+
+  /// The file path for LSP features.
+  ///
+  /// Required when using LSP integration to identify the document.
   final String? filePath;
+
+  /// Initial text content for the editor.
+  ///
+  /// Used only during initialization; subsequent changes should use
+  /// the controller.
   final String? initialText;
+
+  /// Whether the editor is in read-only mode.
+  ///
+  /// When true, the user cannot modify the text content.
   final bool readOnly;
+
+  /// Whether to wrap long lines.
+  ///
+  /// When true, lines wrap at the editor boundary. When false,
+  /// horizontal scrolling is enabled.
   final bool lineWrap;
+
+  /// Whether to automatically focus the editor when mounted.
   final bool autoFocus;
+
+  /// Whether to enable code folding functionality.
+  ///
+  /// When true, fold icons appear in the gutter and code blocks
+  /// can be collapsed.
   final bool enableFolding;
+
+  /// Whether to show indentation guide lines.
+  ///
+  /// Displays vertical lines at each indentation level to help
+  /// visualize code structure.
   final bool enableGuideLines;
+
+  /// Whether to show the gutter with line numbers.
   final bool enableGutter;
+
+  /// Whether to show a divider line between gutter and content.
   final bool enableGutterDivider;
+
+  /// Whether to enable autocomplete suggestions.
+  ///
+  /// Requires LSP integration for language-aware completions.
   final bool enableSuggestions;
 
+  /// Creates a [CodeForge] code editor widget.
   const CodeForge({
     super.key,
     this.controller,
@@ -118,7 +233,6 @@ class _CodeForgeState extends State<CodeForge>
   @override
   void initState() {
     super.initState();
-
     _controller = widget.controller ?? CodeForgeController();
     _focusNode = widget.focusNode ?? FocusNode();
     _hscrollController =
@@ -234,6 +348,8 @@ class _CodeForgeState extends State<CodeForge>
         }
       }
     });
+
+    Future.microtask(CustomIcons.loadAllCustomFonts);
 
     if (widget.filePath != null) {
       if (widget.initialText != null) {
@@ -2705,34 +2821,32 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     );
 
     if (caretY > 0 && caretY <= vScrollOffset + (innerPadding?.top ?? 0)) {
-      vscrollController.animateTo(
-        caretY - (innerPadding?.top ?? 0),
-        duration: const Duration(milliseconds: 100),
-        curve: Curves.easeOut,
+      final targetOffset = caretY - (innerPadding?.top ?? 0);
+      vscrollController.jumpTo(
+        targetOffset.clamp(0, vscrollController.position.maxScrollExtent),
       );
     } else if (caretY + caretHeight >= vScrollOffset + viewportHeight) {
-      vscrollController.animateTo(
-        caretY + caretHeight - viewportHeight + (innerPadding?.bottom ?? 0),
-        duration: const Duration(milliseconds: 100),
-        curve: Curves.easeOut,
+      final targetOffset =
+          caretY + caretHeight - viewportHeight + (innerPadding?.bottom ?? 0);
+      vscrollController.jumpTo(
+        targetOffset.clamp(0, vscrollController.position.maxScrollExtent),
       );
     }
 
     if (caretX < hScrollOffset + (innerPadding?.left ?? 0) + _gutterWidth) {
-      hscrollController.animateTo(
-        caretX - (innerPadding?.left ?? 0) - _gutterWidth,
-        duration: const Duration(milliseconds: 100),
-        curve: Curves.easeOut,
+      final targetOffset = caretX - (innerPadding?.left ?? 0) - _gutterWidth;
+      hscrollController.jumpTo(
+        targetOffset.clamp(0, hscrollController.position.maxScrollExtent),
       );
     } else if (caretX + 1.5 > hScrollOffset + viewportWidth) {
-      hscrollController.animateTo(
-        caretX +
-            1.5 -
-            viewportWidth +
-            (innerPadding?.right ?? 0) +
-            _gutterWidth,
-        duration: const Duration(milliseconds: 100),
-        curve: Curves.easeOut,
+      final targetOffset =
+          caretX +
+          1.5 -
+          viewportWidth +
+          (innerPadding?.right ?? 0) +
+          _gutterWidth;
+      hscrollController.jumpTo(
+        targetOffset.clamp(0, hscrollController.position.maxScrollExtent),
       );
     }
   }
@@ -5390,24 +5504,63 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool get validForMouseTracker => true;
 }
 
+/// Represents a foldable code region in the editor.
+///
+/// A fold range defines a region of code that can be collapsed (folded) to hide
+/// its contents. This is typically used for code blocks like functions, classes,
+/// or control structures.
+///
+/// Fold ranges are automatically detected based on code structure (braces,
+/// indentation) when folding is enabled in the editor.
+///
+/// Example:
+/// ```dart
+/// // A fold range from line 5 to line 10
+/// final foldRange = FoldRange(5, 10);
+/// foldRange.isFolded = true; // Collapse the region
+/// ```
 class FoldRange {
+  /// The starting line index (zero-based) of the fold range.
+  ///
+  /// This is the line where the fold indicator appears in the gutter.
   final int startIndex;
+
+  /// The ending line index (zero-based) of the fold range.
+  ///
+  /// When folded, all lines from `startIndex + 1` to `endIndex` are hidden.
   final int endIndex;
+
+  /// Whether this fold range is currently collapsed.
+  ///
+  /// When true, the contents of this range are hidden in the editor.
   bool isFolded = false;
+
+  /// Child fold ranges that were originally folded when this range was unfolded.
+  ///
+  /// Used to restore the fold state of nested ranges when toggling folds.
   List<FoldRange> originallyFoldedChildren = [];
 
+  /// Creates a [FoldRange] with the specified start and end line indices.
   FoldRange(this.startIndex, this.endIndex);
 
+  /// Adds a child fold range that was originally folded.
+  ///
+  /// Used internally to track nested fold states.
   void addOriginallyFoldedChild(FoldRange child) {
     if (!originallyFoldedChildren.contains(child)) {
       originallyFoldedChildren.add(child);
     }
   }
 
+  /// Clears the list of originally folded children.
   void clearOriginallyFoldedChildren() {
     originallyFoldedChildren.clear();
   }
 
+  /// Checks if a line is contained within this fold range.
+  ///
+  /// Returns true if [line] is strictly greater than [startIndex] and
+  /// less than or equal to [endIndex].
   bool containsLine(int line) {
     return line > startIndex && line <= endIndex;
   }

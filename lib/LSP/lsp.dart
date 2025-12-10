@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -38,18 +39,18 @@ sealed class LspConfig {
   /// The semantic token types legend from the server.
   /// This is populated during initialization and used to decode token type indices.
   List<String>? _serverTokenTypes;
-  
+
   /// The semantic token modifiers legend from the server.
   List<String>? _serverTokenModifiers;
 
   /// Stream of responses from the LSP server.
   /// Use this to listen for notifications like diagnostics.
   Stream<Map<String, dynamic>> get responses => _responseController.stream;
-  
+
   /// The server's semantic token types legend.
   /// Returns null if not yet initialized.
   List<String>? get serverTokenTypes => _serverTokenTypes;
-  
+
   /// The server's semantic token modifiers legend.
   /// Returns null if not yet initialized.
   List<String>? get serverTokenModifiers => _serverTokenModifiers;
@@ -125,7 +126,9 @@ sealed class LspConfig {
       final legend = semanticTokensProvider['legend'];
       if (legend != null) {
         _serverTokenTypes = List<String>.from(legend['tokenTypes'] ?? []);
-        _serverTokenModifiers = List<String>.from(legend['tokenModifiers'] ?? []);
+        _serverTokenModifiers = List<String>.from(
+          legend['tokenModifiers'] ?? [],
+        );
       }
     }
 
@@ -142,7 +145,7 @@ sealed class LspConfig {
   /// Opens the document in the LSP server.
   ///
   /// This method is used internally by the [CodeCrafter] widget and calling it directly is not recommended.
-  /// 
+  ///
   /// If [initialContent] is provided, it will be used as the document content.
   /// Otherwise, the content will be read from [filePath].
   Future<void> openDocument({String? initialContent}) async {
@@ -163,6 +166,10 @@ sealed class LspConfig {
     await Future.delayed(Duration(milliseconds: 300));
   }
 
+  /// Updates the document content in the LSP server.
+  ///
+  /// Sends a 'didChange' notification to the LSP server with the new [content].
+  /// If the document is not open, this method does nothing.
   Future<void> updateDocument(String content) async {
     if (!_openDocuments.containsKey(filePath)) {
       return; // Apply language-specific overrides
@@ -185,6 +192,9 @@ sealed class LspConfig {
     );
   }
 
+  /// Saves the document in the LSP server.
+  ///
+  /// Sends a 'didSave' notification to the LSP server with the current [content].
   Future<void> saveDocument(String content) async {
     await _sendNotification(
       method: 'textDocument/didSave',
@@ -210,10 +220,16 @@ sealed class LspConfig {
     _openDocuments.remove(filePath);
   }
 
+  /// Shuts down the LSP server gracefully.
+  ///
+  /// Sends a 'shutdown' request to the LSP server. This should be called before exiting the server.
   Future<void> shutdown() async {
     await _sendRequest(method: 'shutdown', params: {});
   }
 
+  /// Exits the LSP server process.
+  ///
+  /// Sends an 'exit' notification to the LSP server. This should be called after shutdown.
   Future<void> exitServer() async {
     await _sendNotification(method: 'exit', params: {});
   }
@@ -230,16 +246,16 @@ sealed class LspConfig {
     try {
       final result = response['result'];
       if (result == null) return completion;
-      
+
       final items = result['items'];
       if (items == null || items is! List) return completion;
-      
+
       for (var item in items) {
         final importUris = item['data']?['importUris'];
-        final List<String>? importUriList = importUris != null 
+        final List<String>? importUriList = importUris != null
             ? (importUris as List).map((e) => e.toString()).toList()
             : null;
-            
+
         completion.add(
           LspCompletion(
             label: item['label'],
@@ -248,7 +264,7 @@ sealed class LspConfig {
               orElse: () => CompletionItemType.text,
             ),
             importUri: importUriList,
-            reference: item["data"]?["ref"]
+            reference: item["data"]?["ref"],
           ),
         );
       }
@@ -285,6 +301,9 @@ sealed class LspConfig {
     return '';
   }
 
+  /// Gets the definition location for a symbol at the specified position.
+  ///
+  /// Returns a map with location information, or an empty map if not found.
   Future<Map<String, dynamic>> getDefinition(int line, int character) async {
     final response = await _sendRequest(
       method: 'textDocument/definition',
@@ -294,6 +313,9 @@ sealed class LspConfig {
     return response['result']?[0] ?? '';
   }
 
+  /// Gets all references to a symbol at the specified position.
+  ///
+  /// Returns a list of reference locations, or an empty list if none found.
   Future<List<dynamic>> getReferences(int line, int character) async {
     final params = _commonParams(line, character);
     params['context'] = {'includeDeclaration': true};
@@ -305,6 +327,9 @@ sealed class LspConfig {
     return response['result'];
   }
 
+  /// Gets all semantic tokens for the document.
+  ///
+  /// Returns a list of [LspSemanticToken] objects representing syntax tokens for highlighting.
   Future<List<LspSemanticToken>> getSemanticTokensFull() async {
     final response = await _sendRequest(
       method: 'textDocument/semanticTokens/full',
@@ -463,6 +488,32 @@ class CustomIcons {
   static const IconData snippet = IconData(0x900, fontFamily: 'Snippet');
   static const IconData interface = IconData(0x900, fontFamily: 'Interface');
   static const IconData field = IconData(0x900, fontFamily: 'Field');
+
+  /// Loads all custom icon fonts for the code_forge package.
+  /// Call [CustomIcons.loadAllCustomFonts] before using any custom icons.
+  static Future<void> loadAllCustomFonts() async {
+    final fonts = <String, String>{
+      'Method': 'assets/icons/method.ttf',
+      'Variable': 'assets/icons/variable.ttf',
+      'Class': 'assets/icons/class.ttf',
+      'Enum': 'assets/icons/enum.ttf',
+      'KeyWord': 'assets/icons/keyword.ttf',
+      'Reference': 'assets/icons/reference.ttf',
+      'Constant': 'assets/icons/constant.ttf',
+      'Struct': 'assets/icons/struct.ttf',
+      'Event': 'assets/icons/event.ttf',
+      'Operator': 'assets/icons/operator.ttf',
+      'Parameter': 'assets/icons/parameter.ttf',
+      'Snippet': 'assets/icons/snippet.ttf',
+      'Interface': 'assets/icons/interface.ttf',
+      'Field': 'assets/icons/field.ttf',
+    };
+    for (final entry in fonts.entries) {
+      final loader = FontLoader(entry.key);
+      loader.addFont(rootBundle.load('packages/code_forge/${entry.value}'));
+      await loader.load();
+    }
+  }
 }
 
 /// Represents a completion item in the LSP (Language Server Protocol).
@@ -488,23 +539,22 @@ class LspCompletion {
     required this.label,
     required this.itemType,
     this.reference,
-    this.importUri
-  })
-    : icon = Icon(
-        completionItemIcons[itemType]!.icon,
-        color: completionItemIcons[itemType]!.color,
-        size: 18,
-      );
+    this.importUri,
+  }) : icon = Icon(
+         completionItemIcons[itemType]!.icon,
+         color: completionItemIcons[itemType]!.color,
+         size: 18,
+       );
 
-  Map<String, dynamic> toJson ()=> {
+  Map<String, dynamic> toJson() => {
     "label": label,
     "itemType": itemType,
     "reference": reference,
-    "importUri": importUri
+    "importUri": importUri,
   };
 
   @override
-  String toString ()=> toJson().toString();
+  String toString() => toJson().toString();
 }
 
 /// Represents an error in the LSP (Language Server Protocol).
@@ -546,7 +596,7 @@ class LspSemanticToken {
   final int length;
   final int typeIndex;
   final int modifierBitmask;
-  
+
   /// The actual token type name from the server's legend (e.g., 'namespace', 'function', etc.)
   /// This is populated from the server's semanticTokensProvider.legend.tokenTypes list.
   final String? tokenTypeName;
@@ -563,13 +613,13 @@ class LspSemanticToken {
   int get end => start + length;
 
   Map<String, dynamic> toJson() => {
-      'line': line,
-      'start': start,
-      'length': length,
-      'typeIndex': typeIndex,
-      'tokenTypeName': tokenTypeName,
-      'modifierBitmask': modifierBitmask,
-    };
+    'line': line,
+    'start': start,
+    'length': length,
+    'typeIndex': typeIndex,
+    'tokenTypeName': tokenTypeName,
+    'modifierBitmask': modifierBitmask,
+  };
 
   @override
   String toString() => toJson().toString();

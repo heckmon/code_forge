@@ -2,7 +2,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+/// A custom two-dimensional viewport for the code editor.
+///
+/// This viewport is used internally by [CodeForge] to enable both vertical
+/// and horizontal scrolling within the editor. It delegates to a
+/// [Render2DCodeField] for layout and painting.
 class CustomViewport extends TwoDimensionalViewport {
+  /// Creates a [CustomViewport] with the required scroll offsets and axes.
   const CustomViewport({
     super.key,
     required super.verticalOffset,
@@ -41,7 +47,12 @@ class CustomViewport extends TwoDimensionalViewport {
   }
 }
 
+/// The render object for the code editor's two-dimensional viewport.
+///
+/// This class handles the layout of the code editor content and manages
+/// the content dimensions for both vertical and horizontal scrolling.
 class Render2DCodeField extends RenderTwoDimensionalViewport {
+  /// Creates a [Render2DCodeField] with the required scroll configuration.
   Render2DCodeField({
     required super.horizontalOffset,
     required super.horizontalAxisDirection,

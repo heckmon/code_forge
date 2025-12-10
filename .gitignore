@@ -30,5 +30,6 @@ migrate_working_dir/
 /build/
 /coverage/
 
-/example/lib/*_code.dart
+/example/lib/little_code.dart
+/example/lib/big_code.dart
 /example/pubspec.lock

@@ -203,7 +203,7 @@ class LspStdioConfig extends LspConfig {
         completer.completeError(e);
       }
     }
-    
+
     if (!_isSending) {
       _isSending = true;
       await sendOperation();
@@ -216,7 +216,7 @@ class LspStdioConfig extends LspConfig {
       await sendOperation();
       _isSending = false;
     }
-    
+
     return completer.future;
   }
 

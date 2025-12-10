@@ -47,7 +47,7 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.0.1"
+    version: "1.0.0"
   collection:
     dependency: transitive
     description:
@@ -224,7 +224,7 @@ packages:
     source: hosted
     version: "1.17.0"
   path:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: path
       sha256: "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5"

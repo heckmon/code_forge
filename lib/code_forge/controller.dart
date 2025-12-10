@@ -6,25 +6,79 @@ import 'rope.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// Controller for the [CodeForge] code editor widget.
+///
+/// This controller manages the text content, selection state, and various
+/// editing operations for the code editor. It implements [DeltaTextInputClient]
+/// to handle text input from the platform.
+///
+/// The controller uses a rope data structure internally for efficient text
+/// manipulation, especially for large documents.
+///
+/// Example:
+/// ```dart
+/// final controller = CodeForgeController();
+/// controller.text = 'void main() {\n  print("Hello");\n}';
+///
+/// // Access selection
+/// print(controller.selection);
+///
+/// // Get specific line
+/// print(controller.getLineText(0)); // 'void main() {'
+///
+/// // Fold/unfold code
+/// controller.foldAll();
+/// controller.unfoldAll();
+/// ```
 class CodeForgeController implements DeltaTextInputClient {
   static const _flushDelay = Duration(milliseconds: 300);
   final List<VoidCallback> _listeners = [];
+
+  /// Callback for manually triggering AI completion.
+  /// Set this to enable custom AI completion triggers.
   VoidCallback? manualAiCompletion;
+
   Rope _rope = Rope('');
   TextSelection _selection = const TextSelection.collapsed(offset: 0);
+
+  /// The text input connection to the platform.
   TextInputConnection? connection;
+
   Timer? _flushTimer;
+
+  /// The range of text that has been modified and needs reprocessing.
   TextRange? dirtyRegion;
+
+  /// List of all fold ranges detected in the document.
+  ///
+  /// This list is automatically populated based on code structure
+  /// (braces, indentation, etc.) when folding is enabled.
   List<FoldRange> foldings = [];
+
+  /// List of search highlights to display in the editor.
+  ///
+  /// Add [SearchHighlight] objects to this list to highlight
+  /// search results or other text ranges.
   List<SearchHighlight> searchHighlights = [];
+
   String? _cachedText, _bufferLineText;
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
+
+  /// Whether the search highlights have changed and need repaint.
   bool searchHighlightsChanged = false;
+
   int _bufferLineRopeStart = 0, _bufferLineOriginalLength = 0;
   int _cachedTextVersion = -1, _currentVersion = 0;
   int? dirtyLine, _bufferLineIndex;
+
+  /// Whether the editor is in read-only mode.
+  ///
+  /// When true, the user cannot modify the text content.
   bool readOnly = false;
+
+  /// Whether the line structure has changed (lines added or removed).
   bool lineStructureChanged = false;
+
   String? _lastSentText;
   TextSelection? _lastSentSelection;
   UndoRedoController? _undoController;
@@ -34,7 +88,10 @@ class CodeForgeController implements DeltaTextInputClient {
   VoidCallback? _foldAllCallback;
   VoidCallback? _unfoldAllCallback;
 
-  /// Set the undo controller for this editor
+  /// Sets the undo controller for this editor.
+  ///
+  /// The undo controller manages the undo/redo history for text operations.
+  /// Pass null to disable undo/redo functionality.
   void setUndoController(UndoRedoController? controller) {
     _undoController = controller;
     if (controller != null) {
@@ -157,6 +214,10 @@ class CodeForgeController implements DeltaTextInputClient {
     );
   }
 
+  /// The complete text content of the editor.
+  ///
+  /// Getting this property returns the full document text.
+  /// Setting this property replaces all content and moves the cursor to the end.
   String get text {
     if (_cachedText == null || _cachedTextVersion != _currentVersion) {
       if (_bufferLineIndex != null && _bufferDirty) {
@@ -174,6 +235,7 @@ class CodeForgeController implements DeltaTextInputClient {
     return _cachedText!;
   }
 
+  /// The total length of the document in characters.
   int get length {
     if (_bufferLineIndex != null && _bufferDirty) {
       return _rope.length +
@@ -182,13 +244,22 @@ class CodeForgeController implements DeltaTextInputClient {
     return _rope.length;
   }
 
+  /// The current text selection in the editor.
+  ///
+  /// For a cursor with no selection, [TextSelection.isCollapsed] will be true.
   TextSelection get selection => _selection;
+
+  /// List of all lines in the document.
   List<String> get lines => _rope.cachedLines;
 
+  /// The total number of lines in the document.
   int get lineCount {
     return _rope.lineCount;
   }
 
+  /// The visible text content with folded regions hidden.
+  ///
+  /// Returns the document text with lines inside collapsed fold ranges removed.
   String get visibleText {
     if (foldings.isEmpty) return text;
     final visLines = List<String>.from(lines);
@@ -205,6 +276,10 @@ class CodeForgeController implements DeltaTextInputClient {
     return visLines.join('\n');
   }
 
+  /// Gets the text content of a specific line.
+  ///
+  /// [lineIndex] is zero-based (0 for the first line).
+  /// Returns the text of the line without the newline character.
   String getLineText(int lineIndex) {
     if (_bufferLineIndex != null &&
         lineIndex == _bufferLineIndex &&
@@ -214,6 +289,10 @@ class CodeForgeController implements DeltaTextInputClient {
     return _rope.getLineText(lineIndex);
   }
 
+  /// Gets the line number (zero-based) for a character offset.
+  ///
+  /// [charOffset] is the character position in the document.
+  /// Returns the line index containing that character.
   int getLineAtOffset(int charOffset) {
     if (_bufferLineIndex != null && _bufferDirty) {
       final bufferStart = _bufferLineRopeStart;
@@ -228,6 +307,10 @@ class CodeForgeController implements DeltaTextInputClient {
     return _rope.getLineAtOffset(charOffset);
   }
 
+  /// Gets the character offset where a line starts.
+  ///
+  /// [lineIndex] is zero-based (0 for the first line).
+  /// Returns the character offset of the first character in that line.
   int getLineStartOffset(int lineIndex) {
     if (_bufferLineIndex != null &&
         lineIndex == _bufferLineIndex &&
@@ -243,7 +326,10 @@ class CodeForgeController implements DeltaTextInputClient {
     return _rope.getLineStartOffset(lineIndex);
   }
 
+  /// Finds the start of the line containing [offset].
   int findLineStart(int offset) => _rope.findLineStart(offset);
+
+  /// Finds the end of the line containing [offset].
   int findLineEnd(int offset) => _rope.findLineEnd(offset);
 
   set text(String newText) {
@@ -254,6 +340,10 @@ class CodeForgeController implements DeltaTextInputClient {
     notifyListeners();
   }
 
+  /// Sets the current text selection.
+  ///
+  /// Setting this property will update the selection and notify listeners.
+  /// For a collapsed cursor, use `TextSelection.collapsed(offset: pos)`.
   set selection(TextSelection newSelection) {
     if (_selection == newSelection) return;
 
@@ -273,8 +363,10 @@ class CodeForgeController implements DeltaTextInputClient {
     notifyListeners();
   }
 
-  /// Update selection and sync to text input connection for keyboard navigation.
-  /// This flushes any pending buffer first to ensure IME state is consistent.
+  /// Updates selection and syncs to text input connection for keyboard navigation.
+  ///
+  /// This method flushes any pending buffer first to ensure IME state is consistent.
+  /// Use this for programmatic selection changes that should sync with the platform.
   void setSelectionSilently(TextSelection newSelection) {
     if (_selection == newSelection) return;
 
@@ -302,14 +394,20 @@ class CodeForgeController implements DeltaTextInputClient {
     notifyListeners();
   }
 
+  /// Adds a listener that will be called when the controller state changes.
+  ///
+  /// Listeners are notified on text changes, selection changes, and other
+  /// state updates.
   void addListener(VoidCallback listener) {
     _listeners.add(listener);
   }
 
+  /// Removes a previously added listener.
   void removeListener(VoidCallback listener) {
     _listeners.remove(listener);
   }
 
+  /// Notifies all registered listeners of a state change.
   void notifyListeners() {
     for (final listener in _listeners) {
       listener();
@@ -1094,8 +1192,20 @@ class CodeForgeController implements DeltaTextInputClient {
     _unfoldAllCallback = unfoldAll;
   }
 
-  /// Toggle fold at the specified line number (0-indexed)
-  /// Throws [StateError] if folding is not enabled or no fold range exists at the line
+  /// Toggles the fold state at the specified line number.
+  ///
+  /// [lineNumber] is zero-indexed (0 for the first line).
+  /// If the line is at the start of a fold region, it will be toggled.
+  ///
+  /// Throws [StateError] if:
+  /// - Folding is not enabled on the editor
+  /// - The editor has not been initialized
+  /// - No fold range exists at the specified line
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.toggleFold(5); // Toggle fold at line 6
+  /// ```
   void toggleFold(int lineNumber) {
     if (_toggleFoldCallback == null) {
       throw StateError('Folding is not enabled or editor is not initialized');
@@ -1103,7 +1213,16 @@ class CodeForgeController implements DeltaTextInputClient {
     _toggleFoldCallback!(lineNumber);
   }
 
-  /// Fold all foldable regions in the document
+  /// Folds all foldable regions in the document.
+  ///
+  /// All detected fold ranges will be collapsed, hiding their contents.
+  ///
+  /// Throws [StateError] if folding is not enabled or editor is not initialized.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.foldAll();
+  /// ```
   void foldAll() {
     if (_foldAllCallback == null) {
       throw StateError('Folding is not enabled or editor is not initialized');
@@ -1111,7 +1230,16 @@ class CodeForgeController implements DeltaTextInputClient {
     _foldAllCallback!();
   }
 
-  /// Unfold all folded regions in the document
+  /// Unfolds all folded regions in the document.
+  ///
+  /// All collapsed fold ranges will be expanded, showing their contents.
+  ///
+  /// Throws [StateError] if folding is not enabled or editor is not initialized.
+  ///
+  /// Example:
+  /// ```dart
+  /// controller.unfoldAll();
+  /// ```
   void unfoldAll() {
     if (_unfoldAllCallback == null) {
       throw StateError('Folding is not enabled or editor is not initialized');
@@ -1119,7 +1247,10 @@ class CodeForgeController implements DeltaTextInputClient {
     _unfoldAllCallback!();
   }
 
-  /// Dispose the controller
+  /// Disposes of the controller and releases resources.
+  ///
+  /// Call this method when the controller is no longer needed to prevent
+  /// memory leaks.
   void dispose() {
     _listeners.clear();
     connection?.close();
