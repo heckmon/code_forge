@@ -18,7 +18,7 @@
     <img src="https://img.shields.io/pub/v/code_forge.svg?style=for-the-badge&logo=dart&logoColor=white&labelColor=0175C2&color=02569B" alt="Pub Version"/>
   </a>
   <a href="https://github.com/heckmon/code_forge/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/heckmon/code_forge.svg?style=for-the-badge&labelColor=333333&color=4CAF50" alt="License"/>
+    <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge&labelColor=333333&color=4CAF50" alt="License"/>
   </a>
   <a href="https://github.com/heckmon/code_forge/stargazers">
     <img src="https://img.shields.io/github/stars/heckmon/code_forge.svg?style=for-the-badge&logo=github&labelColor=333333&color=FFD700" alt="GitHub Stars"/>
