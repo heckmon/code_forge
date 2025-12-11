@@ -21,7 +21,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 //TODO: More lsp features
-// TODO: Tokenized input to the AI model for efficient completion.
+//TODO: Tokenized input to the AI model for efficient completion.
 
 /// A highly customizable code editor widget for Flutter.
 ///
@@ -294,7 +294,7 @@ class _CodeForgeState extends State<CodeForge>
             }
             return style;
           })(),
-          backgroundColor: _editorTheme['root']!.backgroundColor!,
+          backgroundColor: _editorTheme['root']?.backgroundColor ?? Colors.white,
           focusColor: Colors.blueAccent.withAlpha(50),
           hoverColor: Colors.grey.withAlpha(15),
           splashColor: Colors.blueAccent.withAlpha(50),
@@ -1882,6 +1882,7 @@ class _CodeForgeState extends State<CodeForge>
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
+                                          const Expanded(child: SizedBox()),
                                           if (item.importUri?[0] != null)
                                             Expanded(
                                               child: Text(

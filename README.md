@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="placeholder_logo.png" alt="CodeForge Logo" width="120"/>
-</p>
-
 <h1 align="center">⚒️ CodeForge</h1>
 
 <p align="center">
@@ -36,7 +32,7 @@
 ---
 
 <p align="center">
-  <img src="https://files.catbox.moe/x40oow.gif" alt="CodeForge Demo" width="800"/><sub>large code support (tested with 100k+ lines) and LSP based intelligent lazy highlighting</sub>
+  <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/code_forge_100k.gif?token=GHSAT0AAAAAADG255TYTX7TQIP7DUNCMHE62J2L74Q" alt="CodeForge Demo" width="800"/><sub>large code support (tested with 100k+ lines) and LSP based intelligent lazy highlighting</sub>
 </p>
 
 ## ✨ Why CodeForge?
@@ -64,52 +60,39 @@
 
 ## 🎬 Features
 
-<table>
-<tr>
-<td width="50%">
+<div style="display:flex; flex-wrap:wrap; gap:20px;">
+  <div style="flex: 0 1 50%; min-width:300px;">
+    <h3>🤖 AI Code Completion</h3>
+    <p>Intelligent code suggestions powered by AI models like Gemini. Auto, manual, or mixed completion modes with smart debouncing.</p>
+    <div style="text-align:center;">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/cf_ai.gif?token=GHSAT0AAAAAADG255TZ2EAJW7IS7N5M7LCO2J2MAGQ" alt="AI Completion" style="width:100%;height:auto;max-width:600px;" />
+    </div>
+  </div>
 
-### 🤖 AI Code Completion
-Intelligent code suggestions powered by AI models like Gemini. Auto, manual, or mixed completion modes with smart debouncing.
+  <div style="flex: 0 1 50%; min-width:300px;">
+    <h3>🔌 LSP Integration</h3>
+    <p>Full Language Server Protocol support with real-time diagnostics, hover documentation, and semantic highlighting.</p>
+    <div style="text-align:center;">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/cf_lsp.gif?token=GHSAT0AAAAAADG255TZHFYBISGLAFA4G2H22J2MATQ" alt="LSP Integration" style="width:100%;height:auto;max-width:600px;" />
+    </div>
+  </div>
 
-<p align="center">
-  <img src="https://files.catbox.moe/csepjs.gif" alt="AI Completion" width="100%"/>
-</p>
+  <div style="flex: 0 1 50%; min-width:300px;">
+    <h3>📁 Smart Code Folding</h3>
+    <p>Collapse and expand code blocks with visual indicators. Navigate large files with ease.</p>
+    <div style="text-align:center;">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/cf_fold.gif?token=GHSAT0AAAAAADG255TYYJIHVO3OLDHQEQIA2J2MBDQ" alt="Code Folding" style="width:100%;height:auto;max-width:600px;" />
+    </div>
+  </div>
 
-</td>
-<td width="50%">
-
-### 🔌 LSP Integration
-Full Language Server Protocol support with real-time diagnostics, hover documentation, and semantic highlighting.
-
-<p align="center">
-  <img src="placeholder_lsp_demo.gif" alt="LSP Integration" width="100%"/>
-</p>
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 📁 Smart Code Folding
-Collapse and expand code blocks with visual indicators. Navigate large files with ease.
-
-<p align="center">
-  <img src="placeholder_folding.gif" alt="Code Folding" width="100%"/>
-</p>
-
-</td>
-<td width="50%">
-
-### 🎨 Syntax Highlighting
-Beautiful syntax highlighting for 180+ languages with customizable themes and semantic token support.
-
-<p align="center">
-  <img src="placeholder_syntax.gif" alt="Syntax Highlighting" width="100%"/>
-</p>
-
-</td>
-</tr>
-</table>
+  <div style="flex: 0 1 50%; min-width:300px;">
+    <h3>🎨 Syntax Highlighting</h3>
+    <p>Beautiful syntax highlighting for 180+ languages with customizable themes and semantic token support.</p>
+    <div style="text-align:center;">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/cf_themes.gif?token=GHSAT0AAAAAADG255TYMPWAK44KOU2ZYSU62J2MCQQ" alt="Syntax Highlighting" style="width:100%;height:auto;max-width:600px;" />
+    </div>
+  </div>
+</div>
 
 ### 🌟 More Features
 
