@@ -102,10 +102,10 @@ class CodeForgeController implements DeltaTextInputClient {
   }
 
   /// Save the current content, [controller.text] to the opened file.
-  void saveFile(){
-    if(openedFile ==  null){
+  void saveFile() {
+    if (openedFile == null) {
       throw FlutterError(
-        "No file found.\nPlease open a file by providing a valid filePath to the CodeForge widget"
+        "No file found.\nPlease open a file by providing a valid filePath to the CodeForge widget",
       );
     }
     File(openedFile!).writeAsStringSync(text);
@@ -114,7 +114,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Moves the cursor one character to the left.
   ///
   /// If [isShiftPressed] is true, extends the selection.
-  void pressLetfArrowKey({bool isShiftPressed = false}){
+  void pressLetfArrowKey({bool isShiftPressed = false}) {
     int newOffset;
     if (!isShiftPressed && selection.start != selection.end) {
       newOffset = selection.start;
@@ -126,19 +126,20 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (isShiftPressed) {
       setSelectionSilently(
-        TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+        TextSelection(
+          baseOffset: selection.baseOffset,
+          extentOffset: newOffset,
+        ),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: newOffset));
     }
   }
 
   /// Moves the cursor one character to the right.
   ///
   /// If [isShiftPressed] is true, extends the selection.
-  void pressRightArrowKey({bool isShiftPressed = false}){
+  void pressRightArrowKey({bool isShiftPressed = false}) {
     int newOffset;
     if (!isShiftPressed && selection.start != selection.end) {
       newOffset = selection.end;
@@ -150,19 +151,20 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (isShiftPressed) {
       setSelectionSilently(
-        TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+        TextSelection(
+          baseOffset: selection.baseOffset,
+          extentOffset: newOffset,
+        ),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: newOffset));
     }
   }
 
   /// Moves the cursor up one line, maintaining the column position.
   ///
   /// If [isShiftPressed] is true, extends the selection.
-  void pressUpArrowKey({bool isShiftPressed = false}){
+  void pressUpArrowKey({bool isShiftPressed = false}) {
     final currentLine = getLineAtOffset(selection.extentOffset);
 
     if (currentLine <= 0) {
@@ -171,9 +173,7 @@ class CodeForgeController implements DeltaTextInputClient {
           TextSelection(baseOffset: selection.baseOffset, extentOffset: 0),
         );
       } else {
-        setSelectionSilently(
-          const TextSelection.collapsed(offset: 0),
-        );
+        setSelectionSilently(const TextSelection.collapsed(offset: 0));
       }
       return;
     }
@@ -197,31 +197,33 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (isShiftPressed) {
       setSelectionSilently(
-        TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+        TextSelection(
+          baseOffset: selection.baseOffset,
+          extentOffset: newOffset,
+        ),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: newOffset));
     }
   }
-  
+
   /// Moves the cursor down one line, maintaining the column position.
   ///
   /// If [isShiftPressed] is true, extends the selection.
-  void pressDownArrowKey({bool isShiftPressed = false}){
+  void pressDownArrowKey({bool isShiftPressed = false}) {
     final currentLine = getLineAtOffset(selection.extentOffset);
 
     if (currentLine >= lineCount - 1) {
       final endOffset = length;
       if (isShiftPressed) {
         setSelectionSilently(
-          TextSelection(baseOffset: selection.baseOffset, extentOffset: endOffset),
+          TextSelection(
+            baseOffset: selection.baseOffset,
+            extentOffset: endOffset,
+          ),
         );
       } else {
-        setSelectionSilently(
-          TextSelection.collapsed(offset: endOffset),
-        );
+        setSelectionSilently(TextSelection.collapsed(offset: endOffset));
       }
       return;
     }
@@ -251,12 +253,13 @@ class CodeForgeController implements DeltaTextInputClient {
       final endOffset = length;
       if (isShiftPressed) {
         setSelectionSilently(
-          TextSelection(baseOffset: selection.baseOffset, extentOffset: endOffset),
+          TextSelection(
+            baseOffset: selection.baseOffset,
+            extentOffset: endOffset,
+          ),
         );
       } else {
-        setSelectionSilently(
-          TextSelection.collapsed(offset: endOffset),
-        );
+        setSelectionSilently(TextSelection.collapsed(offset: endOffset));
       }
       return;
     }
@@ -271,12 +274,13 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (isShiftPressed) {
       setSelectionSilently(
-        TextSelection(baseOffset: selection.baseOffset, extentOffset: newOffset),
+        TextSelection(
+          baseOffset: selection.baseOffset,
+          extentOffset: newOffset,
+        ),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: newOffset));
     }
   }
 
@@ -289,19 +293,20 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (isShiftPressed) {
       setSelectionSilently(
-        TextSelection(baseOffset: selection.baseOffset, extentOffset: lineStart),
+        TextSelection(
+          baseOffset: selection.baseOffset,
+          extentOffset: lineStart,
+        ),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: lineStart),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: lineStart));
     }
   }
 
   /// Moves the cursor to the end of the current line.
   ///
   /// If [isShiftPressed] is true, extends the selection to the line end.
-  void pressEndKey({bool isShiftPressed = false}){
+  void pressEndKey({bool isShiftPressed = false}) {
     final currentLine = getLineAtOffset(selection.extentOffset);
     final lineText = getLineText(currentLine);
     final lineStart = getLineStartOffset(currentLine);
@@ -312,9 +317,7 @@ class CodeForgeController implements DeltaTextInputClient {
         TextSelection(baseOffset: selection.baseOffset, extentOffset: lineEnd),
       );
     } else {
-      setSelectionSilently(
-        TextSelection.collapsed(offset: lineEnd),
-      );
+      setSelectionSilently(TextSelection.collapsed(offset: lineEnd));
     }
   }
 
@@ -351,10 +354,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Selects all text in the editor.
   void selectAll() {
-    selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: length,
-    );
+    selection = TextSelection(baseOffset: 0, extentOffset: length);
   }
 
   /// The complete text content of the editor.
@@ -1542,4 +1542,3 @@ class CodeForgeController implements DeltaTextInputClient {
     }
   }
 }
-
