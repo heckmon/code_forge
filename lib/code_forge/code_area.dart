@@ -2837,7 +2837,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     _lineHeight = fontSize * lineHeightMultiplier;
 
-    _syntaxHighlighter.dispose();
+    try{
+      _syntaxHighlighter.dispose();
+    }
+    catch(e){
+      //
+    }
     _syntaxHighlighter = SyntaxHighlighter(
       language: language,
       editorTheme: editorTheme,
