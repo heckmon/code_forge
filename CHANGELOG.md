@@ -108,5 +108,5 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     * Updated README.md
 
 ## 1.1.0
-    * Fixed keyboard not appearing bug in Android.
-    * Added more public API methods in the controller, such as copy, paste, selectAll, cut, arrow key navigations, etc
+   * Fixed keyboard would not appear in Android.
+   * Added more public API methods in the controller, such as copy, paste, selectAll, cut, arrow key navigations, etc
