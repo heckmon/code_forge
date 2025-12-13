@@ -2485,7 +2485,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   late final Paint _bracketHighlightPainter;
   late final ui.ParagraphStyle _paragraphStyle;
   late final ui.TextStyle _uiTextStyle;
-  late final SyntaxHighlighter _syntaxHighlighter;
+  late SyntaxHighlighter _syntaxHighlighter;
   late double _gutterWidth;
   TextStyle? _aiCompletionTextStyle;
   Map<String, TextStyle> _editorTheme;
