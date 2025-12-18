@@ -3063,11 +3063,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final hScrollOffset = hscrollController.offset;
     final viewportHeight = vscrollController.position.viewportDimension;
     final viewportWidth = hscrollController.position.viewportDimension;
-
-    offsetNotifier.value = Offset(
-      (caretX - hScrollOffset) % viewportWidth,
-      (caretY - vScrollOffset) % viewportHeight,
-    );
+    final relX = (caretX - hScrollOffset).clamp(0.0, viewportWidth);
+    final relY = (caretY - vScrollOffset).clamp(0.0, viewportHeight);
+    
+    offsetNotifier.value = Offset(relX, relY);
 
     if (caretY > 0 && caretY <= vScrollOffset + (innerPadding?.top ?? 0)) {
       final targetOffset = caretY - (innerPadding?.top ?? 0);
