@@ -119,6 +119,8 @@ class LspStdioConfig extends LspConfig {
   }
 
   int get pid => _process.pid;
+  Future<int> get exitCode => _process.exitCode;
+  Process get process => _process;
 
   void _handleStdoutData(List<int> data) {
     _buffer.addAll(data);
