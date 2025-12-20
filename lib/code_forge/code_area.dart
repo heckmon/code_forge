@@ -239,13 +239,16 @@ class _CodeForgeState extends State<CodeForge>
   final _isMobile = Platform.isAndroid || Platform.isIOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
+  final Map<String, String> _suggestionDetailsCache = {};
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
   bool _lspReady = false, _isHovering = false, _isTyping = false;
   String _previousValue = "";
   List<LspSemanticToken>? _semanticTokens;
+  List<Map<String, dynamic>> _extraText = [];
   int _semanticTokensVersion = 0;
   int _sugSelIndex = 0, _actionSelIndex = 0;
+  String? _selectedSuggestionMd;
   Timer? _hoverTimer, _aiDebounceTimer, _semanticTokenTimer, _codeActionTimer;
   List<dynamic> _suggestions = [];
   TextSelection _prevSelection = TextSelection.collapsed(offset: 0);
@@ -299,7 +302,7 @@ class _CodeForgeState extends State<CodeForge>
           })(),
           backgroundColor:
               _editorTheme['root']?.backgroundColor ?? Colors.white,
-          focusColor: Colors.blueAccent.withAlpha(50),
+          focusColor: Color(0xff024281),
           hoverColor: Colors.grey.withAlpha(15),
           splashColor: Colors.blueAccent.withAlpha(50),
           shape: BeveledRectangleBorder(
@@ -320,7 +323,7 @@ class _CodeForgeState extends State<CodeForge>
             ),
           ),
           backgroundColor: (() {
-            final lightnessDelta = -0.06;
+            final lightnessDelta = 0.03;
             final base = _editorTheme['root']!.backgroundColor!;
             final hsl = HSLColor.fromColor(base);
             final newLightness = (hsl.lightness + lightnessDelta).clamp(
@@ -762,6 +765,21 @@ class _CodeForgeState extends State<CodeForge>
     score -= label.length;
 
     return score;
+  }
+
+  String _getSuggestionCacheKey(dynamic item) {
+    if (item is LspCompletion) {
+      final map = item.completionItem;
+      final id = map['id']?.toString() ?? '';
+      final sort = map['sortText']?.toString() ?? '';
+      final source = map['source']?.toString() ?? '';
+      final label = item.label;
+      final importUri = (item.importUri != null && item.importUri!.isNotEmpty)
+          ? item.importUri![0]
+          : '';
+      return 'lsp|$label|$id|$sort|$source|$importUri';
+    }
+    return 'str|${item.toString()}';
   }
 
   void _sortSuggestions(String prefix) {
@@ -1468,6 +1486,9 @@ class _CodeForgeState extends State<CodeForge>
                                           case LogicalKeyboardKey.enter:
                                           case LogicalKeyboardKey.tab:
                                             _acceptSuggestion();
+                                            if(_extraText.isNotEmpty){
+                                              _acceptActions(_extraText);
+                                            }
                                             return KeyEventResult.handled;
                                           case LogicalKeyboardKey.escape:
                                             _suggestionNotifier.value = null;
@@ -1820,109 +1841,239 @@ class _CodeForgeState extends State<CodeForge>
                       _sugSelIndex = 0;
                       return SizedBox.shrink();
                     }
-                    return Positioned(
-                      width: screenWidth < 700
-                          ? screenWidth * 0.63
-                          : screenWidth * 0.3,
-                      top: offset.dy + (widget.textStyle?.fontSize ?? 14) + 10,
-                      left: offset.dx,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight: 400,
-                          maxWidth: 400,
-                          minWidth: 70,
-                        ),
-                        child: Card(
-                          shape: _suggestionStyle.shape,
-                          elevation: _suggestionStyle.elevation,
-                          color: _suggestionStyle.backgroundColor,
-                          margin: EdgeInsets.zero,
-                          child: RawScrollbar(
-                            thumbVisibility: true,
-                            thumbColor: _editorTheme['root']!.color!.withAlpha(
-                              80,
+                    final completionScrlCtrl = ScrollController();
+                    return Stack(
+                      children: [
+                        Positioned(
+                          width: screenWidth < 700
+                              ? screenWidth * 0.63
+                              : screenWidth * 0.3,
+                          top: offset.dy + (widget.textStyle?.fontSize ?? 14) + 10,
+                          left: offset.dx,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight: 400,
+                              maxWidth: 400,
+                              minWidth: 70,
                             ),
-                            interactive: true,
-                            controller: _suggScrollController,
-                            child: ListView.builder(
-                              itemExtent:
-                                  (widget.textStyle?.fontSize ?? 14) + 6.5,
-                              controller: _suggScrollController,
-                              padding: EdgeInsets.only(right: 5),
-                              shrinkWrap: true,
-                              itemCount: sugg.length,
-                              itemBuilder: (_, indx) {
-                                final item = sugg[indx];
-                                return Container(
-                                  color: _sugSelIndex == indx
-                                      ? _suggestionStyle.focusColor
-                                      : Colors.transparent,
-                                  child: InkWell(
-                                    canRequestFocus: false,
-                                    hoverColor: _suggestionStyle.hoverColor,
-                                    focusColor: _suggestionStyle.focusColor,
-                                    splashColor: _suggestionStyle.splashColor,
-                                    onTap: () {
-                                      if (mounted) {
-                                        setState(() {
-                                          _sugSelIndex = indx;
-                                          final text = item is LspCompletion
-                                              ? item.label
-                                              : item as String;
-                                          _controller.insertAtCurrentCursor(
-                                            text,
-                                            replaceTypedChar: true,
-                                          );
-                                          _suggestionNotifier.value = null;
+                            child: Card(
+                              shape: _suggestionStyle.shape,
+                              elevation: _suggestionStyle.elevation,
+                              color: _suggestionStyle.backgroundColor,
+                              margin: EdgeInsets.zero,
+                              child: RawScrollbar(
+                                thumbVisibility: true,
+                                thumbColor:
+                                    _editorTheme['root']!.color!.withAlpha(80),
+                                interactive: true,
+                                controller: _suggScrollController,
+                                child: ListView.builder(
+                                  itemExtent:
+                                      (widget.textStyle?.fontSize ?? 14) + 6.5,
+                                  controller: _suggScrollController,
+                                  padding: EdgeInsets.only(right: 5),
+                                  shrinkWrap: true,
+                                  itemCount: sugg.length,
+                                  itemBuilder: (_, indx) {
+                                    final item = sugg[indx];
+                                    if (item is LspCompletion && indx == _sugSelIndex) {
+                                      final key = _getSuggestionCacheKey(item);
+                                      if (!_suggestionDetailsCache.containsKey(key) &&
+                                          widget.lspConfig != null) {
+                                        (() async {
+                                          try {
+                                            final data = await widget.lspConfig!.resolveCompletionItem(item.completionItem);
+                                            final mdText = "${data['detail'] ?? ''}\n${data['documentation'] ?? ''}";
+                                            if (!mounted) return;
+                                            setState(() {
+                                              final edits = data['additionalTextEdits'];
+                                              if (edits is List) {
+                                                try {
+                                                  _extraText = edits
+                                                      .map((e) => Map<String, dynamic>.from(e as Map))
+                                                      .toList();
+                                                } catch (_) {
+                                                  _extraText = edits.cast<Map<String, dynamic>>();
+                                                }
+                                              } else {
+                                                _extraText = [];
+                                              }
+                                              _suggestionDetailsCache[key] = mdText;
+                                              _selectedSuggestionMd = mdText;
+                                            });
+                                          } catch (e) {
+                                            debugPrint("Completion Resolve failed: ${e.toString()}");
+                                          }
+                                        })();
+                                      } else if (_suggestionDetailsCache.containsKey(key)) {
+                                        final cached = _suggestionDetailsCache[key];
+                                        if (_selectedSuggestionMd != cached) {
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            if (!mounted) return;
+                                            setState(() {
+                                              _selectedSuggestionMd = cached;
+                                            });
+                                          });
+                                        }
+                                      }
+                                    } else if (indx == _sugSelIndex && item is! LspCompletion) {
+                                      if (_selectedSuggestionMd != null) {
+                                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                                          if (!mounted) return;
+                                          setState(() {
+                                            _selectedSuggestionMd = null;
+                                          });
                                         });
                                       }
-                                    },
-                                    child: Row(
-                                      children: [
-                                        if (item is LspCompletion) ...[
-                                          item.icon,
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Text(
-                                              item.label,
-                                              style: _suggestionStyle.textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          const Expanded(child: SizedBox()),
-                                          if (item.importUri?[0] != null)
-                                            Expanded(
-                                              child: Text(
-                                                item.importUri![0],
-                                                style: _suggestionStyle
-                                                    .textStyle
-                                                    .copyWith(
-                                                      color: _suggestionStyle
-                                                          .textStyle
-                                                          .color
-                                                          ?.withAlpha(150),
-                                                    ),
-                                                overflow: TextOverflow.ellipsis,
+                                    }
+
+                                    return Container(
+                                      color: _sugSelIndex == indx
+                                          ? _suggestionStyle.focusColor
+                                          : Colors.transparent,
+                                      child: InkWell(
+                                        canRequestFocus: false,
+                                        hoverColor: _suggestionStyle.hoverColor,
+                                        focusColor: _suggestionStyle.focusColor,
+                                        splashColor: _suggestionStyle.splashColor,
+                                        onTap: () {
+                                          if (mounted) {
+                                            setState(() {
+                                              _sugSelIndex = indx;
+                                              final text = item is LspCompletion
+                                                  ? item.label
+                                                  : item as String;
+                                              _controller.insertAtCurrentCursor(
+                                                text,
+                                                replaceTypedChar: true,
+                                              );
+                                              if(_extraText.isNotEmpty){
+                                                _acceptActions(_extraText);
+                                              }
+                                              _suggestionNotifier.value = null;
+                                            });
+                                          }
+                                        },
+                                        child: Row(
+                                          children: [
+                                            if (item is LspCompletion) ...[
+                                              item.icon,
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  item.label,
+                                                  style: _suggestionStyle.textStyle,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
                                               ),
-                                            ),
-                                        ],
-                                        if (item is String)
-                                          Expanded(
-                                            child: Text(
-                                              item,
-                                              style: _suggestionStyle.textStyle,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                                              const Expanded(child: SizedBox()),
+                                              if (item.importUri?[0] != null)
+                                                Expanded(
+                                                  child: Text(
+                                                    item.importUri![0],
+                                                    style: _suggestionStyle
+                                                        .textStyle
+                                                        .copyWith(
+                                                          color: _suggestionStyle
+                                                              .textStyle
+                                                              .color
+                                                              ?.withAlpha(150),
+                                                        ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                            ],
+                                            if (item is String)
+                                              Expanded(
+                                                child: Text(
+                                                  item,
+                                                  style: _suggestionStyle.textStyle,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        if (_selectedSuggestionMd != null)
+                          Positioned(
+                            top: offset.dy + (widget.textStyle?.fontSize ?? 14) + 10,
+                            left: offset.dx +
+                                (screenWidth < 700
+                                  ? screenWidth * 0.63
+                                  : screenWidth * 0.3
+                                )
+                                + 8,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: 420,
+                                maxHeight: 400,
+                              ),
+                              child: Card(
+                                color: _hoverDetailsStyle.backgroundColor,
+                                shape: _hoverDetailsStyle.shape,
+                                child: Padding(
+                                  padding: EdgeInsets.all(
+                                    _selectedSuggestionMd!.trim().isEmpty ? 0 : 8.0
+                                  ),
+                                  child: RawScrollbar(
+                                    interactive: true,
+                                    controller: completionScrlCtrl,
+                                    thumbVisibility: true,
+                                    thumbColor: _editorTheme['root']!.color!
+                                          .withAlpha(100),
+                                    child: SingleChildScrollView(
+                                      controller: completionScrlCtrl,
+                                      child: MarkdownBlock(
+                                        data: _selectedSuggestionMd!,
+                                        config: MarkdownConfig.darkConfig.copy(
+                                          configs: [
+                                            PConfig(
+                                              textStyle:
+                                                  _hoverDetailsStyle.textStyle,
+                                            ),
+                                            PreConfig(
+                                              language: widget.lspConfig?.languageId
+                                                      .toLowerCase() ??
+                                                  'dart',
+                                              theme: _editorTheme,
+                                              textStyle: TextStyle(
+                                                fontSize: _hoverDetailsStyle
+                                                    .textStyle.fontSize,
+                                              ),
+                                              styleNotMatched: TextStyle(
+                                                color: _editorTheme['root']!.color,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: _editorTheme['root']!
+                                                    .backgroundColor!,
+                                                borderRadius: BorderRadius.zero,
+                                                border: Border.all(
+                                                  width: 0.2,
+                                                  color: _editorTheme['root']!
+                                                          .color ??
+                                                      Colors.grey,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     );
                   },
                 );
@@ -2385,14 +2536,14 @@ class _CodeForgeState extends State<CodeForge>
     );
   }
 
-  Future<void> _acceptActions(Map<String, dynamic> action) async {
+  Future<void> _acceptActions(dynamic action) async {
     final fileUri = Uri.file(widget.filePath!).toString();
-    if (action.containsKey('command')) {
+    if (action is Map && action.containsKey('command')) {
       final String command = action['command'];
       final List args = action['arguments'];
       await widget.lspConfig!.executeCommand(command, args);
       return;
-    } else if (action.containsKey('edit') &&
+    } else if (action is Map && action.containsKey('edit') &&
         (action['edit'] as Map).containsKey('changes')) {
       final Map changes = action['edit']['changes'] as Map;
       if (changes.containsKey(fileUri)) {
@@ -2429,6 +2580,7 @@ class _CodeForgeState extends State<CodeForge>
             ce['start'] as int,
             ce['end'] as int,
             ce['newText'] as String,
+            preserveOldCursor: true
           );
         }
 
@@ -2437,7 +2589,7 @@ class _CodeForgeState extends State<CodeForge>
         }
       }
       return;
-    } else if (action.containsKey('documentChanges') &&
+    } else if (action is Map && action.containsKey('documentChanges') &&
         action['documentChanges'] is List) {
       final List docChanges = List.from(action['documentChanges'] as List);
       for (final dc in docChanges) {
@@ -2476,6 +2628,7 @@ class _CodeForgeState extends State<CodeForge>
                 ce['start'] as int,
                 ce['end'] as int,
                 ce['newText'] as String,
+                preserveOldCursor: true
               );
             }
             if (widget.lspConfig != null) {
@@ -2488,6 +2641,47 @@ class _CodeForgeState extends State<CodeForge>
         }
       }
       return;
+    } else if(action is List){
+      final converted = <Map<String, dynamic>>[];
+      try {
+        for(Map<String, dynamic> item in action){
+          if(!(item.containsKey('newText') && item.containsKey('range')))return;
+          final start = item['range']?['start'];
+          final end = item['range']?['end'];
+          if (start == null || end == null) return;
+          final startOffset =
+              _controller.getLineStartOffset(start['line'] as int) +
+              (start['character'] as int);
+          final endOffset =
+              _controller.getLineStartOffset(end['line'] as int) +
+              (end['character'] as int);
+          final newText = item['newText'] as String? ?? '';
+          converted.add({
+            'start': startOffset,
+            'end': endOffset,
+            'newText': newText,
+          });
+        }
+      } catch (_) {
+        return;
+      }
+      converted.sort(
+        (a, b) => (b['start'] as int).compareTo(a['start'] as int),
+      );
+      for (final ce in converted) {
+        _controller.replaceRange(
+          ce['start'] as int,
+          ce['end'] as int,
+          ce['newText'] as String,
+          preserveOldCursor: true
+        );
+      }
+      if (widget.lspConfig != null) {
+        await widget.lspConfig!.updateDocument(
+          _filePath!,
+          _controller.text,
+        );
+      }
     }
   }
 

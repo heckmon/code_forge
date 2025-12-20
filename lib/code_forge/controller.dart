@@ -759,7 +759,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Replace a range of text with new text.
   /// Used for clipboard operations and text manipulation.
-  void replaceRange(int start, int end, String replacement) {
+  void replaceRange(int start, int end, String replacement, {bool preserveOldCursor = false}) {
     if (_undoController?.isUndoRedoInProgress ?? false) return;
 
     final selectionBefore = _selection;
@@ -777,9 +777,27 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.insert(safeStart, replacement);
     }
     _currentVersion++;
-    _selection = TextSelection.collapsed(
-      offset: safeStart + replacement.length,
-    );
+    TextSelection newSelection;
+    if (preserveOldCursor) {
+      final delta = replacement.length - (safeEnd - safeStart);
+
+      int mapOffset(int offset) {
+        if (offset <= safeStart) return offset;
+        if (offset >= safeEnd) return (offset + delta).clamp(0, _rope.length);
+        final relative = offset - safeStart;
+        final mapped = safeStart + relative.clamp(0, replacement.length);
+        return mapped.clamp(0, _rope.length);
+      }
+
+      final base = mapOffset(selectionBefore.baseOffset);
+      final extent = mapOffset(selectionBefore.extentOffset);
+      newSelection = TextSelection(baseOffset: base, extentOffset: extent);
+    } else {
+      newSelection = TextSelection.collapsed(
+        offset: safeStart + replacement.length,
+      );
+    }
+    _selection = newSelection;
     dirtyLine = _rope.getLineAtOffset(safeStart);
     dirtyRegion = TextRange(
       start: safeStart,

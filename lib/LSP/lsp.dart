@@ -86,9 +86,24 @@ sealed class LspConfig {
           'workspace': {'applyEdit': true},
           'textDocument': {
             'completion': {
-              'completionItem': {'snippetSupport': false},
+              'completionItem': {
+                'resolveSupport': {
+                  'properties': [
+                    'documentaion',
+                    'detail',
+                    'additionalTextEdits'
+                  ]
+                },
+                'snippetSupport': false
+              },
             },
-            'synchronization': {'didSave': true},
+            'synchronization': {
+              'didSave': true,
+              'change' : 1,
+            },
+            'publishDiagnostics': {
+              'relatedInformation': true
+            },
             'hover': {
               'contentFormat': ['markdown'],
             },
@@ -247,7 +262,7 @@ sealed class LspConfig {
       final items = result['items'];
       if (items == null || items is! List) return completion;
 
-      for (var item in items) {
+      for (Map<String, dynamic> item in items) {
         final importUris = item['data']?['importUris'];
         final List<String>? importUriList = importUris != null
             ? (importUris as List).map((e) => e.toString()).toList()
@@ -262,6 +277,7 @@ sealed class LspConfig {
             ),
             importUri: importUriList,
             reference: item["data"]?["ref"],
+            completionItem: item
           ),
         );
       }
@@ -296,6 +312,26 @@ sealed class LspConfig {
           .join('\n');
     }
     return '';
+  }
+
+  /// Resolves and retrieves additional details for the given LSP completion item.
+  ///
+  /// Sends a `completionItem/resolve` request to the language server (when
+  /// supported) and merges any returned fields (for example `documentation`,
+  /// `detail`, and `additionalTextEdits`) into the provided completion item.
+  ///
+  /// The resolved item is returned so callers can use the enriched information
+  /// (for example to display rich documentation, apply additional text edits,
+  /// or show a more descriptive detail string).
+  ///
+  /// Returns a Future that completes with the resolved completion item. Throws an
+  /// exception if the resolve request fails or the server returns an error.
+  Future<Map<String, dynamic>> resolveCompletionItem(Map<String, dynamic> item) async{
+    final response = await _sendRequest(
+      method: 'completionItem/resolve',
+      params: item
+    );
+    return response['result'] ?? item;
   }
 
   /// Gets the definition location for a symbol at the specified position.
@@ -851,9 +887,13 @@ class LspCompletion {
   /// [importUri] provides the URI needed to import the file where the referenced item is defined.
   final List<String>? importUri;
 
+  /// The raw completion details returned by the LSP server.
+  Map<String, dynamic> completionItem;
+
   LspCompletion({
     required this.label,
     required this.itemType,
+    required this.completionItem,
     this.reference,
     this.importUri,
   }) : icon = Icon(
@@ -862,12 +902,7 @@ class LspCompletion {
          size: 18,
        );
 
-  Map<String, dynamic> toJson() => {
-    "label": label,
-    "itemType": itemType,
-    "reference": reference,
-    "importUri": importUri,
-  };
+  Map<String, dynamic> toJson() => completionItem;
 
   @override
   String toString() => toJson().toString();
