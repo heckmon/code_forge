@@ -17,7 +17,6 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final _controller = CodeForgeController();
   final undoController = UndoRedoController();
   final absFilePath = p.join(Directory.current.path, "lib/example_code.dart");
 
@@ -51,12 +50,12 @@ class _MyAppState extends State<MyApp> {
               return CodeForge(
                 undoController: undoController,
                 language: langDart,
-                controller: _controller,
+                controller: CodeForgeController(lspConfig: snapshot.data),
                 textStyle: GoogleFonts.jetBrainsMono(),
                 /* aiCompletion: AiCompletion(
                   model: Gemini(apiKey: "YOUR API KEY"),
                 ), */
-                lspConfig: snapshot.data,
+                // lspConfig: snapshot.data,
                 filePath: absFilePath,
               );
             },

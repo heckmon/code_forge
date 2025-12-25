@@ -56,6 +56,19 @@ sealed class LspConfig {
     this.disableError = false,
   });
 
+  @override
+  bool operator ==(Object other) {
+    return (other is LspConfig &&
+        languageId == other.languageId &&
+        workspacePath == other.workspacePath &&
+        disableError == other.disableError &&
+        disableWarning == other.disableWarning);
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(languageId, workspacePath, disableError, disableWarning);
+
   void dispose();
 
   Future<Map<String, dynamic>> _sendRequest({

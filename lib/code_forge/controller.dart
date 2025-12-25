@@ -33,21 +33,161 @@ import 'package:flutter/services.dart';
 /// ```
 class CodeForgeController implements DeltaTextInputClient {
   static const _flushDelay = Duration(milliseconds: 300);
+  static const _semanticTokenDebounce = Duration(milliseconds: 500);
   final List<VoidCallback> _listeners = [];
-  Timer? _flushTimer;
-  String? _cachedText, _bufferLineText;
+  Timer? _flushTimer, _semanticTokenTimer;
+  String? _cachedText, _bufferLineText, _openedFile;
+  String _previousValue = "", _insertedChar = "";
+  TextSelection _prevSelection = TextSelection.collapsed(offset: 0);
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
   int _bufferLineRopeStart = 0, _bufferLineOriginalLength = 0;
-  int _cachedTextVersion = -1, _currentVersion = 0;
+  int _cachedTextVersion = -1, _currentVersion = 0, _semanticTokensVersion = 0;
   int? dirtyLine, _bufferLineIndex;
   String? _lastSentText;
   TextSelection? _lastSentSelection;
   UndoRedoController? _undoController;
   void Function(int lineNumber)? _toggleFoldCallback;
   VoidCallback? _foldAllCallback, _unfoldAllCallback;
+  bool _lspReady = false, _isTyping = false;
+  List<dynamic> _suggestions = [];
+
+  CodeForgeController({this.lspConfig}) {
+    _listeners.add(() {
+      if (isBufferActive) {
+        final col = bufferCursorColumn;
+        final lineText = bufferLineText ?? '';
+        if (col > 0 && col <= lineText.length) {
+          _insertedChar = lineText.substring(col - 1, col);
+        }
+      } else {
+        final base = _prevSelection.baseOffset.clamp(0, text.length);
+        final extent = selection.baseOffset.clamp(0, text.length);
+        if (extent - base == 1) {
+          _insertedChar = text.substring(base, extent);
+        } else if (extent > 0) {
+          final cursor = selection.baseOffset.clamp(0, text.length);
+          if (cursor > 0) {
+            _insertedChar = text.substring(cursor - 1, cursor);
+          }
+        }
+      }
+      _isTyping = _insertedChar.isNotEmpty && _isAlpha(_insertedChar);
+    });
+
+    if (lspConfig != null) {
+      (() async {
+        try {
+          if (lspConfig is LspSocketConfig) {
+            await (lspConfig! as LspSocketConfig).connect();
+          }
+          if (!lspConfig!.isIntialized) {
+            await lspConfig!.initialize();
+          }
+          await Future.delayed(const Duration(milliseconds: 300));
+          await lspConfig!.openDocument(openedFile!);
+          _lspReady = true;
+          await _fetchSemanticTokensFull();
+        } catch (e) {
+          debugPrint('Error initializing LSP: $e');
+        } finally {
+          _listeners.add(() async {
+            if (text != _previousValue && _lspReady) {
+              await lspConfig!.updateDocument(openedFile!, text);
+              _scheduleSemantictokenRefresh();
+              if (text.length == _previousValue.length + 1 &&
+                  selection.extentOffset == _prevSelection.extentOffset + 1 &&
+                  _isTyping) {
+                final cursorPosition = selection.extentOffset;
+                final line = getLineAtOffset(cursorPosition);
+                final lineStartOffset = getLineStartOffset(line);
+                final character = cursorPosition - lineStartOffset;
+                final prefix = getCurrentWordPrefix(text, cursorPosition);
+                _suggestions = await lspConfig!.getCompletions(
+                  openedFile!,
+                  getLineAtOffset(selection.extentOffset),
+                  character,
+                );
+                _sortSuggestions(prefix);
+                final triggerChar = text[cursorPosition - 1];
+                if (!_isAlpha(triggerChar)) {
+                  suggestions.value = null;
+                  return;
+                }
+                suggestions.value = _suggestions;
+              } else {
+                suggestions.value = null;
+              }
+            }
+            _previousValue = text;
+            _prevSelection = selection;
+          });
+        }
+      })();
+    } else {
+      _listeners.add(() {
+        final cursorPosition = selection.extentOffset;
+        final prefix = getCurrentWordPrefix(text, cursorPosition);
+        if (_isTyping && selection.extentOffset > 0) {
+          final regExp = RegExp(r'\b\w+\b');
+          final List<String> words = regExp
+              .allMatches(text)
+              .map((m) => m.group(0)!)
+              .toList();
+
+          String currentWord = '';
+          if (text.isNotEmpty) {
+            final match = RegExp(r'\w+$').firstMatch(text);
+            if (match != null) {
+              currentWord = match.group(0)!;
+            }
+          }
+
+          _suggestions.clear();
+
+          for (final i in words) {
+            if (!_suggestions.contains(i) && i != currentWord) {
+              _suggestions.add(i);
+            }
+          }
+          if (prefix.isNotEmpty) {
+            _suggestions = _suggestions
+                .where((s) => s.startsWith(prefix))
+                .toList();
+          }
+          _sortSuggestions(prefix);
+          final triggerChar = text[cursorPosition - 1];
+          if (!_isAlpha(triggerChar)) {
+            suggestions.value = null;
+            return;
+          }
+          suggestions.value = _suggestions;
+        } else {
+          suggestions.value = null;
+        }
+      });
+    }
+  }
+
+  final ValueNotifier<(List<LspSemanticToken>?, int)> semanticTokens =
+      ValueNotifier((null, 0));
+  final ValueNotifier<List<dynamic>?> suggestions = ValueNotifier(null);
+
+  /// Configuration for Language Server Protocol integration.
+  ///
+  /// Enables advanced features like hover documentation, diagnostics,
+  /// and semantic highlighting.
+  LspConfig? lspConfig;
+
+  /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge]
+  set openedFile(String? file) {
+    _openedFile = file;
+    if (openedFile != null) {
+      text = File(_openedFile!).readAsStringSync();
+    }
+  }
 
   /// Currently opened file.
-  String? openedFile;
+  String? get openedFile => _openedFile;
 
   VoidCallback? manualAiCompletion, userCodeAction;
 
@@ -631,7 +771,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (replaceTypedChar) {
       final ropeText = _rope.getText();
-      final prefix = _getCurrentWordPrefix(ropeText, safePosition);
+      final prefix = getCurrentWordPrefix(ropeText, safePosition);
       final prefixStart = (safePosition - prefix.length).clamp(0, _rope.length);
 
       replaceRange(prefixStart, safePosition, textToInsert);
@@ -982,13 +1122,180 @@ class CodeForgeController implements DeltaTextInputClient {
     _unfoldAllCallback!();
   }
 
+  /// Returns the identifier prefix immediately preceding the given offset.
+  ///
+  /// This method extracts a contiguous sequence of identifier characters
+  /// (ASCII letters, digits and underscore) that ends at `offset` (or at the
+  /// current buffer cursor when a buffer is active). The extracted prefix is
+  /// only returned if its first character is a letter (A–Z or a–z) or an
+  /// underscore; prefixes that start with a digit are considered invalid and
+  /// yield an empty string.
+  ///
+  /// Behavior details:
+  /// - If `isBufferActive` is true, the method uses `bufferLineText` and
+  ///   `bufferCursorColumn` instead of the provided `text` and `offset`.
+  /// - `offset` is clamped to the range [0, text.length] before processing.
+  /// - If the effective cursor/column is out of range (<= 0 or greater than
+  ///   the line length) the method returns an empty string.
+  /// - Identifier characters considered: '0'–'9', 'A'–'Z', 'a'–'z', and '_'.
+  /// - The first character of the returned prefix must be a letter ('A'–'Z' or
+  ///   'a'–'z') or an underscore; otherwise an empty string is returned.
+  /// - If there is no identifier character immediately before the offset, or
+  ///   the computed start equals the offset, an empty string is returned.
+  ///
+  /// Parameters:
+  /// - text: The full text to inspect (ignored when a buffer is active).
+  /// - offset: The exclusive character index (cursor position) in `text` at
+  ///   which to look backwards for an identifier prefix.
+  ///
+  /// Returns:
+  /// - The identifier prefix ending at the given offset (or buffer cursor),
+  ///   or an empty string if no valid prefix exists.
+  ///
+  /// Examples:
+  /// ```dart
+  ///  getCurrentWordPrefix("hello world", 5) -> "hello"
+  ///  getCurrentWordPrefix("123abc", 6) -> ""  (prefix starts with a digit)
+  /// ```
+  /// - When buffer is active, the method behaves the same but uses the buffer's
+  ///   current line and column instead of `text`/`offset`.
+  String getCurrentWordPrefix(String text, int offset) {
+    final safeOffset = offset.clamp(0, text.length);
+    if (isBufferActive) {
+      final lineText = bufferLineText ?? '';
+      final col = bufferCursorColumn;
+      if (col <= 0) return '';
+      if (col > lineText.length) return '';
+      int i = col - 1;
+      while (i >= 0) {
+        final code = lineText.codeUnitAt(i);
+        final isIdentChar =
+            (code >= 48 && code <= 57) ||
+            (code >= 65 && code <= 90) ||
+            (code >= 97 && code <= 122) ||
+            code == 95;
+        if (!isIdentChar) break;
+        i--;
+      }
+      final start = i + 1;
+      if (start >= col) return '';
+      final firstCode = lineText.codeUnitAt(start);
+      final isStartOk =
+          (firstCode >= 65 && firstCode <= 90) ||
+          (firstCode >= 97 && firstCode <= 122) ||
+          firstCode == 95;
+      if (!isStartOk) return '';
+      return lineText.substring(start, col);
+    }
+
+    if (safeOffset == 0) return '';
+    int i = safeOffset - 1;
+    while (i >= 0) {
+      final code = text.codeUnitAt(i);
+      final isIdentChar =
+          (code >= 48 && code <= 57) ||
+          (code >= 65 && code <= 90) ||
+          (code >= 97 && code <= 122) ||
+          code == 95;
+      if (!isIdentChar) break;
+      i--;
+    }
+    final start = i + 1;
+    if (start >= safeOffset) return '';
+    final firstCode = text.codeUnitAt(start);
+    final isStartOk =
+        (firstCode >= 65 && firstCode <= 90) ||
+        (firstCode >= 97 && firstCode <= 122) ||
+        firstCode == 95;
+    if (!isStartOk) return '';
+    return text.substring(start, safeOffset);
+  }
+
   /// Disposes of the controller and releases resources.
   ///
   /// Call this method when the controller is no longer needed to prevent
   /// memory leaks.
   void dispose() {
+    _semanticTokenTimer?.cancel();
+    _flushTimer?.cancel();
     _listeners.clear();
     connection?.close();
+  }
+
+  bool _isAlpha(String s) {
+    if (s.isEmpty) return false;
+    final code = s.codeUnitAt(0);
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+  }
+
+  Future<void> _fetchSemanticTokensFull() async {
+    if (lspConfig == null) return;
+
+    try {
+      final tokens = await lspConfig!.getSemanticTokensFull(openedFile!);
+      semanticTokens.value = (tokens, _semanticTokensVersion++);
+    } catch (e) {
+      debugPrint('Error fetching semantic tokens: $e');
+    }
+  }
+
+  void _scheduleSemantictokenRefresh() {
+    _semanticTokenTimer?.cancel();
+    _semanticTokenTimer = Timer(_semanticTokenDebounce, () async {
+      await _fetchSemanticTokensFull();
+    });
+  }
+
+  void _sortSuggestions(String prefix) {
+    _suggestions.sort((a, b) {
+      final aLabel = a is LspCompletion ? a.label : a.toString();
+      final bLabel = b is LspCompletion ? b.label : b.toString();
+      final aScore = _scoreMatch(aLabel, prefix);
+      final bScore = _scoreMatch(bLabel, prefix);
+
+      if (aScore != bScore) {
+        return bScore.compareTo(aScore);
+      }
+
+      return aLabel.compareTo(bLabel);
+    });
+  }
+
+  int _scoreMatch(String label, String prefix) {
+    if (prefix.isEmpty) return 0;
+
+    final lowerLabel = label.toLowerCase();
+    final lowerPrefix = prefix.toLowerCase();
+
+    if (!lowerLabel.contains(lowerPrefix)) return -1000000;
+
+    int score = 0;
+
+    if (label.startsWith(prefix)) {
+      score += 100000;
+    } else if (lowerLabel.startsWith(lowerPrefix)) {
+      score += 50000;
+    } else {
+      score += 10000;
+    }
+
+    final matchIndex = lowerLabel.indexOf(lowerPrefix);
+    score -= matchIndex * 100;
+
+    if (matchIndex > 0) {
+      final charBefore = label[matchIndex - 1];
+      final matchChar = label[matchIndex];
+      if (charBefore.toLowerCase() == charBefore &&
+          matchChar.toUpperCase() == matchChar) {
+        score += 5000;
+      } else if (charBefore == '_' || charBefore == '-') {
+        score += 5000;
+      }
+    }
+
+    score -= label.length;
+
+    return score;
   }
 
   void _applyUndoRedoOperation(EditOperation operation) {
@@ -1135,13 +1442,6 @@ class CodeForgeController implements DeltaTextInputClient {
 
     dirtyLine = lineToInvalidate;
     notifyListeners();
-  }
-
-  String _getCurrentWordPrefix(String text, int offset) {
-    final safeOffset = offset.clamp(0, text.length);
-    final beforeCursor = text.substring(0, safeOffset);
-    final match = RegExp(r'([a-zA-Z_][a-zA-Z0-9_]*)$').firstMatch(beforeCursor);
-    return match?.group(0) ?? '';
   }
 
   void clearDirtyRegion() {

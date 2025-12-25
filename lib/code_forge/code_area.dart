@@ -101,12 +101,6 @@ class CodeForge extends StatefulWidget {
   /// ```
   final TextStyle? aiCompletionTextStyle;
 
-  /// Configuration for Language Server Protocol integration.
-  ///
-  /// Enables advanced features like hover documentation, diagnostics,
-  /// and semantic highlighting.
-  final LspConfig? lspConfig;
-
   /// Padding inside the editor content area.
   final EdgeInsets? innerPadding;
 
@@ -185,7 +179,6 @@ class CodeForge extends StatefulWidget {
     this.language,
     this.aiCompletion,
     this.aiCompletionTextStyle,
-    this.lspConfig,
     this.filePath,
     this.initialText,
     this.focusNode,
@@ -213,7 +206,6 @@ class CodeForge extends StatefulWidget {
 
 class _CodeForgeState extends State<CodeForge>
     with SingleTickerProviderStateMixin {
-  static const _semanticTokenDebounce = Duration(milliseconds: 500);
   late final ScrollController _hscrollController, _vscrollController;
   late final CodeForgeController _controller;
   late final FocusNode _focusNode;
@@ -242,16 +234,13 @@ class _CodeForgeState extends State<CodeForge>
   final Map<String, String> _suggestionDetailsCache = {};
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
-  bool _lspReady = false, _isHovering = false, _isTyping = false;
-  String _previousValue = "";
+  bool _isHovering = false;
   List<LspSemanticToken>? _semanticTokens;
   List<Map<String, dynamic>> _extraText = [];
   int _semanticTokensVersion = 0;
   int _sugSelIndex = 0, _actionSelIndex = 0;
   String? _selectedSuggestionMd;
-  Timer? _hoverTimer, _aiDebounceTimer, _semanticTokenTimer, _codeActionTimer;
-  List<dynamic> _suggestions = [];
-  TextSelection _prevSelection = TextSelection.collapsed(offset: 0);
+  Timer? _hoverTimer, _aiDebounceTimer, _codeActionTimer;
 
   @override
   void initState() {
@@ -263,7 +252,7 @@ class _CodeForgeState extends State<CodeForge>
     _vscrollController = widget.verticalScrollController ?? ScrollController();
     _editorTheme = widget.editorTheme ?? vs2015Theme;
     _language = widget.language ?? langDart;
-    _suggestionNotifier = ValueNotifier(null);
+    _suggestionNotifier = _controller.suggestions;
     _hoverNotifier = ValueNotifier(null);
     _diagnosticsNotifier = ValueNotifier<List<LspErrors>>([]);
     _aiNotifier = ValueNotifier(null);
@@ -277,6 +266,8 @@ class _CodeForgeState extends State<CodeForge>
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _filePath = widget.filePath;
+    _semanticTokens ??= _controller.semanticTokens.value.$1;
+    _semanticTokensVersion = _controller.semanticTokens.value.$2;
 
     _controller.setUndoController(_undoRedoController);
 
@@ -349,6 +340,14 @@ class _CodeForgeState extends State<CodeForge>
       duration: const Duration(milliseconds: 500),
     )..repeat(reverse: true);
 
+    _controller.semanticTokens.addListener(() {
+      final tokens = _controller.semanticTokens.value;
+      setState(() {
+        _semanticTokens = tokens.$1;
+        _semanticTokensVersion = tokens.$2;
+      });
+    });
+
     _focusNode.addListener(() {
       if (_focusNode.hasFocus && !widget.readOnly) {
         if (_connection == null || !_connection!.attached) {
@@ -377,7 +376,7 @@ class _CodeForgeState extends State<CodeForge>
 
     Future.microtask(CustomIcons.loadAllCustomFonts);
 
-    if (_filePath == null && widget.lspConfig != null) {
+    if (_filePath == null && _controller.lspConfig != null) {
       throw ArgumentError(
         "The `filePath` parameter cannot be null inorder to use `LspConfig`."
         "A valid file path is required to use the LSP services.",
@@ -390,34 +389,12 @@ class _CodeForgeState extends State<CodeForge>
           'Cannot provide both filePath and initialText to CodeForge.',
         );
       } else if (_filePath.isNotEmpty) {
-        final file = File(_filePath);
-        _controller.text = file.readAsStringSync();
-        _controller.openedFile = _filePath;
+        if (_controller.openedFile != _filePath) {
+          _controller.openedFile = _filePath;
+        }
 
-        if (widget.lspConfig != null) {
-          (() async {
-            final lspConfig = widget.lspConfig;
-            try {
-              if (lspConfig is LspSocketConfig) {
-                await lspConfig.connect();
-              }
-              if (!lspConfig!.isIntialized) {
-                await lspConfig.initialize();
-              }
-              await Future.delayed(const Duration(milliseconds: 300));
-              await lspConfig.openDocument(_filePath);
-              setState(() {
-                _lspReady = true;
-              });
-              await _fetchSemanticTokensFull();
-            } catch (e) {
-              if (mounted) {
-                debugPrint('Error initializing LSP: $e');
-              }
-            }
-          })();
-
-          _lspResponsesSubscription = widget.lspConfig!.responses.listen((
+        if (_controller.lspConfig != null) {
+          _lspResponsesSubscription = _controller.lspConfig!.responses.listen((
             data,
           ) async {
             if (data['method'] == 'workspace/applyEdit') {
@@ -438,10 +415,10 @@ class _CodeForgeState extends State<CodeForge>
                 final List<LspErrors> errors = [];
                 for (final Map<String, dynamic> item in diagnostics) {
                   int severity = item['severity'] ?? 0;
-                  if (severity == 1 && widget.lspConfig!.disableError) {
+                  if (severity == 1 && _controller.lspConfig!.disableError) {
                     severity = 0;
                   }
-                  if (severity == 2 && widget.lspConfig!.disableWarning) {
+                  if (severity == 2 && _controller.lspConfig!.disableWarning) {
                     severity = 0;
                   }
                   if (severity > 0) {
@@ -459,7 +436,7 @@ class _CodeForgeState extends State<CodeForge>
                 _codeActionTimer = Timer(
                   const Duration(milliseconds: 250),
                   () async {
-                    if (!mounted || widget.lspConfig == null) return;
+                    if (!mounted || _controller.lspConfig == null) return;
                     if (errors.isEmpty) {
                       _lspActionNotifier.value = null;
                       return;
@@ -477,7 +454,7 @@ class _CodeForgeState extends State<CodeForge>
                         .map((d) => d.range['end']?['character'] as int? ?? 0)
                         .reduce(max);
 
-                    final actions = await widget.lspConfig!.getCodeActions(
+                    final actions = await _controller.lspConfig!.getCodeActions(
                       filePath: _filePath,
                       startLine: minStartLine,
                       startCharacter: minStartChar,
@@ -501,39 +478,11 @@ class _CodeForgeState extends State<CodeForge>
     }
 
     _controller.addListener(() {
-      final text = _controller.text;
-      final currentSelection = _controller.selection;
-      final cursorPosition = currentSelection.extentOffset;
-      final line = _controller.getLineAtOffset(cursorPosition);
-      final lineStartOffset = _controller.getLineStartOffset(line);
-      final character = cursorPosition - lineStartOffset;
-      final prefix = _getCurrentWordPrefix(text, cursorPosition);
-
-      _isTyping = false;
-
       _resetCursorBlink();
-
-      final oldText = _previousValue;
-      final oldSelection = _prevSelection;
 
       if (_hoverNotifier.value != null && mounted) {
         _hoverTimer?.cancel();
         _hoverNotifier.value = null;
-      }
-
-      if (widget.lspConfig != null && _lspReady && text != _previousValue) {
-        _previousValue = text;
-        (() async {
-          final lspConfig = widget.lspConfig!;
-          await lspConfig.updateDocument(_filePath!, text);
-          _scheduleSemantictokenRefresh();
-          final suggestion = await lspConfig.getCompletions(
-            _filePath,
-            line,
-            character,
-          );
-          _suggestions = suggestion;
-        })();
       }
 
       _aiDebounceTimer?.cancel();
@@ -596,66 +545,6 @@ class _CodeForgeState extends State<CodeForge>
           );
         }
       }
-
-      if (text.length == oldText.length + 1 &&
-          currentSelection.baseOffset == oldSelection.baseOffset + 1) {
-        final insertedChar = text.substring(
-          _prevSelection.baseOffset,
-          currentSelection.baseOffset,
-        );
-        _isTyping =
-            insertedChar.isNotEmpty &&
-            RegExp(r'[a-zA-Z]').hasMatch(insertedChar);
-        if (widget.enableSuggestions &&
-            _isTyping &&
-            prefix.isNotEmpty &&
-            _controller.selection.extentOffset > 0) {
-          if (widget.lspConfig == null) {
-            final regExp = RegExp(r'\b\w+\b');
-            final List<String> words = regExp
-                .allMatches(text)
-                .map((m) => m.group(0)!)
-                .toList();
-            String currentWord = '';
-            if (text.isNotEmpty) {
-              final match = RegExp(r'\w+$').firstMatch(text);
-              if (match != null) {
-                currentWord = match.group(0)!;
-              }
-            }
-            _suggestions.clear();
-            for (final i in words) {
-              if (!_suggestions.contains(i) && i != currentWord) {
-                _suggestions.add(i);
-              }
-            }
-            if (prefix.isNotEmpty) {
-              _suggestions = _suggestions
-                  .where((s) => s.startsWith(prefix))
-                  .toList();
-            }
-          }
-          _sortSuggestions(prefix);
-          final triggerChar = text[cursorPosition - 1];
-          if (!RegExp(r'[a-zA-Z]').hasMatch(triggerChar)) {
-            _suggestionNotifier.value = null;
-            return;
-          }
-          if (mounted && _suggestions.isNotEmpty) {
-            _sugSelIndex = 0;
-            _suggestionNotifier.value = _suggestions;
-            if (_lspActionOffsetNotifier.value != null) {
-              _lspActionOffsetNotifier.value = null;
-              _lspActionNotifier.value = null;
-            }
-          }
-        } else {
-          _suggestionNotifier.value = null;
-        }
-      }
-
-      _previousValue = text;
-      _prevSelection = currentSelection;
     });
 
     _isHoveringPopup.addListener(() {
@@ -723,50 +612,6 @@ class _CodeForgeState extends State<CodeForge>
     }
   }
 
-  String _getCurrentWordPrefix(String text, int offset) {
-    final safeOffset = offset.clamp(0, text.length);
-    final beforeCursor = text.substring(0, safeOffset);
-    final match = RegExp(r'([a-zA-Z_][a-zA-Z0-9_]*)$').firstMatch(beforeCursor);
-    return match?.group(0) ?? '';
-  }
-
-  int _scoreMatch(String label, String prefix) {
-    if (prefix.isEmpty) return 0;
-
-    final lowerLabel = label.toLowerCase();
-    final lowerPrefix = prefix.toLowerCase();
-
-    if (!lowerLabel.contains(lowerPrefix)) return -1000000;
-
-    int score = 0;
-
-    if (label.startsWith(prefix)) {
-      score += 100000;
-    } else if (lowerLabel.startsWith(lowerPrefix)) {
-      score += 50000;
-    } else {
-      score += 10000;
-    }
-
-    final matchIndex = lowerLabel.indexOf(lowerPrefix);
-    score -= matchIndex * 100;
-
-    if (matchIndex > 0) {
-      final charBefore = label[matchIndex - 1];
-      final matchChar = label[matchIndex];
-      if (charBefore.toLowerCase() == charBefore &&
-          matchChar.toUpperCase() == matchChar) {
-        score += 5000;
-      } else if (charBefore == '_' || charBefore == '-') {
-        score += 5000;
-      }
-    }
-
-    score -= label.length;
-
-    return score;
-  }
-
   String _getSuggestionCacheKey(dynamic item) {
     if (item is LspCompletion) {
       final map = item.completionItem;
@@ -782,46 +627,15 @@ class _CodeForgeState extends State<CodeForge>
     return 'str|${item.toString()}';
   }
 
-  void _sortSuggestions(String prefix) {
-    _suggestions.sort((a, b) {
-      final aLabel = a is LspCompletion ? a.label : a.toString();
-      final bLabel = b is LspCompletion ? b.label : b.toString();
-      final aScore = _scoreMatch(aLabel, prefix);
-      final bScore = _scoreMatch(bLabel, prefix);
-
-      if (aScore != bScore) {
-        return bScore.compareTo(aScore);
-      }
-
-      return aLabel.compareTo(bLabel);
-    });
-  }
-
-  Future<void> _fetchSemanticTokensFull() async {
-    if (widget.lspConfig == null || !_lspReady) return;
-
-    try {
-      final tokens = await widget.lspConfig!.getSemanticTokensFull(_filePath!);
-      if (mounted) {
-        setState(() {
-          _semanticTokens = tokens;
-          _semanticTokensVersion++;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error fetching semantic tokens: $e');
-    }
-  }
-
   Future<void> _fetchCodeActionsForCurrentPosition() async {
-    if (widget.lspConfig == null) return;
+    if (_controller.lspConfig == null) return;
     final sel = _controller.selection;
     final cursor = sel.extentOffset;
     final line = _controller.getLineAtOffset(cursor);
     final lineStart = _controller.getLineStartOffset(line);
     final character = cursor - lineStart;
 
-    final actions = await widget.lspConfig!.getCodeActions(
+    final actions = await _controller.lspConfig!.getCodeActions(
       filePath: _filePath!,
       startLine: line,
       startCharacter: character,
@@ -836,15 +650,6 @@ class _CodeForgeState extends State<CodeForge>
     _lspActionNotifier.value = actions;
     _actionSelIndex = 0;
     _lspActionOffsetNotifier.value = _offsetNotifier.value;
-  }
-
-  void _scheduleSemantictokenRefresh() {
-    _semanticTokenTimer?.cancel();
-    _semanticTokenTimer = Timer(_semanticTokenDebounce, () async {
-      if (!mounted || !_lspReady) return;
-
-      await _fetchSemanticTokensFull();
-    });
   }
 
   void _resetCursorBlink() {
@@ -871,7 +676,6 @@ class _CodeForgeState extends State<CodeForge>
     _isHoveringPopup.dispose();
     _hoverTimer?.cancel();
     _aiDebounceTimer?.cancel();
-    _semanticTokenTimer?.cancel();
     _actionScrollController.dispose();
     super.dispose();
   }
@@ -1811,8 +1615,9 @@ class _CodeForgeState extends State<CodeForge>
                                     controller: _controller,
                                     editorTheme: _editorTheme,
                                     language: _language,
-                                    languageId: widget.lspConfig?.languageId,
-                                    lspConfig: widget.lspConfig,
+                                    languageId:
+                                        _controller.lspConfig?.languageId,
+                                    lspConfig: _controller.lspConfig,
                                     semanticTokens: _semanticTokens,
                                     semanticTokensVersion:
                                         _semanticTokensVersion,
@@ -1918,10 +1723,11 @@ class _CodeForgeState extends State<CodeForge>
                                       if (!_suggestionDetailsCache.containsKey(
                                             key,
                                           ) &&
-                                          widget.lspConfig != null) {
+                                          _controller.lspConfig != null) {
                                         (() async {
                                           try {
-                                            final data = await widget.lspConfig!
+                                            final data = await _controller
+                                                .lspConfig!
                                                 .resolveCompletionItem(
                                                   item.completionItem,
                                                 );
@@ -2114,7 +1920,9 @@ class _CodeForgeState extends State<CodeForge>
                                             ),
                                             PreConfig(
                                               language:
-                                                  widget.lspConfig?.languageId
+                                                  _controller
+                                                      .lspConfig
+                                                      ?.languageId
                                                       .toLowerCase() ??
                                                   'dart',
                                               theme: _editorTheme,
@@ -2158,7 +1966,7 @@ class _CodeForgeState extends State<CodeForge>
             ValueListenableBuilder(
               valueListenable: _hoverNotifier,
               builder: (_, hov, c) {
-                if (hov == null || widget.lspConfig == null) {
+                if (hov == null || _controller.lspConfig == null) {
                   return SizedBox.shrink();
                 }
                 final Offset position = hov[0];
@@ -2176,7 +1984,7 @@ class _CodeForgeState extends State<CodeForge>
                     onExit: (_) => _isHoveringPopup.value = false,
                     child: FutureBuilder<Map<String, dynamic>>(
                       future: (() async {
-                        final lspConfig = widget.lspConfig;
+                        final lspConfig = _controller.lspConfig;
                         final line = lineChar['line']!;
                         final character = lineChar['character']!;
 
@@ -2385,7 +2193,7 @@ class _CodeForgeState extends State<CodeForge>
                                                 ),
                                                 PreConfig(
                                                   language:
-                                                      widget
+                                                      _controller
                                                           .lspConfig
                                                           ?.languageId
                                                           .toLowerCase() ??
@@ -2511,7 +2319,7 @@ class _CodeForgeState extends State<CodeForge>
               builder: (_, offset, child) {
                 if (offset == null ||
                     _lspActionNotifier.value == null ||
-                    widget.lspConfig == null) {
+                    _controller.lspConfig == null) {
                   return SizedBox.shrink();
                 }
 
@@ -2617,7 +2425,7 @@ class _CodeForgeState extends State<CodeForge>
     if (action is Map && action.containsKey('command')) {
       final String command = action['command'];
       final List args = action['arguments'];
-      await widget.lspConfig!.executeCommand(command, args);
+      await _controller.lspConfig!.executeCommand(command, args);
       return;
     } else if (action is Map &&
         action.containsKey('edit') &&
@@ -2661,8 +2469,11 @@ class _CodeForgeState extends State<CodeForge>
           );
         }
 
-        if (widget.lspConfig != null) {
-          await widget.lspConfig!.updateDocument(_filePath!, _controller.text);
+        if (_controller.lspConfig != null) {
+          await _controller.lspConfig!.updateDocument(
+            _filePath!,
+            _controller.text,
+          );
         }
       }
       return;
@@ -2709,8 +2520,8 @@ class _CodeForgeState extends State<CodeForge>
                 preserveOldCursor: true,
               );
             }
-            if (widget.lspConfig != null) {
-              await widget.lspConfig!.updateDocument(
+            if (_controller.lspConfig != null) {
+              await _controller.lspConfig!.updateDocument(
                 _filePath!,
                 _controller.text,
               );
@@ -2756,8 +2567,11 @@ class _CodeForgeState extends State<CodeForge>
           preserveOldCursor: true,
         );
       }
-      if (widget.lspConfig != null) {
-        await widget.lspConfig!.updateDocument(_filePath!, _controller.text);
+      if (_controller.lspConfig != null) {
+        await _controller.lspConfig!.updateDocument(
+          _filePath!,
+          _controller.text,
+        );
       }
     }
   }
