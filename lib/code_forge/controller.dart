@@ -48,7 +48,7 @@ class CodeForgeController implements DeltaTextInputClient {
   UndoRedoController? _undoController;
   void Function(int lineNumber)? _toggleFoldCallback;
   VoidCallback? _foldAllCallback, _unfoldAllCallback;
-  bool _lspReady = false, _isTyping = false;
+  bool _lspReady = false, _isTyping = false, _isDisposed = false;
   List<dynamic> _suggestions = [];
   StreamSubscription? _lspResponsesSubscription;
 
@@ -88,126 +88,94 @@ class CodeForgeController implements DeltaTextInputClient {
           await lspConfig!.openDocument(openedFile!);
           _lspReady = true;
           await _fetchSemanticTokensFull();
-          _lspResponsesSubscription = lspConfig!.responses.listen((data) async {
-            try {
-              if (data['method'] == 'workspace/applyEdit') {
-                final Map<String, dynamic>? params = data['params'];
-                if (params != null && params.isNotEmpty) {
-                  if (params.containsKey('edit')) {
-                    await applyWorkspaceEdit(params);
-                  }
-                }
-              }
-
-              if (data['method'] == 'textDocument/publishDiagnostics') {
-                final List<dynamic> rawDiagnostics =
-                    data['params']?['diagnostics'] ?? [];
-                if (rawDiagnostics.isNotEmpty) {
-                  final List<LspErrors> errors = [];
-                  for (final item in rawDiagnostics) {
-                    if (item is! Map<String, dynamic>) continue;
-                    int severity = item['severity'] ?? 0;
-                    if (severity == 1 && lspConfig!.disableError) {
-                      severity = 0;
-                    }
-                    if (severity == 2 && lspConfig!.disableWarning) {
-                      severity = 0;
-                    }
-                    if (severity > 0) {
-                      errors.add(
-                        LspErrors(
-                          severity: severity,
-                          range: item['range'],
-                          message: item['message'] ?? '',
-                        ),
-                      );
-                    }
-                  }
-                  diagnostics.value = errors;
-
-                  _codeActionTimer?.cancel();
-                  _codeActionTimer = Timer(
-                    const Duration(milliseconds: 250),
-                    () async {
-                      if (errors.isEmpty) {
-                        codeActions.value = null;
-                        return;
-                      }
-                      int minStartLine = errors
-                          .map((d) => d.range['start']?['line'] as int? ?? 0)
-                          .reduce((a, b) => a < b ? a : b);
-                      int minStartChar = errors
-                          .map(
-                            (d) => d.range['start']?['character'] as int? ?? 0,
-                          )
-                          .reduce((a, b) => a < b ? a : b);
-                      int maxEndLine = errors
-                          .map((d) => d.range['end']?['line'] as int? ?? 0)
-                          .reduce((a, b) => a > b ? a : b);
-                      int maxEndChar = errors
-                          .map((d) => d.range['end']?['character'] as int? ?? 0)
-                          .reduce((a, b) => a > b ? a : b);
-
-                      try {
-                        final actions = await lspConfig!.getCodeActions(
-                          filePath: openedFile!,
-                          startLine: minStartLine,
-                          startCharacter: minStartChar,
-                          endLine: maxEndLine,
-                          endCharacter: maxEndChar,
-                          diagnostics: rawDiagnostics
-                              .cast<Map<String, dynamic>>(),
-                        );
-                        codeActions.value = actions;
-                      } catch (e) {
-                        debugPrint('Error fetching code actions: $e');
-                      }
-                    },
-                  );
-                } else {
-                  diagnostics.value = [];
-                }
-              }
-            } catch (e, st) {
-              debugPrint('Error handling LSP response: $e\n$st');
-            }
-          });
         } catch (e) {
           debugPrint('Error initializing LSP: $e');
         } finally {
-          _listeners.add(() async {
-            if (text != _previousValue && _lspReady) {
-              await lspConfig!.updateDocument(openedFile!, text);
-              _scheduleSemantictokenRefresh();
-              if (text.length == _previousValue.length + 1 &&
-                  selection.extentOffset == _prevSelection.extentOffset + 1 &&
-                  _isTyping) {
-                final cursorPosition = selection.extentOffset;
-                final line = getLineAtOffset(cursorPosition);
-                final lineStartOffset = getLineStartOffset(line);
-                final character = cursorPosition - lineStartOffset;
-                final prefix = getCurrentWordPrefix(text, cursorPosition);
-                _suggestions = await lspConfig!.getCompletions(
-                  openedFile!,
-                  getLineAtOffset(selection.extentOffset),
-                  character,
-                );
-                _sortSuggestions(prefix);
-                final triggerChar = text[cursorPosition - 1];
-                if (!_isAlpha(triggerChar)) {
-                  suggestions.value = null;
-                  return;
-                }
-                suggestions.value = _suggestions;
-              } else {
-                suggestions.value = null;
-              }
-            }
-            _previousValue = text;
-            _prevSelection = selection;
-          });
+          _listeners.add(_highlightListener);
         }
       })();
+
+      _lspResponsesSubscription = lspConfig!.responses.listen((data) async {
+        try {
+          if (data['method'] == 'workspace/applyEdit') {
+            final Map<String, dynamic>? params = data['params'];
+            if (params != null && params.isNotEmpty) {
+              if (params.containsKey('edit')) {
+                await applyWorkspaceEdit(params);
+              }
+            }
+          }
+
+          if (data['method'] == 'textDocument/publishDiagnostics') {
+            final List<dynamic> rawDiagnostics =
+                data['params']?['diagnostics'] ?? [];
+            if (rawDiagnostics.isNotEmpty) {
+              final List<LspErrors> errors = [];
+              for (final item in rawDiagnostics) {
+                if (item is! Map<String, dynamic>) continue;
+                int severity = item['severity'] ?? 0;
+                if (severity == 1 && lspConfig!.disableError) {
+                  severity = 0;
+                }
+                if (severity == 2 && lspConfig!.disableWarning) {
+                  severity = 0;
+                }
+                if (severity > 0) {
+                  errors.add(
+                    LspErrors(
+                      severity: severity,
+                      range: item['range'],
+                      message: item['message'] ?? '',
+                    ),
+                  );
+                }
+              }
+              if (!_isDisposed) diagnostics.value = errors;
+
+              _codeActionTimer?.cancel();
+              _codeActionTimer = Timer(
+                const Duration(milliseconds: 250),
+                () async {
+                  if (errors.isEmpty) {
+                    if (!_isDisposed) codeActions.value = null;
+                    return;
+                  }
+                  int minStartLine = errors
+                      .map((d) => d.range['start']?['line'] as int? ?? 0)
+                      .reduce((a, b) => a < b ? a : b);
+                  int minStartChar = errors
+                      .map((d) => d.range['start']?['character'] as int? ?? 0)
+                      .reduce((a, b) => a < b ? a : b);
+                  int maxEndLine = errors
+                      .map((d) => d.range['end']?['line'] as int? ?? 0)
+                      .reduce((a, b) => a > b ? a : b);
+                  int maxEndChar = errors
+                      .map((d) => d.range['end']?['character'] as int? ?? 0)
+                      .reduce((a, b) => a > b ? a : b);
+
+                  try {
+                    final actions = await lspConfig!.getCodeActions(
+                      filePath: openedFile!,
+                      startLine: minStartLine,
+                      startCharacter: minStartChar,
+                      endLine: maxEndLine,
+                      endCharacter: maxEndChar,
+                      diagnostics: rawDiagnostics.cast<Map<String, dynamic>>(),
+                    );
+                    if (!_isDisposed) codeActions.value = actions;
+                  } catch (e) {
+                    debugPrint('Error fetching code actions: $e');
+                  }
+                },
+              );
+            } else {
+              if (!_isDisposed) diagnostics.value = [];
+            }
+          }
+        } catch (e, st) {
+          debugPrint('Error handling LSP response: $e\n$st');
+        }
+      });
     } else {
       _listeners.add(() {
         final cursorPosition = selection.extentOffset;
@@ -242,15 +210,47 @@ class CodeForgeController implements DeltaTextInputClient {
           _sortSuggestions(prefix);
           final triggerChar = text[cursorPosition - 1];
           if (!_isAlpha(triggerChar)) {
-            suggestions.value = null;
+            if (!_isDisposed) suggestions.value = null;
             return;
           }
-          suggestions.value = _suggestions;
+          if (!_isDisposed) suggestions.value = _suggestions;
         } else {
-          suggestions.value = null;
+          if (!_isDisposed) suggestions.value = null;
         }
       });
     }
+  }
+
+  Future<void> _highlightListener() async {
+    if (text != _previousValue && _lspReady) {
+      await lspConfig!.updateDocument(openedFile!, text);
+      _scheduleSemantictokenRefresh();
+      if (text.length == _previousValue.length + 1 &&
+          selection.extentOffset == _prevSelection.extentOffset + 1 &&
+          _isTyping) {
+        final cursorPosition = selection.extentOffset;
+        final line = getLineAtOffset(cursorPosition);
+        final lineStartOffset = getLineStartOffset(line);
+        final character = cursorPosition - lineStartOffset;
+        final prefix = getCurrentWordPrefix(text, cursorPosition);
+        _suggestions = await lspConfig!.getCompletions(
+          openedFile!,
+          getLineAtOffset(selection.extentOffset),
+          character,
+        );
+        _sortSuggestions(prefix);
+        final triggerChar = text[cursorPosition - 1];
+        if (!_isAlpha(triggerChar)) {
+          if (!_isDisposed) suggestions.value = null;
+          return;
+        }
+        if (!_isDisposed) suggestions.value = _suggestions;
+      } else {
+        if (!_isDisposed) suggestions.value = null;
+      }
+    }
+    _previousValue = text;
+    _prevSelection = selection;
   }
 
   final ValueNotifier<(List<LspSemanticToken>?, int)> semanticTokens =
@@ -782,6 +782,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Notifies all registered listeners of a state change.
   void notifyListeners() {
+    if (_isDisposed) return;
     for (final listener in _listeners) {
       listener();
     }
@@ -1447,6 +1448,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Call this method when the controller is no longer needed to prevent
   /// memory leaks.
   void dispose() {
+    _isDisposed = true;
     _semanticTokenTimer?.cancel();
     _flushTimer?.cancel();
     _codeActionTimer?.cancel();
@@ -1618,7 +1620,9 @@ class CodeForgeController implements DeltaTextInputClient {
 
     try {
       final tokens = await lspConfig!.getSemanticTokensFull(openedFile!);
-      semanticTokens.value = (tokens, _semanticTokensVersion++);
+      if (!_isDisposed) {
+        semanticTokens.value = (tokens, _semanticTokensVersion++);
+      }
     } catch (e) {
       debugPrint('Error fetching semantic tokens: $e');
     }

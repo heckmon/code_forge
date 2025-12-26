@@ -225,6 +225,8 @@ class _CodeForgeState extends State<CodeForge>
   late final ValueNotifier<List<dynamic>?> _lspActionNotifier;
   late final UndoRedoController _undoRedoController;
   late final String? _filePath;
+  late final VoidCallback _semanticTokensListener;
+  late final VoidCallback _controllerListener;
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
   final Map<String, String> _cachedResponse = {};
@@ -267,8 +269,6 @@ class _CodeForgeState extends State<CodeForge>
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _filePath = widget.filePath;
-    _semanticTokens ??= _controller.semanticTokens.value.$1;
-    _semanticTokensVersion = _controller.semanticTokens.value.$2;
 
     _controller.setUndoController(_undoRedoController);
 
@@ -341,13 +341,15 @@ class _CodeForgeState extends State<CodeForge>
       duration: const Duration(milliseconds: 500),
     )..repeat(reverse: true);
 
-    _controller.semanticTokens.addListener(() {
+    _semanticTokensListener = () {
       final tokens = _controller.semanticTokens.value;
+      if (!mounted) return;
       setState(() {
         _semanticTokens = tokens.$1;
         _semanticTokensVersion = tokens.$2;
       });
-    });
+    };
+    _controller.semanticTokens.addListener(_semanticTokensListener);
 
     _focusNode.addListener(() {
       if (_focusNode.hasFocus && !widget.readOnly) {
@@ -398,7 +400,7 @@ class _CodeForgeState extends State<CodeForge>
       _controller.text = widget.initialText!;
     }
 
-    _controller.addListener(() {
+    _controllerListener = () {
       _resetCursorBlink();
 
       if (_hoverNotifier.value != null && mounted) {
@@ -466,7 +468,8 @@ class _CodeForgeState extends State<CodeForge>
           );
         }
       }
-    });
+    };
+    _controller.addListener(_controllerListener);
 
     _isHoveringPopup.addListener(() {
       if (!_isHoveringPopup.value && _hoverNotifier.value != null) {
@@ -583,21 +586,23 @@ class _CodeForgeState extends State<CodeForge>
 
   @override
   void dispose() {
-    _controller.removeListener(_resetCursorBlink);
+    _controller.removeListener(_controllerListener);
+    _controller.semanticTokens.removeListener(_semanticTokensListener);
     _connection?.close();
     _lspResponsesSubscription?.cancel();
     _caretBlinkController.dispose();
-    _suggestionNotifier.dispose();
     _hoverNotifier.dispose();
-    _diagnosticsNotifier.dispose();
     _aiNotifier.dispose();
     _aiOffsetNotifier.dispose();
     _contextMenuOffsetNotifier.dispose();
     _selectionActiveNotifier.dispose();
     _isHoveringPopup.dispose();
+    _offsetNotifier.dispose();
+    _lspActionOffsetNotifier.dispose();
+    _suggScrollController.dispose();
+    _actionScrollController.dispose();
     _hoverTimer?.cancel();
     _aiDebounceTimer?.cancel();
-    _actionScrollController.dispose();
     super.dispose();
   }
 
@@ -2421,7 +2426,12 @@ class _CodeField extends LeafRenderObjectWidget {
     covariant _CodeFieldRenderer renderObject,
   ) {
     if (semanticTokens != null) {
-      renderObject.updateSemanticTokens(semanticTokens!, semanticTokensVersion);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        renderObject.updateSemanticTokens(
+          semanticTokens!,
+          semanticTokensVersion,
+        );
+      });
     }
     renderObject
       ..updateDiagnostics(diagnostics)
@@ -2502,11 +2512,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   int _lastAppliedSemanticVersion = -1, _lastDocumentVersion = -1;
 
   void updateSemanticTokens(List<LspSemanticToken> tokens, int version) {
-    if (version <= _lastAppliedSemanticVersion) return;
+    if (version < _lastAppliedSemanticVersion) return;
     _lastAppliedSemanticVersion = version;
     _syntaxHighlighter.updateSemanticTokens(tokens, controller.text);
     _paragraphCache.clear();
-    markNeedsPaint();
   }
 
   void _checkDocumentVersionAndClearCache() {
@@ -2615,7 +2624,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: _editorTheme,
       baseTextStyle: _textStyle,
       languageId: languageId,
-      onHighlightComplete: markNeedsPaint,
     );
 
     _gutterPadding = fontSize;
@@ -5417,7 +5425,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (event is PointerDownEvent && event.buttons == kPrimaryButton) {
       try {
         focusNode.requestFocus();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint(e.toString());
+      }
       if (contextMenuOffsetNotifier.value.dx >= 0) {
         contextMenuOffsetNotifier.value = const Offset(-1, -1);
       }

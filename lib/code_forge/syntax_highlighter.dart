@@ -52,7 +52,6 @@ class SyntaxHighlighter {
   int _version = 0;
   int _documentVersion = 0;
   static const int isolateThreshold = 500;
-  VoidCallback? onHighlightComplete;
   int get documentVersion => _documentVersion;
 
   SyntaxHighlighter({
@@ -60,7 +59,6 @@ class SyntaxHighlighter {
     required this.editorTheme,
     this.baseTextStyle,
     this.languageId,
-    this.onHighlightComplete,
   }) {
     _langId = language.hashCode.toString();
     _highlight = Highlight();
@@ -100,8 +98,8 @@ class SyntaxHighlighter {
       }
     }
 
-    for (final lineSpans in _lineSemanticSpans.values) {
-      lineSpans.sort((a, b) => a.startChar.compareTo(b.startChar));
+    for (final spans in _lineSemanticSpans.values) {
+      spans.sort((a, b) => a.startChar.compareTo(b.startChar));
     }
 
     _isEditing = false;
@@ -109,7 +107,6 @@ class SyntaxHighlighter {
     _mergedCache.clear();
     _grammarCache.clear();
     _version++;
-    onHighlightComplete?.call();
   }
 
   void applyDocumentEdit(
@@ -307,7 +304,6 @@ class SyntaxHighlighter {
 
     final expectedLength = endPos - startPos;
     if (addedLength < expectedLength) {
-      // Clamp indices to avoid range errors
       final subStart = (startPos + addedLength).clamp(0, lineText.length);
       final subEnd = endPos.clamp(0, lineText.length);
       if (subEnd > subStart) {
@@ -489,7 +485,6 @@ class SyntaxHighlighter {
         final span = _highlightLine(entry.value);
         _grammarCache[entry.key] = HighlightedLine(entry.value, span, _version);
       }
-      onHighlightComplete?.call();
       return;
     }
 
@@ -513,8 +508,6 @@ class SyntaxHighlighter {
         _version,
       );
     }
-
-    onHighlightComplete?.call();
   }
 
   TextSpan? _spanDataToTextSpan(_SpanData? data) {

@@ -142,3 +142,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 2.1.0
 - FEATURE: Added more public APIs in the `CodeForgeController`.
+
+## 2.2.0
+- FIX: Asynchronous highlighting.
+- FIX: Delayed LSP diagnostic lints.
