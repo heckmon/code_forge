@@ -19,6 +19,8 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final undoController = UndoRedoController();
   final absFilePath = p.join(Directory.current.path, "lib/example_code.dart");
+  CodeForgeController? codeController;
+  FindController? findController;
 
   Future<LspConfig> getLsp() async {
     final absWorkspacePath = p.join(Directory.current.path, "lib");
@@ -45,17 +47,112 @@ class _MyAppState extends State<MyApp> {
             future: getLsp(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return CircularProgressIndicator();
+                return const Center(child: CircularProgressIndicator());
               }
-              return CodeForge(
-                undoController: undoController,
-                language: langDart,
-                controller: CodeForgeController(lspConfig: snapshot.data),
-                textStyle: GoogleFonts.jetBrainsMono(),
-                /* aiCompletion: AiCompletion(
-                  model: Gemini(apiKey: "YOUR API KEY"),
-                ), */
-                filePath: absFilePath,
+
+              if (!snapshot.hasData) {
+                return const Center(child: Text("Failed to load LSP"));
+              }
+
+              // Initialize controllers if not already (or if config changed, though unlikely here)
+              // Ideally we'd do this cleaner, but for a quick verified test inside FutureBuilder:
+              final lspConfig = snapshot.data!;
+              if (codeController == null ||
+                  codeController!.lspConfig != lspConfig) {
+                codeController = CodeForgeController(lspConfig: lspConfig);
+                findController = FindController(codeController!);
+              }
+
+              return Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8.0),
+                    color: Colors.grey[200],
+                    child: Row(
+                      children: [
+                        const Icon(Icons.search),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            decoration: const InputDecoration(
+                              hintText: 'Find...',
+                              border: InputBorder.none,
+                            ),
+                            onChanged: (val) => findController?.find(val),
+                          ),
+                        ),
+                        // Verification Toggles
+                        ListenableBuilder(
+                          listenable: findController!,
+                          builder: (context, _) {
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.abc),
+                                  color: findController!.caseSensitive
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                  onPressed: () =>
+                                      findController!.caseSensitive =
+                                          !findController!.caseSensitive,
+                                  tooltip: 'Match Case',
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.text_fields),
+                                  color: findController!.matchWholeWord
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                  onPressed: () =>
+                                      findController!.matchWholeWord =
+                                          !findController!.matchWholeWord,
+                                  tooltip: 'Match Whole Word',
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.code),
+                                  color: findController!.isRegex
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                  onPressed: () => findController!.isRegex =
+                                      !findController!.isRegex,
+                                  tooltip: 'Regex',
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                          onPressed: () => findController?.previous(),
+                          tooltip: 'Previous',
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          onPressed: () => findController?.next(),
+                          tooltip: 'Next',
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: CodeForge(
+                      undoController: undoController,
+                      language: langDart,
+                      controller: codeController,
+                      textStyle: GoogleFonts.jetBrainsMono(),
+                      filePath: absFilePath,
+                      matchHighlightStyle: const MatchHighlightStyle(
+                        currentMatchStyle: TextStyle(
+                          backgroundColor: Color(0xFFFFA726),
+                        ),
+                        otherMatchStyle: TextStyle(
+                          backgroundColor: Color(0x55FFFF00),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           ),
