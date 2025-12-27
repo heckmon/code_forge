@@ -1033,7 +1033,13 @@ class _CodeForgeState extends State<CodeForge>
                 thumbVisibility: _isHovering,
                 controller: _hscrollController,
                 child: GestureDetector(
-                  onTap: _focusNode.requestFocus,
+                  onTap: () {
+                    _focusNode.requestFocus();
+                    if (_contextMenuOffsetNotifier.value.dx >= 0) {
+                      _contextMenuOffsetNotifier.value = const Offset(-1, -1);
+                    }
+                    _suggestionNotifier.value = null;
+                  },
                   child: MouseRegion(
                     onEnter: (event) {
                       if (mounted) setState(() => _isHovering = true);
@@ -5425,6 +5431,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (event is PointerDownEvent && event.buttons == kPrimaryButton) {
       try {
         focusNode.requestFocus();
+        suggestionNotifier.value = null;
       } catch (e) {
         debugPrint(e.toString());
       }
@@ -5592,6 +5599,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         if ((localPosition - (_pointerDownPosition ?? localPosition)).distance >
             10) {
           _isDragging = true;
+          suggestionNotifier.value = null;
 
           _selectionTimer?.cancel();
         }
