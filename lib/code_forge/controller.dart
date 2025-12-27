@@ -37,8 +37,8 @@ class CodeForgeController implements DeltaTextInputClient {
   final List<VoidCallback> _listeners = [];
   Timer? _flushTimer, _semanticTokenTimer, _codeActionTimer;
   String? _cachedText, _bufferLineText, _openedFile;
-  String _previousValue = "", _insertedChar = "";
-  TextSelection _prevSelection = TextSelection.collapsed(offset: 0);
+  String _previousValue = "";
+  TextSelection _prevSelection = const TextSelection.collapsed(offset: 0);
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
   int _bufferLineRopeStart = 0, _bufferLineOriginalLength = 0;
   int _cachedTextVersion = -1, _currentVersion = 0, _semanticTokensVersion = 0;
@@ -53,28 +53,6 @@ class CodeForgeController implements DeltaTextInputClient {
   StreamSubscription? _lspResponsesSubscription;
 
   CodeForgeController({this.lspConfig}) {
-    _listeners.add(() {
-      if (isBufferActive) {
-        final col = bufferCursorColumn;
-        final lineText = bufferLineText ?? '';
-        if (col > 0 && col <= lineText.length) {
-          _insertedChar = lineText.substring(col - 1, col);
-        }
-      } else {
-        final base = _prevSelection.baseOffset.clamp(0, text.length);
-        final extent = selection.baseOffset.clamp(0, text.length);
-        if (extent - base == 1) {
-          _insertedChar = text.substring(base, extent);
-        } else if (extent > 0) {
-          final cursor = selection.baseOffset.clamp(0, text.length);
-          if (cursor > 0) {
-            _insertedChar = text.substring(cursor - 1, cursor);
-          }
-        }
-      }
-      _isTyping = _insertedChar.isNotEmpty && _isAlpha(_insertedChar);
-    });
-
     if (lspConfig != null) {
       (() async {
         try {
@@ -178,6 +156,10 @@ class CodeForgeController implements DeltaTextInputClient {
       });
     } else {
       _listeners.add(() {
+        // Track previous state for non-LSP usage to ensure _isTyping detection works
+        _previousValue = text;
+        _prevSelection = selection;
+
         final cursorPosition = selection.extentOffset;
         final prefix = getCurrentWordPrefix(text, cursorPosition);
         if (_isTyping && selection.extentOffset > 0) {
@@ -710,6 +692,7 @@ class CodeForgeController implements DeltaTextInputClient {
     _currentVersion++;
     _selection = TextSelection.collapsed(offset: newText.length);
     dirtyRegion = TextRange(start: 0, end: newText.length);
+    _isTyping = false;
     notifyListeners();
   }
 
@@ -724,6 +707,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     _selection = newSelection;
     selectionOnly = true;
+    _isTyping = false; // Explicit selection change resets typing state
 
     if (connection != null && connection!.attached) {
       _lastSentText = text;
@@ -755,6 +739,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     _selection = newSelection;
     selectionOnly = true;
+    _isTyping = false;
 
     if (connection != null && connection!.attached) {
       _lastSentText = text;
@@ -791,6 +776,9 @@ class CodeForgeController implements DeltaTextInputClient {
   @override
   void updateEditingValueWithDeltas(List<TextEditingDelta> textEditingDeltas) {
     if (readOnly) return;
+
+    bool typingDetected = false;
+
     for (final delta in textEditingDeltas) {
       if (delta is TextEditingDeltaNonTextUpdate) {
         if (_lastSentSelection == null ||
@@ -806,6 +794,9 @@ class CodeForgeController implements DeltaTextInputClient {
       _lastSentText = null;
 
       if (delta is TextEditingDeltaInsertion) {
+        if (delta.textInserted.isNotEmpty && _isAlpha(delta.textInserted)) {
+          typingDetected = true;
+        }
         _handleInsertion(
           delta.insertionOffset,
           delta.textInserted,
@@ -814,6 +805,10 @@ class CodeForgeController implements DeltaTextInputClient {
       } else if (delta is TextEditingDeltaDeletion) {
         _handleDeletion(delta.deletedRange, delta.selection);
       } else if (delta is TextEditingDeltaReplacement) {
+        if (delta.replacementText.isNotEmpty &&
+            _isAlpha(delta.replacementText)) {
+          typingDetected = true;
+        }
         _handleReplacement(
           delta.replacedRange,
           delta.replacementText,
@@ -821,6 +816,14 @@ class CodeForgeController implements DeltaTextInputClient {
         );
       }
     }
+
+    // Update _isTyping based on whether we saw valid typing input
+    // If no text changes (only selection), typingDetected stays false
+    // But we only want to reset _isTyping to false if this was an EXPLICIT non-typing action
+    // However, if we receive deltas, and none are typing, it implies cursor invalidation or deletion?
+    // Let's set it strictly:
+    _isTyping = typingDetected;
+
     notifyListeners();
   }
 
@@ -852,7 +855,7 @@ class CodeForgeController implements DeltaTextInputClient {
     );
 
     if (isFolded) {
-      final newPosition = visibleText.length;
+      final newPosition = text.length;
       selection = TextSelection.collapsed(offset: newPosition);
       return;
     }
@@ -1848,7 +1851,7 @@ class CodeForgeController implements DeltaTextInputClient {
     if (_undoController?.isUndoRedoInProgress ?? false) return;
 
     final selectionBefore = _selection;
-    final currentLength = length;
+    final currentLength = text.length;
     if (offset < 0 || offset > currentLength) {
       return;
     }
