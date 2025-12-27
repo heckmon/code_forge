@@ -1033,7 +1033,12 @@ class _CodeForgeState extends State<CodeForge>
                 thumbVisibility: _isHovering,
                 controller: _hscrollController,
                 child: GestureDetector(
-                  onTap: _focusNode.requestFocus,
+                  onTap: () {
+                    _focusNode.requestFocus();
+                    if (_contextMenuOffsetNotifier.value.dx >= 0) {
+                      _contextMenuOffsetNotifier.value = const Offset(-1, -1);
+                    }
+                  },
                   child: MouseRegion(
                     onEnter: (event) {
                       if (mounted) setState(() => _isHovering = true);
