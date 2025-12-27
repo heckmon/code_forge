@@ -656,22 +656,24 @@ class _CodeForgeState extends State<CodeForge>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (hasSelection) ...[
-                    _buildContextMenuItem(
-                      'Cut',
-                      Icons.cut,
-                      () => _controller.cut(),
-                    ),
+                    if (!_controller.readOnly)
+                      _buildContextMenuItem(
+                        'Cut',
+                        Icons.cut,
+                        () => _controller.cut(),
+                      ),
                     _buildContextMenuItem(
                       'Copy',
                       Icons.copy,
                       () => _controller.copy(),
                     ),
                   ],
-                  _buildContextMenuItem(
-                    'Paste',
-                    Icons.paste,
-                    () async => _controller.paste(),
-                  ),
+                  if (!_controller.readOnly)
+                    _buildContextMenuItem(
+                      'Paste',
+                      Icons.paste,
+                      () async => _controller.paste(),
+                    ),
                   _buildContextMenuItem(
                     'Select All',
                     Icons.select_all,
@@ -695,22 +697,24 @@ class _CodeForgeState extends State<CodeForge>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (hasSelection) ...[
-                      _buildDesktopContextMenuItem(
-                        'Cut',
-                        'Ctrl+X',
-                        () => _controller.cut(),
-                      ),
+                      if (!_controller.readOnly)
+                        _buildDesktopContextMenuItem(
+                          'Cut',
+                          'Ctrl+X',
+                          () => _controller.cut(),
+                        ),
                       _buildDesktopContextMenuItem(
                         'Copy',
                         'Ctrl+C',
                         () => _controller.copy(),
                       ),
                     ],
-                    _buildDesktopContextMenuItem(
-                      'Paste',
-                      'Ctrl+V',
-                      () => _controller.paste(),
-                    ),
+                    if (!_controller.readOnly)
+                      _buildDesktopContextMenuItem(
+                        'Paste',
+                        'Ctrl+V',
+                        () => _controller.paste(),
+                      ),
                     _buildDesktopContextMenuItem(
                       'Select All',
                       'Ctrl+A',
