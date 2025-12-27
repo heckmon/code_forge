@@ -1063,6 +1063,7 @@ class _CodeForgeState extends State<CodeForge>
                             horizontalOffset: hoffset,
                             horizontalAxisDirection: AxisDirection.right,
                             mainAxis: Axis.vertical,
+                            lineWrap: widget.lineWrap,
                             delegate: TwoDimensionalChildBuilderDelegate(
                               maxXIndex: 0,
                               maxYIndex: 0,
@@ -2503,6 +2504,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool _showBubble = false, _draggingCHandle = false, _readOnly;
   Rect? _startHandleRect, _endHandleRect, _normalHandle;
   double _longLineWidth = 0.0, _wrapWidth = double.infinity;
+  Timer? _resizeTimer;
   int _extraSpaceToAdd = 0, _cachedLineCount = 0;
   String? _aiResponse, _lastProcessedText;
   TextSelection? _lastSelectionForAi;
@@ -3568,6 +3570,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   @override
+  void detach() {
+    _resizeTimer?.cancel();
+    super.detach();
+  }
+
+  @override
   void performLayout() {
     final lineCount = controller.lineCount;
 
@@ -3590,9 +3598,19 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final clampedWrapWidth = newWrapWidth < 100 ? 100.0 : newWrapWidth;
 
       if ((_wrapWidth - clampedWrapWidth).abs() > 1) {
-        _wrapWidth = clampedWrapWidth;
-        _paragraphCache.clear();
-        _lineHeightCache.clear();
+        // Debounce resize updates
+        _resizeTimer?.cancel();
+        _resizeTimer = Timer(const Duration(milliseconds: 150), () {
+          _wrapWidth = clampedWrapWidth;
+          _paragraphCache.clear();
+          _lineHeightCache.clear();
+          markNeedsLayout();
+        });
+        // Skip update this frame if we are waiting for debounce
+        // But if _wrapWidth is infinity (first run), we must set it
+        if (_wrapWidth == double.infinity) {
+          _wrapWidth = clampedWrapWidth;
+        }
       }
     } else {
       _wrapWidth = double.infinity;
@@ -3623,7 +3641,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               : MediaQuery.of(context).size.width)
         : maxLineWidth + (innerPadding?.horizontal ?? 0) + _gutterWidth;
 
-    final minWidth = MediaQuery.of(context).size.width;
+    final minWidth = lineWrap ? 0.0 : MediaQuery.of(context).size.width;
     final contentWidth = max(computedWidth, minWidth);
 
     size = constraints.constrain(Size(contentWidth, contentHeight));
@@ -3635,6 +3653,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
 
     final lineText = controller.getLineText(lineIndex);
+
+    // Fallback if needed (shouldn't happen often if M measurement works)
     final para = _buildHighlightedParagraph(
       lineIndex,
       lineText,
@@ -3802,6 +3822,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             width: lineWrap ? _wrapWidth : null,
           );
           _paragraphCache[i] = paragraph;
+
+          // Refine estimation with actual height
+          if (lineWrap) {
+            _lineHeightCache[i] = paragraph.height;
+          }
         }
       }
 
@@ -5443,26 +5468,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
 
       if (enableFolding && enableGutter && localPosition.dx < _gutterWidth) {
-        final hasActiveFolds = _foldRanges.any((f) => f.isFolded);
-        int clickedLine;
-
-        if (!hasActiveFolds) {
-          clickedLine = (clickY / _lineHeight).floor().clamp(
-            0,
-            controller.lineCount - 1,
-          );
-        } else {
-          clickedLine = 0;
-          double currentY = 0;
-          for (int i = 0; i < controller.lineCount; i++) {
-            if (_isLineFolded(i)) continue;
-            if (clickY >= currentY && clickY < currentY + _lineHeight) {
-              clickedLine = i;
-              break;
-            }
-            currentY += _lineHeight;
-          }
-        }
+        if (clickY < 0) return;
+        final clickedLine = _findVisibleLineByYPosition(clickY);
 
         final foldRange = _getFoldRangeAtLine(clickedLine);
         if (foldRange != null) {

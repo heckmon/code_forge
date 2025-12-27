@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 /// and horizontal scrolling within the editor. It delegates to a
 /// [Render2DCodeField] for layout and painting.
 class CustomViewport extends TwoDimensionalViewport {
+  final bool lineWrap;
+
   /// Creates a [CustomViewport] with the required scroll offsets and axes.
   const CustomViewport({
     super.key,
@@ -17,6 +19,7 @@ class CustomViewport extends TwoDimensionalViewport {
     required super.horizontalAxisDirection,
     required TwoDimensionalChildBuilderDelegate super.delegate,
     required super.mainAxis,
+    required this.lineWrap,
   });
 
   @override
@@ -29,6 +32,7 @@ class CustomViewport extends TwoDimensionalViewport {
       delegate: delegate,
       mainAxis: mainAxis,
       childManager: context as TwoDimensionalChildManager,
+      lineWrap: lineWrap,
     );
   }
 
@@ -37,6 +41,7 @@ class CustomViewport extends TwoDimensionalViewport {
     BuildContext context,
     covariant RenderTwoDimensionalViewport renderObject,
   ) {
+    (renderObject as Render2DCodeField).lineWrap = lineWrap;
     renderObject
       ..horizontalOffset = horizontalOffset
       ..horizontalAxisDirection = horizontalAxisDirection
@@ -52,6 +57,8 @@ class CustomViewport extends TwoDimensionalViewport {
 /// This class handles the layout of the code editor content and manages
 /// the content dimensions for both vertical and horizontal scrolling.
 class Render2DCodeField extends RenderTwoDimensionalViewport {
+  bool lineWrap;
+
   /// Creates a [Render2DCodeField] with the required scroll configuration.
   Render2DCodeField({
     required super.horizontalOffset,
@@ -61,6 +68,7 @@ class Render2DCodeField extends RenderTwoDimensionalViewport {
     required super.delegate,
     required super.mainAxis,
     required super.childManager,
+    required this.lineWrap,
   });
 
   @override
@@ -72,10 +80,9 @@ class Render2DCodeField extends RenderTwoDimensionalViewport {
         BoxConstraints(
           minHeight: 0,
           minWidth: 0,
-          maxWidth: double.infinity,
+          maxWidth: lineWrap ? viewportDimension.width : double.infinity,
           maxHeight: double.infinity,
         ),
-
         parentUsesSize: true,
       );
       parentDataOf(child).layoutOffset = Offset.zero;
