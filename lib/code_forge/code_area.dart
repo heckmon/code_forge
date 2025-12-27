@@ -1506,7 +1506,7 @@ class _CodeForgeState extends State<CodeForge>
                   valueListenable: _suggestionNotifier,
                   builder: (_, sugg, child) {
                     if (_aiNotifier.value != null) return SizedBox.shrink();
-                    if (sugg == null) {
+                    if (sugg == null || sugg.isEmpty) {
                       _sugSelIndex = 0;
                       return SizedBox.shrink();
                     }
