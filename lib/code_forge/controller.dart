@@ -156,7 +156,6 @@ class CodeForgeController implements DeltaTextInputClient {
       });
     } else {
       _listeners.add(() {
-        // Track previous state for non-LSP usage to ensure _isTyping detection works
         _previousValue = text;
         _prevSelection = selection;
 
@@ -819,11 +818,6 @@ class CodeForgeController implements DeltaTextInputClient {
       }
     }
 
-    // Update _isTyping based on whether we saw valid typing input
-    // If no text changes (only selection), typingDetected stays false
-    // But we only want to reset _isTyping to false if this was an EXPLICIT non-typing action
-    // However, if we receive deltas, and none are typing, it implies cursor invalidation or deletion?
-    // Let's set it strictly:
     _isTyping = typingDetected;
 
     notifyListeners();
@@ -1089,7 +1083,6 @@ class CodeForgeController implements DeltaTextInputClient {
   /// `notifyListeners()` to request a repaint/update.
   void findWord(
     String word, {
-    TextStyle? highlightStyle,
     bool matchCase = false,
     bool matchWholeWord = false,
   }) {
@@ -1157,7 +1150,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Clears existing `searchHighlights`, applies [regex] to the document
   /// text, appends a `SearchHighlight` for every match and then sets
   /// `searchHighlightsChanged = true` and calls `notifyListeners()`.
-  void findRegex(RegExp regex, TextStyle? highlightStyle) {
+  void findRegex(RegExp regex) {
     searchHighlights.clear();
 
     final searchText = text;

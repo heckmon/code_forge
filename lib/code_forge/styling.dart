@@ -204,6 +204,37 @@ class SearchHighlight {
   });
 }
 
+/// Styles used to highlight occurrences found by the controller.findWord() API.
+///
+/// Provides separate TextStyle values for the currently selected match and for
+/// all other matches, so the active match can be visually emphasized while
+/// keeping other matches visible.
+///
+/// Fields:
+/// - currentMatchStyle: TextStyle applied to the currently selected/active
+///   match. Use this to draw attention to the match the user is navigating to.
+/// - otherMatchStyle: TextStyle applied to all non-active matches. Typically
+///   a subtler style than the currentMatchStyle (for example a translucent
+///   background color).
+///
+/// Usage example:
+/// ```dart
+/// matchHighlightStyle: const MatchHighlightStyle(
+///   currentMatchStyle: TextStyle(
+///     backgroundColor: Color(0xFFFFA726),
+///   ),
+///   otherMatchStyle: TextStyle(
+///     backgroundColor: Color(0x55FFFF00),
+///   ),
+/// ),
+/// ```
+///
+/// Notes:
+/// - Prefer using const constructors and const TextStyle values where possible
+///   to improve performance.
+/// - The exact visual result depends on how the editor widget composes the
+///   TextStyle with surrounding styles; typically only the differing properties
+///   (for example backgroundColor) will have a visible effect.
 class MatchHighlightStyle {
   /// Style for the currently selected match.
   final TextStyle currentMatchStyle;

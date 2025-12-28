@@ -1,6 +1,6 @@
 name: code_forge
 description: "A sophisticated code editor package with AI completion, LSP support, syntax highlighting, and advanced editing capabilities."
-version: 2.2.0
+version: 3.0.0
 homepage: https://github.com/heckmon/code_forge
 
 environment:

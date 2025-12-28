@@ -142,7 +142,7 @@ Add CodeForge to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  code_forge: ^2.2.0
+  code_forge: ^3.0.0
 ```
 
 Then run:
@@ -632,6 +632,16 @@ CodeForge(
     backgroundColor: Color(0xFF252526),
     textStyle: TextStyle(color: Colors.white),
   ),
+
+  // Highlight matching text using [controller.findWord()] and [controller.findRegex()]
+  matchHighlightStyle: const MatchHighlightStyle(
+    currentMatchStyle: TextStyle(
+      backgroundColor: Color(0xFFFFA726),
+    ),
+    otherMatchStyle: TextStyle(
+      backgroundColor: Color(0x55FFFF00),
+    ),
+  ),
 )
 ```
 
@@ -680,6 +690,7 @@ CodeForge(
 | `gutterStyle` | `GutterStyle?` | Gutter styling |
 | `suggestionStyle` | `SuggestionStyle?` | Suggestion popup styling |
 | `hoverDetailsStyle` | `HoverDetailsStyle?` | Hover popup styling |
+| `matchHighlightStyle` | `MatchHighlightStyle?` | Highlight the matching words <br> in the controller.findWord() API |
 
 ### CodeForgeController
 
@@ -737,6 +748,42 @@ CodeSelectionStyle({
   Color selectionColor,
   Color cursorBubbleColor,
 })
+```
+
+### SuggestionStyle
+```dart
+SuggestionStyle(
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  backgroundColor: Colors.grey[900]!,
+  focusColor: Colors.blue.withOpacity(0.3),
+  hoverColor: Colors.blue.withOpacity(0.1),
+  splashColor: Colors.blue.withOpacity(0.2),
+  textStyle: TextStyle(color: Colors.white),
+)
+```
+
+### HoverDetailsStyle
+```dart
+HoverDetailsStyle(
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  backgroundColor: Colors.grey[850]!,
+  focusColor: Colors.blue.withOpacity(0.3),
+  hoverColor: Colors.blue.withOpacity(0.1),
+  splashColor: Colors.blue.withOpacity(0.2),
+  textStyle: TextStyle(color: Colors.white),
+)
+```
+
+### MatchHighlightStyle
+```dart
+matchHighlightStyle: const MatchHighlightStyle(
+  currentMatchStyle: TextStyle(
+    backgroundColor: Color(0xFFFFA726),
+  ),
+  otherMatchStyle: TextStyle(
+    backgroundColor: Color(0x55FFFF00),
+  ),
+),
 ```
 
 </details>

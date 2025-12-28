@@ -473,6 +473,7 @@ class _CodeForgeState extends State<CodeForge>
         }
       }
     };
+
     _controller.addListener(_controllerListener);
 
     _isHoveringPopup.addListener(() {
@@ -1104,6 +1105,10 @@ class _CodeForgeState extends State<CodeForge>
                                         final suggestions =
                                             _suggestionNotifier.value!;
                                         switch (event.logicalKey) {
+                                          case LogicalKeyboardKey.arrowLeft:
+                                          case LogicalKeyboardKey.arrowRight:
+                                            _suggestionNotifier.value = null;
+                                            return KeyEventResult.handled;
                                           case LogicalKeyboardKey.arrowDown:
                                             if (mounted) {
                                               setState(() {
@@ -1152,6 +1157,9 @@ class _CodeForgeState extends State<CodeForge>
                                         final actions =
                                             _lspActionNotifier.value!;
                                         switch (event.logicalKey) {
+                                          case LogicalKeyboardKey.arrowLeft:
+                                          case LogicalKeyboardKey.arrowRight:
+                                            return KeyEventResult.handled;
                                           case LogicalKeyboardKey.arrowDown:
                                             if (mounted) {
                                               setState(() {
@@ -2492,9 +2500,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final Map<int, ui.Paragraph> _paragraphCache = {};
   final Map<int, double> _lineHeightCache = {};
   final List<FoldRange> _foldRanges = [];
+  final MatchHighlightStyle? _matchHighlightStyle;
+  final MatchHighlightStyle? matchHighlightStyle;
+  late double _lineHeight;
   final _dtap = DoubleTapGestureRecognizer();
   final _onetap = TapGestureRecognizer();
-  late double _lineHeight;
   late final double _gutterPadding;
   late final Paint _caretPainter;
   late final Paint _bracketHighlightPainter;
@@ -2510,8 +2520,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   GutterStyle _gutterStyle;
   CodeSelectionStyle _selectionStyle;
   List<LspErrors> _diagnostics;
-  MatchHighlightStyle? _matchHighlightStyle;
-  final MatchHighlightStyle? matchHighlightStyle;
   int _cachedCaretOffset = -1, _cachedCaretLine = 0, _cachedCaretLineStart = 0;
   int? _dragStartOffset;
   Timer? _selectionTimer, _hoverTimer;

@@ -120,7 +120,6 @@ class FindController extends ChangeNotifier {
 
       _matches = regExp.allMatches(text).toList();
     } catch (e) {
-      // Invalid regex or pattern
       _matches = [];
       _currentMatchIndex = -1;
       _updateHighlights();
@@ -134,7 +133,6 @@ class FindController extends ChangeNotifier {
       return;
     }
 
-    // Pick match closest to cursor (after cursor)
     final cursor = _codeController.selection.start;
     int index = 0;
     bool found = false;
@@ -146,17 +144,6 @@ class FindController extends ChangeNotifier {
         break;
       }
     }
-
-    // // pick match closest to cursor (before cursor)
-    // if (!found) {
-    //   for (int i = _matches.length - 1; i >= 0; i--) {
-    //     if (_matches[i].start < cursor) {
-    //       index = i;
-    //       found = true;
-    //       break;
-    //     }
-    //   }
-    // }
 
     _currentMatchIndex = found ? index : 0;
 
@@ -197,30 +184,11 @@ class FindController extends ChangeNotifier {
 
     final match = _matches[_currentMatchIndex];
     _codeController.replaceRange(match.start, match.end, replacement);
-
-    // After replacement, offsets change, so we must re-search.
-    // We want to move to the 'next' match relative to where we were.
-    // Since the current match is replaced, the "next" match in the list (index+1)
-    // effectively becomes the new match at 'index' or close to it,
-    // but simplified: just re-run find.
-
-    // We strive to select the next match after finding.
-
-    // Store current index to try and maintain relative position if possible,
-    // though usually "Replace" implies "Replace and Find Next".
-    // Let's just re-find via the listener which will trigger on text change.
-
-    // find() automatically sets _currentMatchIndex to the one closest to cursor.
-    // Since replaceRange puts cursor at end of replacement, find() should select the next one.
   }
 
   /// Replaces all matches with [replacement].
   void replaceAll(String replacement) {
     if (_matches.isEmpty) return;
-
-    // We use the regex/string logic to generate the new text
-    // and replace the entire content to ensure a single undo step if possible
-    // (via replaceRange of the whole document).
 
     final text = _codeController.text;
     String pattern = _lastQuery;
@@ -237,12 +205,7 @@ class FindController extends ChangeNotifier {
       final regExp = RegExp(pattern, caseSensitive: _caseSensitive);
       final newText = text.replaceAll(regExp, replacement);
 
-      // Replace the entire document content
       _codeController.replaceRange(0, text.length, newText);
-
-      // Clear matches as they are all gone (or changed)
-      // Listener will re-trigger find if needed, though for Replace All
-      // usually we expect 0 matches unless replacement contains the pattern.
     } catch (e) {
       debugPrint('FindController: Replace All failed. Error: $e');
     }
@@ -253,7 +216,7 @@ class FindController extends ChangeNotifier {
     _currentMatchIndex = -1;
     _codeController.searchHighlights = [];
     _codeController.searchHighlightsChanged = true;
-    _codeController.notifyListeners(); // Ensure UI clears highlights
+    _codeController.notifyListeners();
     notifyListeners();
   }
 
@@ -263,9 +226,6 @@ class FindController extends ChangeNotifier {
       _codeController.setSelectionSilently(
         TextSelection(baseOffset: match.start, extentOffset: match.end),
       );
-      // Changing selection typically triggers ensureVisible in the editor logic
-      // providing selectionOnly logic is handled in code_area.
-      // We explicitly set selectionOnly to true to force scroll to cursor
       _codeController.selectionOnly = true;
       _codeController.notifyListeners();
     }

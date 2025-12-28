@@ -146,3 +146,11 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 2.2.0
 - FIX: Asynchronous highlighting.
 - FIX: Delayed LSP diagnostic lints.
+
+## 3.0.0
+- FEATURE: Find and highlight multiple words with the new `FindWordController` API. Seperate styling is available for both focused **word** and unfocued **words**.
+- FEATURE: *Double click to select a word* is now available in desktop also.
+- FIX: Code reslove for focused suggestion persists on the screen.
+- FIX: Removed cut, paste and other writing operations from read only mode.
+- FIX: Line wrap wasn't responsive on resizing the screen.
+- FIX: Suggestions persists on cursor movement.
