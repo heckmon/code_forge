@@ -92,6 +92,14 @@ class _MyAppState extends State<MyApp> {
                                 return Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    findController?.currentMatchIndex == -1
+                                        ? Text(
+                                            "No Results",
+                                            style: TextStyle(color: Colors.red),
+                                          )
+                                        : Text(
+                                            "${findController!.currentMatchIndex + 1}/${findController!.matchCount}",
+                                          ),
                                     IconButton(
                                       icon: const Icon(Icons.abc),
                                       color: findController!.caseSensitive
