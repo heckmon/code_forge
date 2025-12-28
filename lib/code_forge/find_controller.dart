@@ -124,20 +124,21 @@ class FindController extends ChangeNotifier {
       }
     }
 
-    // pick match closest to cursor (before cursor)
-    if (!found) {
-      for (int i = _matches.length - 1; i >= 0; i--) {
-        if (_matches[i].start < cursor) {
-          index = i;
-          found = true;
-          break;
-        }
-      }
-    }
+    // // pick match closest to cursor (before cursor)
+    // if (!found) {
+    //   for (int i = _matches.length - 1; i >= 0; i--) {
+    //     if (_matches[i].start < cursor) {
+    //       index = i;
+    //       found = true;
+    //       break;
+    //     }
+    //   }
+    // }
 
     _currentMatchIndex = found ? index : 0;
 
     _updateHighlights();
+    _scrollToCurrentMatch();
     notifyListeners();
   }
 
