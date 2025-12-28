@@ -212,11 +212,7 @@ class MatchHighlightStyle {
   final TextStyle otherMatchStyle;
 
   const MatchHighlightStyle({
-    this.currentMatchStyle = const TextStyle(
-      backgroundColor: Color(0x80FF9800), // Orange with 50% opacity
-    ),
-    this.otherMatchStyle = const TextStyle(
-      backgroundColor: Color(0x4DFFEB3B), // Yellow with 30% opacity
-    ),
+    required this.currentMatchStyle,
+    required this.otherMatchStyle,
   });
 }

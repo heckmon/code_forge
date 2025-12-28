@@ -1481,6 +1481,8 @@ class _CodeForgeState extends State<CodeForge>
                                     suggestionNotifier: _suggestionNotifier,
                                     aiCompletionTextStyle:
                                         widget.aiCompletionTextStyle,
+                                    matchHighlightStyle:
+                                        widget.matchHighlightStyle,
                                     lspActionNotifier: _lspActionNotifier,
                                     lspActionOffsetNotifier:
                                         _lspActionOffsetNotifier,
@@ -2344,6 +2346,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final BuildContext context;
   final TextStyle? aiCompletionTextStyle;
   final String? filePath;
+  final MatchHighlightStyle? matchHighlightStyle;
 
   const _CodeField({
     required this.controller,
@@ -2382,6 +2385,7 @@ class _CodeField extends LeafRenderObjectWidget {
     this.semanticTokensVersion = 0,
     this.innerPadding,
     this.aiCompletionTextStyle,
+    this.matchHighlightStyle,
   });
 
   @override
@@ -2400,6 +2404,7 @@ class _CodeField extends LeafRenderObjectWidget {
       readOnly: readOnly,
       caretBlinkController: caretBlinkController,
       textStyle: textStyle,
+      matchHighlightStyle: matchHighlightStyle,
       enableFolding: enableFolding,
       enableGuideLines: enableGuideLines,
       enableGutter: enableGutter,
@@ -4889,9 +4894,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       final highlightStyle = highlight.isCurrentMatch
           ? (_matchHighlightStyle?.currentMatchStyle ??
-                const TextStyle(backgroundColor: Color(0x80FF9800)))
+                const TextStyle(backgroundColor: Color(0xFF01A2FF)))
           : (_matchHighlightStyle?.otherMatchStyle ??
-                const TextStyle(backgroundColor: Color(0x4DFFEB3B)));
+                const TextStyle(
+                  backgroundColor: Color.fromARGB(163, 72, 215, 255),
+                ));
 
       final highlightPaint = Paint()
         ..color = highlightStyle.backgroundColor ?? Colors.amberAccent
