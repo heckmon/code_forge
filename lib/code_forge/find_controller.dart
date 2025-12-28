@@ -17,8 +17,31 @@ class FindController extends ChangeNotifier {
   bool _matchWholeWord = false;
   String _lastQuery = '';
 
+  String _lastText = '';
+  VoidCallback? _controllerListener;
+
   /// Creates a [FindController] associated with the given [CodeForgeController].
-  FindController(this._codeController);
+  FindController(this._codeController) {
+    _lastText = _codeController.text;
+    _controllerListener = _onCodeControllerChanged;
+    _codeController.addListener(_controllerListener!);
+  }
+
+  @override
+  void dispose() {
+    if (_controllerListener != null) {
+      _codeController.removeListener(_controllerListener!);
+    }
+    super.dispose();
+  }
+
+  void _onCodeControllerChanged() {
+    final currentText = _codeController.text;
+    if (currentText != _lastText) {
+      _lastText = currentText;
+      _reperformSearch();
+    }
+  }
 
   /// The number of matches found for the current query.
   int get matchCount => _matches.length;
@@ -61,14 +84,15 @@ class FindController extends ChangeNotifier {
 
   void _reperformSearch() {
     if (_lastQuery.isNotEmpty) {
-      find(_lastQuery);
+      find(_lastQuery, scrollToMatch: false);
     }
   }
 
   /// Performs a text search.
   ///
   /// [query] is the text to search for.
-  void find(String query) {
+  /// [scrollToMatch] determines if the editor should scroll to the selected match.
+  void find(String query, {bool scrollToMatch = true}) {
     _lastQuery = query;
 
     if (query.isEmpty) {
@@ -103,7 +127,6 @@ class FindController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    // break
     if (_matches.isEmpty) {
       _currentMatchIndex = -1;
       _updateHighlights();
@@ -138,7 +161,10 @@ class FindController extends ChangeNotifier {
     _currentMatchIndex = found ? index : 0;
 
     _updateHighlights();
-    _scrollToCurrentMatch();
+
+    if (scrollToMatch) {
+      _scrollToCurrentMatch();
+    }
     notifyListeners();
   }
 
@@ -182,8 +208,7 @@ class FindController extends ChangeNotifier {
 
     // Store current index to try and maintain relative position if possible,
     // though usually "Replace" implies "Replace and Find Next".
-    // Let's just re-find.
-    find(_lastQuery);
+    // Let's just re-find via the listener which will trigger on text change.
 
     // find() automatically sets _currentMatchIndex to the one closest to cursor.
     // Since replaceRange puts cursor at end of replacement, find() should select the next one.
@@ -216,7 +241,8 @@ class FindController extends ChangeNotifier {
       _codeController.replaceRange(0, text.length, newText);
 
       // Clear matches as they are all gone (or changed)
-      find(_lastQuery);
+      // Listener will re-trigger find if needed, though for Replace All
+      // usually we expect 0 matches unless replacement contains the pattern.
     } catch (e) {
       debugPrint('FindController: Replace All failed. Error: $e');
     }
