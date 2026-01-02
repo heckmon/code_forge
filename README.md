@@ -150,7 +150,7 @@ Add CodeForge to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  code_forge: ^4.0.0
+  code_forge: ^4.1.0
 ```
 
 Then run:

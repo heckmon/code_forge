@@ -160,3 +160,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 - FEATURE: Added new `finderBuilder` API to implement the find-replace serach bar.
 - FEATURE: Added keyboard shortcuts Ctrl + F and Ctrl + H to show the find-replace search bar.
 - FIX: Scroll doesn't work after selecting a word.
+
+## 4.1.0
+- FEATURE: Added semantic highlight support for the custom protocol used by the `ccls` language server.

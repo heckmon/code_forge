@@ -95,6 +95,9 @@ sealed class LspConfig {
         'workspaceFolders': [
           {'uri': workspaceUri, 'name': 'workspace'},
         ],
+        'initializationOptions': {
+          'highlight': {'enabled': true},
+        },
         'capabilities': {
           'workspace': {'applyEdit': true},
           'textDocument': {
@@ -1032,7 +1035,7 @@ const Map<String, List<String>> semanticToHljs = {
   'type': ['built_in', 'type'],
   'namespace': ['built_in', 'type'],
   'interface': ['built_in', 'type'],
-  'struct': ['attr', 'attribute'],
+  'struct': ['built_in', 'type'],
   'enum': ['built_in', 'type'],
   'function': ['section', 'function', 'bullet', 'selector-tag', 'selector-id'],
   'method': ['section', 'function', 'bullet', 'selector-tag', 'selector-id'],
@@ -1040,6 +1043,7 @@ const Map<String, List<String>> semanticToHljs = {
   'variable': ['attr', 'attribute'],
   'parameter': ['attr', 'attribute'],
   'property': ['attr', 'attribute'],
+  'field': ['attr', 'attribute'],
   'typeParameter': ['attr', 'attribute'],
   'enumMember': ['attr', 'attribute'],
   'operator': ['keyword'],
@@ -1051,6 +1055,7 @@ const Map<String, List<String>> semanticToHljs = {
   'regexp': ['regexp'],
   'macro': ['meta', 'meta-keyword'],
   'event': ['attr', 'attribute'],
+  'constant': ['number', 'literal'],
 };
 
 /// Pyright-specific overrides for semantic token mappings.

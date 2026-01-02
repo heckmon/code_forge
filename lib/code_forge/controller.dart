@@ -49,6 +49,7 @@ class CodeForgeController implements DeltaTextInputClient {
   void Function(int lineNumber)? _toggleFoldCallback;
   VoidCallback? _foldAllCallback, _unfoldAllCallback;
   bool _lspReady = false, _isTyping = false, _isDisposed = false;
+  bool _usesCclsSemanticHighlight = false;
   List<dynamic> _suggestions = [];
   StreamSubscription? _lspResponsesSubscription;
 
@@ -148,6 +149,25 @@ class CodeForgeController implements DeltaTextInputClient {
               );
             } else {
               if (!_isDisposed) diagnostics.value = [];
+            }
+          }
+
+          if (data['method'] == r'$ccls/publishSemanticHighlight') {
+            final params = data['params'] as Map<String, dynamic>?;
+            if (params != null) {
+              final uri = params['uri'] as String?;
+              final symbols = params['symbols'] as List<dynamic>?;
+
+              if (uri != null &&
+                  openedFile != null &&
+                  uri.endsWith(openedFile!.split('/').last) &&
+                  symbols != null) {
+                _usesCclsSemanticHighlight = true;
+                final tokens = _convertCclsSymbolsToTokens(symbols);
+                if (!_isDisposed && tokens.isNotEmpty) {
+                  semanticTokens.value = (tokens, _semanticTokensVersion++);
+                }
+              }
             }
           }
         } catch (e, st) {
@@ -1620,6 +1640,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   Future<void> _fetchSemanticTokensFull() async {
     if (lspConfig == null) return;
+    if (_usesCclsSemanticHighlight) return;
 
     try {
       final tokens = await lspConfig!.getSemanticTokensFull(openedFile!);
@@ -1636,6 +1657,171 @@ class CodeForgeController implements DeltaTextInputClient {
     _semanticTokenTimer = Timer(_semanticTokenDebounce, () async {
       await _fetchSemanticTokensFull();
     });
+  }
+
+  List<LspSemanticToken> _convertCclsSymbolsToTokens(List<dynamic> symbols) {
+    final tokens = <LspSemanticToken>[];
+    final documentText = text;
+    final byteOffsetMap = _buildByteOffsetMap(documentText);
+
+    for (final symbol in symbols) {
+      if (symbol is! Map<String, dynamic>) continue;
+
+      final kind = symbol['kind'] as int? ?? 0;
+      final storage = symbol['storage'] as int? ?? 0;
+      final tokenTypeName = _cclsSymbolKindToTokenType(kind);
+      final lsRanges = symbol['lsRanges'] as List<dynamic>?;
+      final ranges = symbol['ranges'] as List<dynamic>?;
+
+      if (lsRanges != null && lsRanges.isNotEmpty) {
+        for (final range in lsRanges) {
+          if (range is! List<dynamic> || range.length < 3) continue;
+          final line = range[0] as int;
+          final startChar = range[1] as int;
+          final endChar = range[2] as int;
+
+          tokens.add(
+            LspSemanticToken(
+              line: line,
+              start: startChar,
+              length: endChar - startChar,
+              typeIndex: kind,
+              modifierBitmask: storage,
+              tokenTypeName: tokenTypeName,
+            ),
+          );
+        }
+      } else if (ranges != null && ranges.isNotEmpty) {
+        for (final range in ranges) {
+          if (range is! Map<String, dynamic>) continue;
+          final startByte = range['L'] as int?;
+          final endByte = range['R'] as int?;
+          if (startByte == null || endByte == null) continue;
+
+          final startPos = _byteOffsetToLineChar(byteOffsetMap, startByte);
+          final endPos = _byteOffsetToLineChar(byteOffsetMap, endByte);
+
+          if (startPos != null && endPos != null && startPos.$1 == endPos.$1) {
+            tokens.add(
+              LspSemanticToken(
+                line: startPos.$1,
+                start: startPos.$2,
+                length: endPos.$2 - startPos.$2,
+                typeIndex: kind,
+                modifierBitmask: storage,
+                tokenTypeName: tokenTypeName,
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    return tokens;
+  }
+
+  List<int> _buildByteOffsetMap(String text) {
+    final offsets = <int>[0];
+    int currentOffset = 0;
+
+    for (int i = 0; i < text.length; i++) {
+      currentOffset++;
+      if (text[i] == '\n') {
+        offsets.add(currentOffset);
+      }
+    }
+
+    return offsets;
+  }
+
+  (int, int)? _byteOffsetToLineChar(List<int> lineOffsets, int byteOffset) {
+    if (byteOffset < 0) return null;
+
+    int low = 0;
+    int high = lineOffsets.length - 1;
+
+    while (low < high) {
+      final mid = (low + high + 1) ~/ 2;
+      if (lineOffsets[mid] <= byteOffset) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    final line = low;
+    final charOffset = byteOffset - lineOffsets[line];
+
+    return (line, charOffset);
+  }
+
+  String _cclsSymbolKindToTokenType(int kind) {
+    switch (kind) {
+      case 0:
+        return 'unknown';
+      case 1:
+        return 'file';
+      case 2:
+        return 'module';
+      case 3:
+        return 'namespace';
+      case 4:
+        return 'package';
+      case 5:
+        return 'class';
+      case 6:
+        return 'method';
+      case 7:
+        return 'property';
+      case 8:
+        return 'field';
+      case 9:
+        return 'constructor';
+      case 10:
+        return 'enum';
+      case 11:
+        return 'interface';
+      case 12:
+        return 'function';
+      case 13:
+        return 'variable';
+      case 14:
+        return 'constant';
+      case 15:
+        return 'string';
+      case 16:
+        return 'number';
+      case 17:
+        return 'boolean';
+      case 18:
+        return 'array';
+      case 19:
+        return 'object';
+      case 20:
+        return 'key';
+      case 21:
+        return 'null';
+      case 22:
+        return 'enumMember';
+      case 23:
+        return 'struct';
+      case 24:
+        return 'event';
+      case 25:
+        return 'operator';
+      case 26:
+        return 'typeParameter';
+      case 252:
+        return 'type'; // Type alias
+      case 253:
+        return 'parameter';
+      case 254:
+        return 'variable'; // StaticMethod
+      case 255:
+        return 'macro';
+      default:
+        return 'unknown';
+    }
   }
 
   void _sortSuggestions(String prefix) {
