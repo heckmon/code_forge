@@ -109,14 +109,14 @@ class CodeForgeController implements DeltaTextInputClient {
                   );
                 }
               }
-              if (!_isDisposed) diagnostics.value = errors;
+              if (!_isDisposed) diagnosticsNotifier.value = errors;
 
               _codeActionTimer?.cancel();
               _codeActionTimer = Timer(
                 const Duration(milliseconds: 250),
                 () async {
                   if (errors.isEmpty) {
-                    if (!_isDisposed) codeActions.value = null;
+                    if (!_isDisposed) codeActionsNotifier.value = null;
                     return;
                   }
                   int minStartLine = errors
@@ -141,14 +141,14 @@ class CodeForgeController implements DeltaTextInputClient {
                       endCharacter: maxEndChar,
                       diagnostics: rawDiagnostics.cast<Map<String, dynamic>>(),
                     );
-                    if (!_isDisposed) codeActions.value = actions;
+                    if (!_isDisposed) codeActionsNotifier.value = actions;
                   } catch (e) {
                     debugPrint('Error fetching code actions: $e');
                   }
                 },
               );
             } else {
-              if (!_isDisposed) diagnostics.value = [];
+              if (!_isDisposed) diagnosticsNotifier.value = [];
             }
           }
 
@@ -211,12 +211,12 @@ class CodeForgeController implements DeltaTextInputClient {
           _sortSuggestions(prefix);
           final triggerChar = text[cursorPosition - 1];
           if (!_isAlpha(triggerChar)) {
-            if (!_isDisposed) suggestions.value = null;
+            if (!_isDisposed) suggestionsNotifier.value = null;
             return;
           }
-          if (!_isDisposed) suggestions.value = _suggestions;
+          if (!_isDisposed) suggestionsNotifier.value = _suggestions;
         } else {
-          if (!_isDisposed) suggestions.value = null;
+          if (!_isDisposed) suggestionsNotifier.value = null;
         }
       });
     }
@@ -242,12 +242,12 @@ class CodeForgeController implements DeltaTextInputClient {
         _sortSuggestions(prefix);
         final triggerChar = text[cursorPosition - 1];
         if (!_isAlpha(triggerChar)) {
-          if (!_isDisposed) suggestions.value = null;
+          if (!_isDisposed) suggestionsNotifier.value = null;
           return;
         }
-        if (!_isDisposed) suggestions.value = _suggestions;
+        if (!_isDisposed) suggestionsNotifier.value = _suggestions;
       } else {
-        if (!_isDisposed) suggestions.value = null;
+        if (!_isDisposed) suggestionsNotifier.value = null;
       }
     }
     _previousValue = text;
@@ -256,9 +256,12 @@ class CodeForgeController implements DeltaTextInputClient {
 
   final ValueNotifier<(List<LspSemanticToken>?, int)> semanticTokens =
       ValueNotifier((null, 0));
-  final ValueNotifier<List<dynamic>?> suggestions = ValueNotifier(null);
-  final ValueNotifier<List<LspErrors>> diagnostics = ValueNotifier([]);
-  final ValueNotifier<List<dynamic>?> codeActions = ValueNotifier(null);
+  final ValueNotifier<List<dynamic>?> suggestionsNotifier = ValueNotifier(null);
+  final ValueNotifier<List<LspErrors>> diagnosticsNotifier = ValueNotifier([]);
+  final ValueNotifier<List<dynamic>?> codeActionsNotifier = ValueNotifier(null);
+  final ValueNotifier<LspSignatureHelps?> signatureNotifier = ValueNotifier(
+    null,
+  );
 
   /// Configuration for Language Server Protocol integration.
   ///
@@ -273,6 +276,16 @@ class CodeForgeController implements DeltaTextInputClient {
       text = File(_openedFile!).readAsStringSync();
     }
   }
+
+  /// Returns the errors, warnings and info available in the editor as a [List<LspErrors>].
+  /// Each [LspErrors] item holds the error severity, range and the message of each errors.
+  List<LspErrors> get diagnostics => diagnosticsNotifier.value;
+
+  /// The curent LSP suggestions shown in the editor.
+  /// The vale is [List<dynamic>] because it can be either [String] or [LspCompletion].
+  /// if the lspconfig is available and a valid server is configured, the [List<LspCompletion>] will be returned.
+  /// else a [List<String>] with locally available words will be returned.
+  List<dynamic>? get suggestions => suggestionsNotifier.value;
 
   /// Currently opened file.
   String? get openedFile => _openedFile;

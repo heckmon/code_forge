@@ -113,6 +113,15 @@ sealed class LspConfig {
                 'snippetSupport': false,
               },
             },
+            'signatureHelp': {
+              'dynamicRegistration': false,
+              'signatureInformation': {
+                'documentationFormat': ['markdown', 'plaintext'],
+                'parameterInformation': {'labelOffsetSupport': true},
+                'activeParameterSupport': true,
+              },
+              'contextSupport': true,
+            },
             'synchronization': {'didSave': true, 'change': 1},
             'publishDiagnostics': {'relatedInformation': true},
             'hover': {
@@ -345,6 +354,56 @@ sealed class LspConfig {
       params: item,
     );
     return response['result'] ?? item;
+  }
+
+  Future<LspSignatureHelps> signatureHelp(
+    String filePath,
+    int line,
+    int character,
+    int triggerKind, {
+    String? triggerCharacter,
+  }) async {
+    final commonParams = _commonParams(filePath, line, character);
+    commonParams.addAll({
+      'context': {
+        'triggerKind': triggerKind,
+        if (triggerCharacter != null) 'triggerCharacter': triggerCharacter,
+      },
+    });
+    final response = await _sendRequest(
+      method: 'textDocument/signatureHelp',
+      params: commonParams,
+    );
+
+    final result = response['result'];
+    final signatures = result['signatures'];
+    late final String label, doc;
+    late final List<Map<String, dynamic>> parameters;
+    if (signatures is List) {
+      if (signatures.isNotEmpty) {
+        label = (signatures[0]['label']) ?? "";
+        parameters =
+            ((signatures[0]['parameters'] as List?)
+                ?.cast<Map<String, dynamic>>()) ??
+            [];
+        doc = (signatures[0]['documentation']['value']) ?? "";
+      } else {
+        label = "";
+        doc = "";
+        parameters = [];
+      }
+    } else {
+      label = "";
+      doc = "";
+      parameters = [];
+    }
+    return LspSignatureHelps(
+      activeParameter: (result['activeParameter'] ?? -1) as int,
+      activeSignature: (result['activeSignature'] ?? -1) as int,
+      documentation: doc,
+      label: label,
+      parameters: parameters,
+    );
   }
 
   /// Gets the definition location for a symbol at the specified position.
@@ -952,6 +1011,20 @@ class LspErrors {
 
   @override
   String toString() => toJson().toString();
+}
+
+class LspSignatureHelps {
+  final int activeParameter, activeSignature;
+  final String documentation, label;
+  final List<Map<String, dynamic>> parameters;
+
+  LspSignatureHelps({
+    required this.activeParameter,
+    required this.activeSignature,
+    required this.documentation,
+    required this.label,
+    required this.parameters,
+  });
 }
 
 class LspSemanticToken {

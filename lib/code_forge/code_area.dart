@@ -241,6 +241,7 @@ class _CodeForgeState extends State<CodeForge>
   late final HoverDetailsStyle _hoverDetailsStyle;
   late final ValueNotifier<List<dynamic>?> _suggestionNotifier, _hoverNotifier;
   late final ValueNotifier<List<LspErrors>> _diagnosticsNotifier;
+  late final ValueNotifier<LspSignatureHelps?> _lspSignatureNotifier;
   late final ValueNotifier<String?> _aiNotifier;
   late final ValueNotifier<Offset?> _aiOffsetNotifier;
   late final ValueNotifier<Offset> _contextMenuOffsetNotifier;
@@ -259,7 +260,7 @@ class _CodeForgeState extends State<CodeForge>
   final Map<String, String> _suggestionDetailsCache = {};
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
-  bool _isHovering = false;
+  bool _isHovering = false, _isSignatureInvoked = false;
   List<LspSemanticToken>? _semanticTokens;
   List<Map<String, dynamic>> _extraText = [];
   int _semanticTokensVersion = 0;
@@ -279,9 +280,10 @@ class _CodeForgeState extends State<CodeForge>
     _vscrollController = widget.verticalScrollController ?? ScrollController();
     _editorTheme = widget.editorTheme ?? vs2015Theme;
     _language = widget.language ?? langDart;
-    _suggestionNotifier = _controller.suggestions;
-    _diagnosticsNotifier = _controller.diagnostics;
-    _lspActionNotifier = _controller.codeActions;
+    _suggestionNotifier = _controller.suggestionsNotifier;
+    _diagnosticsNotifier = _controller.diagnosticsNotifier;
+    _lspActionNotifier = _controller.codeActionsNotifier;
+    _lspSignatureNotifier = _controller.signatureNotifier;
     _hoverNotifier = ValueNotifier(null);
     _aiNotifier = ValueNotifier(null);
     _aiOffsetNotifier = ValueNotifier(null);
@@ -428,6 +430,14 @@ class _CodeForgeState extends State<CodeForge>
     _controllerListener = () {
       _resetCursorBlink();
 
+      if (_isSignatureInvoked) {
+        if (_controller.lspConfig != null) {
+          (() async => await _callSignatureHelp())();
+        }
+      } else if (_lspSignatureNotifier.value != null) {
+        _lspSignatureNotifier.value = null;
+      }
+
       if (_hoverNotifier.value != null && mounted) {
         _hoverTimer?.cancel();
         _hoverNotifier.value = null;
@@ -496,6 +506,18 @@ class _CodeForgeState extends State<CodeForge>
     };
 
     _controller.addListener(_controllerListener);
+
+    _lspSignatureNotifier.addListener(() {
+      if (_lspSignatureNotifier.value != null) {
+        if (_lspSignatureNotifier.value!.parameters.isEmpty) {
+          _lspSignatureNotifier.value = null;
+          setState(() {
+            _isSignatureInvoked = false;
+          });
+          return;
+        }
+      }
+    });
 
     _isHoveringPopup.addListener(() {
       if (!_isHoveringPopup.value && _hoverNotifier.value != null) {
@@ -638,6 +660,10 @@ class _CodeForgeState extends State<CodeForge>
       return;
     }
 
+    if (_suggestionNotifier.value != null) {
+      _suggestionNotifier.value = null;
+    }
+
     final sel = _controller.selection;
     final textLength = _controller.length;
 
@@ -657,6 +683,22 @@ class _CodeForgeState extends State<CodeForge>
     } else {
       _controller.setSelectionSilently(
         TextSelection.collapsed(offset: newOffset),
+      );
+    }
+  }
+
+  Future<void> _callSignatureHelp() async {
+    final lspConfig = _controller.lspConfig;
+    if (lspConfig != null) {
+      final cursorPosition = _controller.selection.extentOffset;
+      final line = _controller.getLineAtOffset(cursorPosition);
+      final lineStartOffset = _controller.getLineStartOffset(line);
+      final character = cursorPosition - lineStartOffset;
+      _lspSignatureNotifier.value = await lspConfig.signatureHelp(
+        widget.filePath!,
+        line,
+        character,
+        1,
       );
     }
   }
@@ -1087,6 +1129,7 @@ class _CodeForgeState extends State<CodeForge>
                               );
                             }
                             _suggestionNotifier.value = null;
+                            _lspSignatureNotifier.value = null;
                           },
                           child: MouseRegion(
                             onEnter: (event) {
@@ -1268,6 +1311,15 @@ class _CodeForgeState extends State<CodeForge>
                                               if (isCtrlPressed &&
                                                   isShiftPressed) {
                                                 switch (event.logicalKey) {
+                                                  case LogicalKeyboardKey.space:
+                                                    setState(() {
+                                                      _isSignatureInvoked =
+                                                          true;
+                                                    });
+                                                    (() async =>
+                                                        await _callSignatureHelp())();
+                                                    return KeyEventResult
+                                                        .handled;
                                                   case LogicalKeyboardKey
                                                       .arrowUp:
                                                     _moveLineUp();
@@ -1562,6 +1614,12 @@ class _CodeForgeState extends State<CodeForge>
                                                     isShiftPressed:
                                                         isShiftPressed,
                                                   );
+                                                  if (_suggestionNotifier
+                                                          .value !=
+                                                      null) {
+                                                    _suggestionNotifier.value =
+                                                        null;
+                                                  }
                                                   _commonKeyFunctions();
                                                   return KeyEventResult.handled;
 
@@ -1595,6 +1653,8 @@ class _CodeForgeState extends State<CodeForge>
 
                                                 case LogicalKeyboardKey.escape:
                                                   _hoverTimer?.cancel();
+                                                  _lspSignatureNotifier.value =
+                                                      null;
                                                   _contextMenuOffsetNotifier
                                                       .value = const Offset(
                                                     -1,
@@ -1609,6 +1669,9 @@ class _CodeForgeState extends State<CodeForge>
                                                   _suggestionNotifier.value =
                                                       null;
                                                   _hoverNotifier.value = null;
+                                                  setState(() {
+                                                    _isSignatureInvoked = false;
+                                                  });
                                                   return KeyEventResult.handled;
 
                                                 case LogicalKeyboardKey.tab:
@@ -1691,6 +1754,8 @@ class _CodeForgeState extends State<CodeForge>
                                                 _lspActionNotifier,
                                             lspActionOffsetNotifier:
                                                 _lspActionOffsetNotifier,
+                                            signatureNotifier:
+                                                _lspSignatureNotifier,
                                             filePath: _filePath,
                                           ),
                                         );
@@ -1705,6 +1770,168 @@ class _CodeForgeState extends State<CodeForge>
                       ),
                     ),
                     _buildContextMenu(),
+                    ValueListenableBuilder(
+                      valueListenable: _offsetNotifier,
+                      builder: (_, offset, __) {
+                        return ValueListenableBuilder(
+                          valueListenable: _lspSignatureNotifier,
+                          builder: (_, signature, __) {
+                            if (signature == null ||
+                                signature.activeParameter < 0 ||
+                                signature.parameters.isEmpty) {
+                              return SizedBox.shrink();
+                            }
+                            final sigScrollCtrl = ScrollController();
+                            return Positioned(
+                              width: screenWidth < 700
+                                  ? screenWidth * 0.63
+                                  : null,
+                              top:
+                                  offset.dy +
+                                  (widget.textStyle?.fontSize ?? 14) +
+                                  10 +
+                                  (screenWidth < 700
+                                      ? (offset.dy < screenHeight / 2)
+                                            ? 0
+                                            : -150
+                                      : 0),
+                              left: offset.dx,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: 420,
+                                  maxHeight: 400,
+                                  minWidth: 70,
+                                ),
+                                child: Card(
+                                  color: _hoverDetailsStyle.backgroundColor,
+                                  shape: _hoverDetailsStyle.shape,
+                                  child: RawScrollbar(
+                                    interactive: true,
+                                    controller: sigScrollCtrl,
+                                    thumbVisibility: true,
+                                    thumbColor: _editorTheme['root']!.color!
+                                        .withAlpha(100),
+                                    child: SingleChildScrollView(
+                                      controller: sigScrollCtrl,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 7,
+                                              left: 6.5,
+                                            ),
+                                            child: RichText(
+                                              text: (() {
+                                                final range =
+                                                    (signature.parameters[signature
+                                                                .activeParameter]['label']
+                                                            as List)
+                                                        .cast<int>();
+                                                final label = signature.label;
+                                                final firstPart = label
+                                                    .substring(0, range[0]);
+                                                final highlightPart = label
+                                                    .substring(
+                                                      range[0],
+                                                      range[1],
+                                                    );
+                                                final finalPart = label
+                                                    .substring(range[1]);
+                                                return TextSpan(
+                                                  style: TextStyle(
+                                                    fontSize:
+                                                        (widget
+                                                                .textStyle
+                                                                ?.fontSize ??
+                                                            15) +
+                                                        1.75,
+                                                    color: _editorTheme['root']
+                                                        ?.color,
+                                                  ),
+                                                  children: [
+                                                    TextSpan(text: firstPart),
+                                                    TextSpan(
+                                                      text: highlightPart,
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: Colors.blue,
+                                                      ),
+                                                    ),
+                                                    TextSpan(text: finalPart),
+                                                  ],
+                                                );
+                                              })(),
+                                            ),
+                                          ),
+                                          Divider(
+                                            color: _editorTheme['root']?.color,
+                                            thickness: 0.5,
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              left: 6.5,
+                                            ),
+                                            child: MarkdownBlock(
+                                              data: signature.documentation,
+                                              config: MarkdownConfig.darkConfig.copy(
+                                                configs: [
+                                                  PConfig(
+                                                    textStyle:
+                                                        _hoverDetailsStyle
+                                                            .textStyle,
+                                                  ),
+                                                  PreConfig(
+                                                    language:
+                                                        _controller
+                                                            .lspConfig
+                                                            ?.languageId
+                                                            .toLowerCase() ??
+                                                        'dart',
+                                                    theme: _editorTheme,
+                                                    textStyle: TextStyle(
+                                                      fontSize:
+                                                          _hoverDetailsStyle
+                                                              .textStyle
+                                                              .fontSize,
+                                                    ),
+                                                    styleNotMatched: TextStyle(
+                                                      color:
+                                                          _editorTheme['root']!
+                                                              .color,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          _editorTheme['root']!
+                                                              .backgroundColor!,
+                                                      borderRadius:
+                                                          BorderRadius.zero,
+                                                      border: Border.all(
+                                                        width: 0.2,
+                                                        color:
+                                                            _editorTheme['root']!
+                                                                .color ??
+                                                            Colors.grey,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
                     ValueListenableBuilder(
                       valueListenable: _offsetNotifier,
                       builder: (context, offset, child) {
@@ -1953,13 +2180,29 @@ class _CodeForgeState extends State<CodeForge>
                                     ),
                                   ),
                                 ),
-                                if (_selectedSuggestionMd != null)
+                                if (_selectedSuggestionMd != null &&
+                                    _lspSignatureNotifier.value == null)
                                   Positioned(
+                                    width: screenWidth < 700
+                                        ? screenWidth * 0.63
+                                        : null,
                                     top:
                                         offset.dy +
                                         (widget.textStyle?.fontSize ?? 14) +
                                         10 +
-                                        (screenWidth < 700 ? 400 : 0),
+                                        (screenWidth < 700
+                                            ? (offset.dy < (screenWidth / 2) &&
+                                                      400 < screenHeight)
+                                                  ? (((widget.textStyle?.fontSize ??
+                                                                    14) +
+                                                                6.5) *
+                                                            (_suggestionNotifier
+                                                                    .value
+                                                                    ?.length ??
+                                                                0))
+                                                        .clamp(0, 400)
+                                                  : -100
+                                            : 0),
                                     left: screenWidth < 700
                                         ? offset.dx
                                         : offset.dx + screenWidth * 0.3 + 8,
@@ -1967,6 +2210,7 @@ class _CodeForgeState extends State<CodeForge>
                                       constraints: BoxConstraints(
                                         maxWidth: 420,
                                         maxHeight: 400,
+                                        minWidth: 70,
                                       ),
                                       child: Card(
                                         color:
@@ -2633,6 +2877,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final ValueNotifier<List<dynamic>?> hoverNotifier, suggestionNotifier;
   final ValueNotifier<List<dynamic>?> lspActionNotifier;
   final ValueNotifier<String?> aiNotifier;
+  final ValueNotifier<LspSignatureHelps?> signatureNotifier;
   final ValueNotifier<Offset?> aiOffsetNotifier, lspActionOffsetNotifier;
   final BuildContext context;
   final TextStyle? aiCompletionTextStyle;
@@ -2662,6 +2907,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.hoverNotifier,
     required this.suggestionNotifier,
     required this.aiNotifier,
+    required this.signatureNotifier,
     required this.aiOffsetNotifier,
     required this.lspActionNotifier,
     required this.lspActionOffsetNotifier,
@@ -2715,6 +2961,7 @@ class _CodeField extends LeafRenderObjectWidget {
       suggestionNotifier: suggestionNotifier,
       lspActionNotifier: lspActionNotifier,
       lspActionOffsetNotifier: lspActionOffsetNotifier,
+      signatureNotifier: signatureNotifier,
       aiCompletionTextStyle: aiCompletionTextStyle,
       filePath: filePath,
     );
@@ -2764,6 +3011,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final ValueNotifier<List<dynamic>?> lspActionNotifier;
   final ValueNotifier<Offset?> aiOffsetNotifier, lspActionOffsetNotifier;
   final ValueNotifier<String?> aiNotifier;
+  final ValueNotifier<LspSignatureHelps?> signatureNotifier;
   final BuildContext context;
   final LspConfig? lspConfig;
   final Map<int, double> _lineWidthCache = {};
@@ -2881,6 +3129,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.lspActionOffsetNotifier,
     required this.aiNotifier,
     required this.aiOffsetNotifier,
+    required this.signatureNotifier,
     required this.isHoveringPopup,
     required this.context,
     required bool lineWrap,
@@ -3901,7 +4150,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final clampedWrapWidth = newWrapWidth < 100 ? 100.0 : newWrapWidth;
 
       if ((_wrapWidth - clampedWrapWidth).abs() > 1) {
-        // Debounce resize updates
         _resizeTimer?.cancel();
         _resizeTimer = Timer(const Duration(milliseconds: 150), () {
           _wrapWidth = clampedWrapWidth;
@@ -3909,8 +4157,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           _lineHeightCache.clear();
           markNeedsLayout();
         });
-        // Skip update this frame if we are waiting for debounce
-        // But if _wrapWidth is infinity (first run), we must set it
         if (_wrapWidth == double.infinity) {
           _wrapWidth = clampedWrapWidth;
         }
@@ -3957,7 +4203,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final lineText = controller.getLineText(lineIndex);
 
-    // Fallback if needed (shouldn't happen often if M measurement works)
     final para = _buildHighlightedParagraph(
       lineIndex,
       lineText,
@@ -4126,7 +4371,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           );
           _paragraphCache[i] = paragraph;
 
-          // Refine estimation with actual height
           if (lineWrap) {
             _lineHeightCache[i] = paragraph.height;
           }
@@ -5762,6 +6006,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       try {
         focusNode.requestFocus();
         suggestionNotifier.value = null;
+        signatureNotifier.value = null;
       } catch (e) {
         debugPrint(e.toString());
       }
@@ -5804,13 +6049,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         };
 
         _onetap.onTap = () {
-          if (lspActionNotifier.value != null) {
-            lspActionNotifier.value = null;
-            lspActionOffsetNotifier.value = null;
-          }
-          if (suggestionNotifier.value != null) {
-            suggestionNotifier.value = null;
-          }
           if (hoverNotifier.value != null) {
             hoverNotifier.value = null;
           } else if (_isOffsetOverWord(textOffset)) {
@@ -5866,6 +6104,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         _onetap.onTap = () {
           if (suggestionNotifier.value != null) {
             suggestionNotifier.value = null;
+          }
+          if (signatureNotifier.value != null) {
+            signatureNotifier.value = null;
           }
           if (lspActionNotifier.value != null) {
             lspActionNotifier.value = null;
