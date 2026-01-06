@@ -42,7 +42,8 @@ class BiDi {
     return (codeUnit >= _arabicStart && codeUnit <= _arabicEnd) ||
         (codeUnit >= _arabicSupplementStart &&
             codeUnit <= _arabicSupplementEnd) ||
-        (codeUnit >= _arabicExtendedAStart && codeUnit <= _arabicExtendedAEnd) ||
+        (codeUnit >= _arabicExtendedAStart &&
+            codeUnit <= _arabicExtendedAEnd) ||
         (codeUnit >= _hebrewStart && codeUnit <= _hebrewEnd) ||
         (codeUnit >= _syriacStart && codeUnit <= _syriacEnd) ||
         (codeUnit >= _thaanaStart && codeUnit <= _thaanaEnd) ||
@@ -110,9 +111,7 @@ class Rope {
   }
 
   /// Private constructor for immutable operations
-  Rope._fromNode(_RopeNode? root, int length)
-      : _root = root,
-        _length = length;
+  Rope._fromNode(_RopeNode? root, int length) : _root = root, _length = length;
 
   int get length => _length;
 
@@ -236,22 +235,16 @@ class Rope {
         currentDir = charDir;
         segmentStart = i;
       } else if (charDir != currentDir) {
-        segments.add(BiDiSegment(
-          start + segmentStart,
-          start + i,
-          currentDir,
-        ));
+        segments.add(BiDiSegment(start + segmentStart, start + i, currentDir));
         currentDir = charDir;
         segmentStart = i;
       }
     }
 
     if (currentDir != null) {
-      segments.add(BiDiSegment(
-        start + segmentStart,
-        start + text.length,
-        currentDir,
-      ));
+      segments.add(
+        BiDiSegment(start + segmentStart, start + text.length, currentDir),
+      );
     }
 
     return segments;
@@ -273,9 +266,13 @@ class Rope {
     if (!containsRtl) return text;
 
     if (isRtl) {
-      return String.fromCharCode(BiDi.rle) + text + String.fromCharCode(BiDi.pdf);
+      return String.fromCharCode(BiDi.rle) +
+          text +
+          String.fromCharCode(BiDi.pdf);
     } else {
-      return String.fromCharCode(BiDi.lre) + text + String.fromCharCode(BiDi.pdf);
+      return String.fromCharCode(BiDi.lre) +
+          text +
+          String.fromCharCode(BiDi.pdf);
     }
   }
 
