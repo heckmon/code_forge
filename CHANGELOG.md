@@ -171,3 +171,14 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 4.3.0
 - FEATURE: BiDi support in `Rope` data structure.
 - FEATURE: Immutable rope operations - insert and delete.
+
+## 5.0.0
+- FEATURE: Added git diff support:
+<p align="left">
+  <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/git_diff.png" alt="Git diff" heihght="400" width="400"/>
+
+</p>
+
+- ENHANCEMENT: Removed built-in AI completion and APi calls, user can use `controller.setGhostText()`.
+
+- ENHANCEMENT: Enhanced large text handling.

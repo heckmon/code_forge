@@ -279,7 +279,14 @@ sealed class LspConfig {
       final result = response['result'];
       if (result == null) return completion;
 
-      final items = result['items'];
+      final dynamic items;
+
+      if (result is List) {
+        items = result;
+      } else {
+        items = result['items'];
+      }
+
       if (items == null || items is! List) return completion;
 
       for (Map<String, dynamic> item in items) {
@@ -648,7 +655,16 @@ sealed class LspConfig {
           'start': {'line': startLine, 'character': startCharacter},
           'end': {'line': endLine, 'character': endCharacter},
         },
-        'context': {'diagnostics': diagnostics},
+        'context': {
+          'diagnostics': diagnostics,
+          if (Platform.isAndroid && filePath.endsWith(".java"))
+            'only': [
+              'quickfix',
+              'refactor.extract',
+              'refactor.inline',
+              'refactor.rewrite',
+            ],
+        },
       },
     );
 

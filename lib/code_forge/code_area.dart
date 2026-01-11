@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
-import '../AI_completion/ai.dart';
 import '../LSP/lsp.dart';
 import 'controller.dart';
 import 'find_controller.dart';
@@ -85,27 +84,23 @@ class CodeForge extends StatefulWidget {
   /// Defines the font family, size, and other text properties.
   final TextStyle? textStyle;
 
-  /// Configuration for AI-powered code completion.
+  /// The text style for ghost text (inline suggestions).
   ///
-  /// When provided, enables AI suggestions while typing.
-  final AiCompletion? aiCompletion;
-
-  /// The text style for AI completion ghost text.
-  ///
-  /// This style is applied to the semi-transparent AI suggestion text
-  /// that appears inline as the user types. If not specified, defaults
-  /// to the editor's base text style with reduced opacity.
+  /// This style is applied to the semi-transparent suggestion text
+  /// that appears inline. Ghost text is set via the controller's
+  /// `setGhostText()` method. If not specified, defaults to the
+  /// editor's base text style with reduced opacity.
   ///
   /// Example:
   /// ```dart
   /// CodeForge(
-  ///   aiCompletionTextStyle: TextStyle(
+  ///   ghostTextStyle: TextStyle(
   ///     color: Colors.grey.withOpacity(0.5),
   ///     fontStyle: FontStyle.italic,
   ///   ),
   /// )
   /// ```
-  final TextStyle? aiCompletionTextStyle;
+  final TextStyle? ghostTextStyle;
 
   /// Padding inside the editor content area.
   final EdgeInsets? innerPadding;
@@ -197,8 +192,7 @@ class CodeForge extends StatefulWidget {
     this.undoController,
     this.editorTheme,
     this.language,
-    this.aiCompletion,
-    this.aiCompletionTextStyle,
+    this.ghostTextStyle,
     this.filePath,
     this.initialText,
     this.focusNode,
@@ -253,7 +247,6 @@ class _CodeForgeState extends State<CodeForge>
   late final VoidCallback _controllerListener;
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
-  final Map<String, String> _cachedResponse = {};
   final _isMobile = Platform.isAndroid || Platform.isIOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
@@ -266,7 +259,7 @@ class _CodeForgeState extends State<CodeForge>
   int _semanticTokensVersion = 0;
   int _sugSelIndex = 0, _actionSelIndex = 0;
   String? _selectedSuggestionMd;
-  Timer? _hoverTimer, _aiDebounceTimer;
+  Timer? _hoverTimer;
   late final FindController _findController;
 
   @override
@@ -290,7 +283,6 @@ class _CodeForgeState extends State<CodeForge>
     _contextMenuOffsetNotifier = ValueNotifier(const Offset(-1, -1));
     _selectionActiveNotifier = ValueNotifier(false);
     _isHoveringPopup = ValueNotifier<bool>(false);
-    _controller.manualAiCompletion = _getManualAiSuggestion;
     _controller.userCodeAction = _fetchCodeActionsForCurrentPosition;
     _controller.readOnly = widget.readOnly;
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
@@ -448,67 +440,6 @@ class _CodeForgeState extends State<CodeForge>
         _hoverTimer?.cancel();
         _hoverNotifier.value = null;
       }
-
-      _aiDebounceTimer?.cancel();
-
-      if (widget.aiCompletion != null &&
-          _controller.selection.isValid &&
-          widget.aiCompletion!.enableCompletion &&
-          _aiNotifier.value == null) {
-        if (_suggestionNotifier.value != null) return;
-        final text = _controller.text;
-        const int maxSuffixChars = 1000;
-        const int maxPrefixChars = 3000;
-        final cursorPosition = _controller.selection.extentOffset.clamp(
-          0,
-          _controller.length,
-        );
-        final textAfterCursor = text.substring(cursorPosition);
-        if (cursorPosition <= 0) return;
-        bool lineEnd =
-            textAfterCursor.isEmpty ||
-            textAfterCursor.startsWith('\n') ||
-            textAfterCursor.trim().isEmpty;
-        if (!lineEnd) return;
-        final start = (cursorPosition - maxPrefixChars).clamp(
-          0,
-          cursorPosition,
-        );
-        final end = (cursorPosition + maxSuffixChars).clamp(
-          cursorPosition,
-          text.length,
-        );
-
-        final prefixContext = text.substring(start, cursorPosition);
-        final suffixContext = text.substring(cursorPosition, end);
-
-        final codeToSend =
-            '''
-        Language: ${widget.language!.name}
-        Task: Code completion
-
-        Context before cursor:
-        --------------------------------
-        $prefixContext
-        --------------------------------
-        <|CURSOR|>
-        --------------------------------
-        Context after cursor:
-        --------------------------------
-        $suffixContext
-        --------------------------------
-        ''';
-
-        if (widget.aiCompletion!.completionType == CompletionType.auto ||
-            widget.aiCompletion!.completionType == CompletionType.mixed) {
-          _aiDebounceTimer = Timer(
-            Duration(milliseconds: widget.aiCompletion!.debounceTime),
-            () async {
-              _aiNotifier.value = await _getCachedResponse(codeToSend);
-            },
-          );
-        }
-      }
     };
 
     _controller.addListener(_controllerListener);
@@ -656,13 +587,18 @@ class _CodeForgeState extends State<CodeForge>
     _suggScrollController.dispose();
     _actionScrollController.dispose();
     _hoverTimer?.cancel();
-    _aiDebounceTimer?.cancel();
     super.dispose();
   }
 
   void _handleArrowRight(bool withShift) {
+    final ghost = _controller.ghostText;
+    if (ghost != null && !ghost.shouldPersist && !withShift) {
+      _acceptControllerGhostText();
+      return;
+    }
+
     if (_aiNotifier.value != null) {
-      _acceptAiCompletion();
+      _acceptGhostText();
       return;
     }
 
@@ -919,6 +855,11 @@ class _CodeForgeState extends State<CodeForge>
   void _commonKeyFunctions() {
     if (_aiNotifier.value != null) {
       _aiNotifier.value = null;
+    }
+
+    final ghost = _controller.ghostText;
+    if (ghost != null && !ghost.shouldPersist) {
+      _controller.clearGhostText();
     }
 
     _resetCursorBlink();
@@ -1745,9 +1686,18 @@ class _CodeForgeState extends State<CodeForge>
                                                     return KeyEventResult
                                                         .handled;
                                                   }
+                                                  // Check for ghost text from controller (non-persistent)
+                                                  final ghost =
+                                                      _controller.ghostText;
+                                                  if (ghost != null &&
+                                                      !ghost.shouldPersist) {
+                                                    _acceptControllerGhostText();
+                                                    return KeyEventResult
+                                                        .handled;
+                                                  }
                                                   if (_aiNotifier.value !=
                                                       null) {
-                                                    _acceptAiCompletion();
+                                                    _acceptGhostText();
                                                   } else if (_suggestionNotifier
                                                           .value ==
                                                       null) {
@@ -1812,8 +1762,8 @@ class _CodeForgeState extends State<CodeForge>
                                             isHoveringPopup: _isHoveringPopup,
                                             suggestionNotifier:
                                                 _suggestionNotifier,
-                                            aiCompletionTextStyle:
-                                                widget.aiCompletionTextStyle,
+                                            ghostTextStyle:
+                                                widget.ghostTextStyle,
                                             matchHighlightStyle:
                                                 widget.matchHighlightStyle,
                                             lspActionNotifier:
@@ -2157,7 +2107,18 @@ class _CodeForgeState extends State<CodeForge>
                                                           item.completionItem,
                                                         );
                                                     final mdText =
-                                                        "${data['detail'] ?? ''}\n${data['documentation'] ?? ''}";
+                                                        "${data['detail'] ?? ''}\n${(() {
+                                                          final doc = data['documentation'];
+                                                          if (doc == null) {
+                                                            return '';
+                                                          }
+
+                                                          if (doc is Map<String, dynamic> && doc.containsKey('value')) {
+                                                            return doc['value'];
+                                                          }
+
+                                                          return doc;
+                                                        })()}";
                                                     if (!mounted) return;
                                                     setState(() {
                                                       final edits =
@@ -2976,35 +2937,19 @@ class _CodeForgeState extends State<CodeForge>
     _sugSelIndex = 0;
   }
 
-  Future<void> _getManualAiSuggestion() async {
-    _suggestionNotifier.value = null;
-    if (widget.aiCompletion?.completionType == CompletionType.manual ||
-        widget.aiCompletion?.completionType == CompletionType.mixed) {
-      final String text = _controller.text;
-      final int cursorPosition = _controller.selection.extentOffset;
-      final String codeToSend =
-          "${text.substring(0, cursorPosition)}<|CURSOR|>${text.substring(cursorPosition)}";
-      _aiNotifier.value = await _getCachedResponse(codeToSend);
-    }
-  }
-
-  Future<String> _getCachedResponse(String codeToSend) async {
-    final String key = codeToSend.hashCode.toString();
-    if (_cachedResponse.containsKey(key)) {
-      return _cachedResponse[key]!;
-    }
-    final String aiResponse = await widget.aiCompletion!.model
-        .completionResponse(codeToSend);
-    _cachedResponse[key] = aiResponse;
-    return aiResponse;
-  }
-
-  void _acceptAiCompletion() {
-    final aiText = _aiNotifier.value;
-    if (aiText == null || aiText.isEmpty) return;
-    _controller.insertAtCurrentCursor(aiText);
+  void _acceptGhostText() {
+    final ghostText = _aiNotifier.value;
+    if (ghostText == null || ghostText.isEmpty) return;
+    _controller.insertAtCurrentCursor(ghostText);
     _aiNotifier.value = null;
     _aiOffsetNotifier.value = null;
+  }
+
+  void _acceptControllerGhostText() {
+    final ghost = _controller.ghostText;
+    if (ghost == null || ghost.text.isEmpty) return;
+    _controller.insertAtCurrentCursor(ghost.text);
+    _controller.clearGhostText();
   }
 }
 
@@ -3034,7 +2979,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final ValueNotifier<LspSignatureHelps?> signatureNotifier;
   final ValueNotifier<Offset?> aiOffsetNotifier, lspActionOffsetNotifier;
   final BuildContext context;
-  final TextStyle? aiCompletionTextStyle;
+  final TextStyle? ghostTextStyle;
   final String? filePath;
   final MatchHighlightStyle? matchHighlightStyle;
 
@@ -3075,7 +3020,7 @@ class _CodeField extends LeafRenderObjectWidget {
     this.semanticTokens,
     this.semanticTokensVersion = 0,
     this.innerPadding,
-    this.aiCompletionTextStyle,
+    this.ghostTextStyle,
     this.matchHighlightStyle,
   });
 
@@ -3116,7 +3061,7 @@ class _CodeField extends LeafRenderObjectWidget {
       lspActionNotifier: lspActionNotifier,
       lspActionOffsetNotifier: lspActionOffsetNotifier,
       signatureNotifier: signatureNotifier,
-      aiCompletionTextStyle: aiCompletionTextStyle,
+      ghostTextStyle: ghostTextStyle,
       filePath: filePath,
     );
   }
@@ -3148,7 +3093,7 @@ class _CodeField extends LeafRenderObjectWidget {
       ..enableGutterDivider = enableGutterDivider
       ..gutterStyle = gutterStyle
       ..selectionStyle = selectionStyle
-      ..aiCompletionTextStyle = aiCompletionTextStyle;
+      ..ghostTextStyle = ghostTextStyle;
   }
 }
 
@@ -3186,7 +3131,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   late final ui.TextStyle _uiTextStyle;
   late SyntaxHighlighter _syntaxHighlighter;
   late double _gutterWidth;
-  TextStyle? _aiCompletionTextStyle;
+  TextStyle? _ghostTextStyle;
   Map<String, TextStyle> _editorTheme;
   Mode _language;
   EdgeInsets? _innerPadding;
@@ -3201,20 +3146,26 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Offset _currentPosition = Offset.zero;
   bool _enableFolding, _enableGuideLines, _enableGutter, _enableGutterDivider;
   bool _isFoldToggleInProgress = false, _lineWrap;
-  bool _foldRangesNeedsClear = false, _insertingPlaceholder = false;
+  bool _foldRangesNeedsClear = false;
   bool _selectionActive = false, _isDragging = false;
   bool _draggingStartHandle = false, _draggingEndHandle = false;
   bool _showBubble = false, _draggingCHandle = false, _readOnly;
   Rect? _startHandleRect, _endHandleRect, _normalHandle;
   double _longLineWidth = 0.0, _wrapWidth = double.infinity;
   Timer? _resizeTimer;
-  int _extraSpaceToAdd = 0, _cachedLineCount = 0;
+  int _cachedLineCount = 0;
+  Timer? _layoutDebounceTimer;
+  bool _isDeferringLayout = false;
+  int _previousLineCount = 0;
+  double _cachedTotalHeight = 0.0;
+  bool _hasCachedHeight = false;
   String? _aiResponse, _lastProcessedText;
   TextSelection? _lastSelectionForAi;
   ui.Paragraph? _cachedMagnifiedParagraph;
-  int? _placeholderInsertOffset, _cachedMagnifiedLine, _cachedMagnifiedOffset;
-  int _placeholderLineCount = 0;
+  int? _cachedMagnifiedLine, _cachedMagnifiedOffset;
   int _lastAppliedSemanticVersion = -1, _lastDocumentVersion = -1;
+  int? _ghostTextAnchorLine;
+  int _ghostTextLineCount = 0;
 
   void updateSemanticTokens(List<LspSemanticToken> tokens, int version) {
     if (version < _lastAppliedSemanticVersion) return;
@@ -3303,9 +3254,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     this.matchHighlightStyle,
     EdgeInsets? innerPadding,
     TextStyle? textStyle,
-    TextStyle? aiCompletionTextStyle,
+    TextStyle? ghostTextStyle,
   }) : _editorTheme = editorTheme,
-       _aiCompletionTextStyle = aiCompletionTextStyle,
+       _ghostTextStyle = ghostTextStyle,
        _language = language,
        _readOnly = readOnly,
        _enableFolding = enableFolding,
@@ -3427,65 +3378,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _aiResponse = aiNotifier.value;
       aiOffsetNotifier.value = _getCaretInfo().offset;
 
-      final isNewSuggestion =
-          _aiResponse != null &&
-          (previousAiResponse == null ||
-              !previousAiResponse.endsWith(_aiResponse!));
-
-      if (isNewSuggestion) {
+      if (_aiResponse != null && _aiResponse!.isNotEmpty) {
         final aiLines = _aiResponse!.split('\n');
-        final aiLineslen = aiLines.length;
-        if (aiLineslen > 1) {
-          if (_placeholderInsertOffset != null && _placeholderLineCount > 0) {
-            final placehldr = '\n' * _placeholderLineCount;
-            _insertingPlaceholder = true;
-            controller.replaceRange(
-              _placeholderInsertOffset!,
-              _placeholderInsertOffset! + placehldr.length,
-              '',
-            );
-            _insertingPlaceholder = false;
-          }
-
-          final placehldr = '\n' * (aiLineslen - 1);
-          _extraSpaceToAdd = aiLineslen;
-          final lastSelection = controller.selection;
-
-          _insertingPlaceholder = true;
-          _placeholderInsertOffset = controller.selection.extentOffset;
-          _placeholderLineCount = aiLineslen - 1;
-          controller.insertAtCurrentCursor(placehldr);
-          controller.selection = lastSelection;
-          _insertingPlaceholder = false;
-        }
+        _ghostTextAnchorLine = controller.getLineAtOffset(
+          controller.selection.extentOffset.clamp(0, controller.length),
+        );
+        _ghostTextLineCount = aiLines.length - 1; // Extra lines beyond first
       } else if (_aiResponse == null && previousAiResponse != null) {
-        if (_placeholderInsertOffset != null && _placeholderLineCount > 0) {
-          final currentOffset = controller.selection.extentOffset;
-          final placehldr = '\n' * _placeholderLineCount;
-
-          _insertingPlaceholder = true;
-
-          controller.replaceRange(
-            _placeholderInsertOffset!,
-            _placeholderInsertOffset! + placehldr.length,
-            '',
-          );
-
-          if (currentOffset > _placeholderInsertOffset!) {
-            final adjustedOffset = (currentOffset - placehldr.length).clamp(
-              0,
-              controller.length,
-            );
-            controller.selection = TextSelection.collapsed(
-              offset: adjustedOffset,
-            );
-          }
-          _insertingPlaceholder = false;
-
-          _placeholderInsertOffset = null;
-          _placeholderLineCount = 0;
-        }
-        _extraSpaceToAdd = 0;
+        _ghostTextAnchorLine = null;
+        _ghostTextLineCount = 0;
       }
 
       markNeedsLayout();
@@ -3504,10 +3405,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool get enableGutter => _enableGutter;
   bool get enableGutterDivider => _enableGutterDivider;
   GutterStyle get gutterStyle => _gutterStyle;
-  TextStyle? get aiCompletionTextStyle => _aiCompletionTextStyle;
-  set aiCompletionTextStyle(TextStyle? value) {
-    if (_aiCompletionTextStyle == value) return;
-    _aiCompletionTextStyle = value;
+  TextStyle? get ghostTextStyle => _ghostTextStyle;
+  set ghostTextStyle(TextStyle? value) {
+    if (_ghostTextStyle == value) return;
+    _ghostTextStyle = value;
     markNeedsPaint();
   }
 
@@ -3687,9 +3588,46 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
   }
 
+  void _deferLayout() {
+    _layoutDebounceTimer?.cancel();
+    _isDeferringLayout = true;
+
+    if (_hasCachedHeight) {
+      final lineDelta = _cachedLineCount - _previousLineCount;
+      _cachedTotalHeight += lineDelta * _lineHeight;
+    }
+    _previousLineCount = _cachedLineCount;
+
+    if (!_isFoldToggleInProgress) {
+      _ensureCaretVisible();
+    }
+    markNeedsPaint();
+
+    _layoutDebounceTimer = Timer(const Duration(milliseconds: 100), () {
+      _isDeferringLayout = false;
+      markNeedsLayout();
+    });
+  }
+
   void _onControllerChange() {
     if (controller.searchHighlightsChanged) {
       controller.searchHighlightsChanged = false;
+      markNeedsPaint();
+      return;
+    }
+
+    if (controller.decorationsChanged) {
+      controller.decorationsChanged = false;
+      final ghost = controller.ghostText;
+      if (ghost != null && ghost.text.isNotEmpty) {
+        _ghostTextAnchorLine = ghost.line;
+        final ghostLines = ghost.text.split('\n');
+        _ghostTextLineCount = ghostLines.length - 1;
+      } else if (_aiResponse == null) {
+        _ghostTextAnchorLine = null;
+        _ghostTextLineCount = 0;
+      }
+      markNeedsLayout();
       markNeedsPaint();
       return;
     }
@@ -3756,12 +3694,27 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     controller.clearDirtyRegion();
 
     if (lineCountChanged) {
+      final insertionLine =
+          affectedLine ??
+          controller.getLineAtOffset(
+            controller.selection.extentOffset.clamp(0, controller.length),
+          );
+
       _cachedLineCount = newLineCount;
-      _lineTextCache.clear();
-      _lineWidthCache.clear();
-      _paragraphCache.clear();
-      _lineHeightCache.clear();
-      _syntaxHighlighter.invalidateAll();
+
+      final startInvalidation = insertionLine > 0 ? insertionLine - 1 : 0;
+      _lineTextCache.removeWhere((key, _) => key >= startInvalidation);
+      _lineWidthCache.removeWhere((key, _) => key >= startInvalidation);
+      _paragraphCache.removeWhere((key, _) => key >= startInvalidation);
+      _lineHeightCache.removeWhere((key, _) => key >= startInvalidation);
+      _syntaxHighlighter.invalidateLines(
+        Set.from(
+          List.generate(
+            newLineCount - startInvalidation,
+            (i) => startInvalidation + i,
+          ),
+        ),
+      );
 
       if (enableGutter && gutterStyle.gutterWidth == null) {
         final fontSize = textStyle?.fontSize ?? 14.0;
@@ -3775,7 +3728,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         _foldRangesNeedsClear = true;
       }
 
-      markNeedsLayout();
+      _deferLayout();
     } else if (affectedLine != null) {
       final newLineWidth = _getLineWidth(affectedLine);
       final currentContentWidth =
@@ -3800,16 +3753,23 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (_lastProcessedText == newText &&
         _aiResponse != null &&
         _aiResponse!.isNotEmpty &&
-        _lastSelectionForAi != controller.selection &&
-        !_insertingPlaceholder) {
+        _lastSelectionForAi != controller.selection) {
       aiNotifier.value = null;
       aiOffsetNotifier.value = null;
+      _ghostTextAnchorLine = null;
+      _ghostTextLineCount = 0;
+    }
+
+    final ghost = controller.ghostText;
+    if (_lastProcessedText == newText &&
+        ghost != null &&
+        !ghost.shouldPersist &&
+        _lastSelectionForAi != controller.selection) {
+      controller.clearGhostText();
     }
     _lastSelectionForAi = controller.selection;
 
-    if (_aiResponse != null &&
-        _aiResponse!.isNotEmpty &&
-        !_insertingPlaceholder) {
+    if (_aiResponse != null && _aiResponse!.isNotEmpty) {
       final textLengthDiff = newText.length - oldText.length;
 
       if (textLengthDiff > 0 && cursorPosition >= textLengthDiff) {
@@ -3819,27 +3779,65 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         );
 
         if (_aiResponse!.startsWith(newlyTypedChars)) {
-          if (_placeholderInsertOffset != null) {
-            _placeholderInsertOffset =
-                _placeholderInsertOffset! + newlyTypedChars.length;
-          }
-
           _aiResponse = _aiResponse!.substring(newlyTypedChars.length);
           if (_aiResponse!.isEmpty) {
             aiNotifier.value = null;
             aiOffsetNotifier.value = null;
+            _ghostTextAnchorLine = null;
+            _ghostTextLineCount = 0;
           } else {
             aiNotifier.value = _aiResponse;
+            final aiLines = _aiResponse!.split('\n');
+            _ghostTextLineCount = aiLines.length - 1;
           }
         } else {
           _aiResponse = null;
           aiNotifier.value = null;
           aiOffsetNotifier.value = null;
+          _ghostTextAnchorLine = null;
+          _ghostTextLineCount = 0;
         }
       } else if (textLengthDiff < 0) {
         _aiResponse = null;
         aiNotifier.value = null;
         aiOffsetNotifier.value = null;
+        _ghostTextAnchorLine = null;
+        _ghostTextLineCount = 0;
+      }
+    }
+
+    final ctrlGhost = controller.ghostText;
+    if (ctrlGhost != null && !ctrlGhost.shouldPersist) {
+      final textLengthDiff = newText.length - oldText.length;
+
+      if (textLengthDiff > 0 && cursorPosition >= textLengthDiff) {
+        final newlyTypedChars = textBeforeCursor.substring(
+          cursorPosition - textLengthDiff,
+          cursorPosition,
+        );
+
+        if (ctrlGhost.text.startsWith(newlyTypedChars)) {
+          final remainingText = ctrlGhost.text.substring(
+            newlyTypedChars.length,
+          );
+          if (remainingText.isEmpty) {
+            controller.clearGhostText();
+          } else {
+            controller.setGhostText(
+              GhostText(
+                line: ctrlGhost.line,
+                column: ctrlGhost.column + newlyTypedChars.length,
+                text: remainingText,
+                style: ctrlGhost.style,
+                shouldPersist: false,
+              ),
+            );
+          }
+        } else {
+          controller.clearGhostText();
+        }
+      } else if (textLengthDiff < 0) {
+        controller.clearGhostText();
       }
     }
 
@@ -4161,10 +4159,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         }
       }
 
+      final ghostOffset = _getGhostTextVisualOffset(lineIndex);
+
       return (
         lineIndex: lineIndex,
         columnIndex: columnIndex,
-        offset: Offset(caretX, lineY + caretYInLine),
+        offset: Offset(caretX, lineY + caretYInLine + ghostOffset),
         height: _lineHeight,
       );
     }
@@ -4208,10 +4208,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
     }
 
+    final ghostOffset = _getGhostTextVisualOffset(lineIndex);
+
     return (
       lineIndex: lineIndex,
       columnIndex: columnIndex,
-      offset: Offset(caretX, lineY + caretYInLine),
+      offset: Offset(caretX, lineY + caretYInLine + ghostOffset),
       height: _lineHeight,
     );
   }
@@ -4278,7 +4280,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   @override
   void detach() {
     _resizeTimer?.cancel();
+    _layoutDebounceTimer?.cancel();
     super.detach();
+  }
+
+  double get _ghostTextExtraHeight => _ghostTextLineCount * _lineHeight;
+
+  double _getGhostTextVisualOffset(int lineIndex) {
+    if (_ghostTextAnchorLine == null || _ghostTextLineCount <= 0) return 0;
+    if (lineIndex <= _ghostTextAnchorLine!) return 0;
+    return _ghostTextExtraHeight;
   }
 
   @override
@@ -4291,9 +4302,25 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineHeightCache.removeWhere((key, _) => key >= lineCount);
     }
 
+    if (_isDeferringLayout && _hasCachedHeight) {
+      final contentHeight =
+          _cachedTotalHeight +
+          (innerPadding?.vertical ?? 0) +
+          _ghostTextExtraHeight;
+      final computedWidth = lineWrap
+          ? (constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : MediaQuery.of(context).size.width)
+          : _longLineWidth + (innerPadding?.horizontal ?? 0) + _gutterWidth;
+      final minWidth = lineWrap ? 0.0 : MediaQuery.of(context).size.width;
+      final contentWidth = max(computedWidth, minWidth);
+      size = constraints.constrain(Size(contentWidth, contentHeight));
+      return;
+    }
+
     final hasActiveFolds = _foldRanges.any((f) => f.isFolded);
     double visibleHeight = 0;
-    double maxLineWidth = 0;
+    double maxLineWidth = _longLineWidth;
 
     if (lineWrap) {
       final viewportWidth = constraints.maxWidth.isFinite
@@ -4315,29 +4342,77 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           _wrapWidth = clampedWrapWidth;
         }
       }
+
+      if (hasActiveFolds) {
+        for (int i = 0; i < lineCount; i++) {
+          if (_isLineFolded(i)) continue;
+          visibleHeight += _getWrappedLineHeight(i);
+        }
+      } else {
+        double cachedHeight = 0;
+        int cachedCount = 0;
+        for (final entry in _lineHeightCache.entries) {
+          if (entry.key < lineCount) {
+            cachedHeight += entry.value;
+            cachedCount++;
+          }
+        }
+        final uncachedCount = lineCount - cachedCount;
+        final avgHeight = cachedCount > 0
+            ? cachedHeight / cachedCount
+            : _lineHeight;
+        visibleHeight = cachedHeight + (uncachedCount * avgHeight);
+      }
     } else {
       _wrapWidth = double.infinity;
-    }
 
-    for (int i = 0; i < lineCount; i++) {
-      if (hasActiveFolds && _isLineFolded(i)) continue;
-
-      if (lineWrap) {
-        final lineHeight = _getWrappedLineHeight(i);
-        visibleHeight += lineHeight;
+      if (hasActiveFolds) {
+        int visibleLines = 0;
+        for (int i = 0; i < lineCount; i++) {
+          if (!_isLineFolded(i)) visibleLines++;
+        }
+        visibleHeight = visibleLines * _lineHeight;
       } else {
-        visibleHeight += _lineHeight;
-        final width = _getLineWidth(i);
-        if (width > maxLineWidth) {
-          maxLineWidth = width;
+        visibleHeight = lineCount * _lineHeight;
+      }
+
+      if (_longLineWidth == 0 && lineCount > 0) {
+        final viewTop = vscrollController.hasClients
+            ? vscrollController.offset
+            : 0.0;
+        final viewBottom =
+            viewTop +
+            (vscrollController.hasClients
+                ? vscrollController.position.viewportDimension
+                : MediaQuery.of(context).size.height);
+        final firstVisible = (viewTop / _lineHeight).floor().clamp(
+          0,
+          lineCount - 1,
+        );
+        final lastVisible = (viewBottom / _lineHeight).ceil().clamp(
+          0,
+          lineCount - 1,
+        );
+        final buffer = 50;
+        final start = (firstVisible - buffer).clamp(0, lineCount - 1);
+        final end = (lastVisible + buffer).clamp(0, lineCount - 1);
+
+        for (int i = start; i <= end; i++) {
+          final width = _getLineWidth(i);
+          if (width > maxLineWidth) {
+            maxLineWidth = width;
+          }
         }
       }
     }
 
     _longLineWidth = maxLineWidth;
+    _cachedTotalHeight = visibleHeight;
+    _hasCachedHeight = true;
+    _previousLineCount = lineCount;
 
     final contentHeight =
-        visibleHeight + (innerPadding?.vertical ?? 0) + _extraSpaceToAdd;
+        visibleHeight + (innerPadding?.vertical ?? 0) + _ghostTextExtraHeight;
     final computedWidth = lineWrap
         ? (constraints.maxWidth.isFinite
               ? constraints.maxWidth
@@ -4460,6 +4535,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       hasActiveFolds,
     );
 
+    _drawLineDecorations(
+      canvas,
+      offset,
+      firstVisibleLine,
+      lastVisibleLine,
+      firstVisibleLineY,
+      hasActiveFolds,
+    );
+
     _drawFoldedLineHighlights(
       canvas,
       offset,
@@ -4496,6 +4580,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       final contentTop = currentY;
       final lineHeight = lineWrap ? _getWrappedLineHeight(i) : _lineHeight;
+      final visualYOffset = _getGhostTextVisualOffset(i);
 
       ui.Paragraph paragraph;
       String lineText;
@@ -4541,7 +4626,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               _gutterWidth +
                   (innerPadding?.left ?? 0) -
                   (lineWrap ? 0 : hscrollController.offset),
-              (innerPadding?.top ?? 0) + contentTop - vscrollController.offset,
+              (innerPadding?.top ?? 0) +
+                  contentTop +
+                  visualYOffset -
+                  vscrollController.offset,
             ),
       );
 
@@ -4557,7 +4645,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                     paraWidth -
                     (lineWrap ? 0 : hscrollController.offset),
                 (innerPadding?.top ?? 0) +
-                    contentTop -
+                    contentTop +
+                    visualYOffset -
                     vscrollController.offset,
               ),
         );
@@ -4575,7 +4664,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       hasActiveFolds,
     );
 
-    if (_aiResponse != null && _aiResponse!.isNotEmpty) {
+    if (controller.ghostText != null) {
+      _drawGhostText(
+        canvas,
+        offset,
+        firstVisibleLine,
+        lastVisibleLine,
+        firstVisibleLineY,
+        hasActiveFolds,
+      );
+    } else if (_aiResponse != null && _aiResponse!.isNotEmpty) {
       _drawAiGhostText(
         canvas,
         offset,
@@ -4919,9 +5017,19 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final contentTop = currentY;
       final lineHeight = lineWrap ? _getWrappedLineHeight(i) : _lineHeight;
 
-      if (contentTop > viewBottom) break;
+      final visualYOffset = _getGhostTextVisualOffset(i);
 
-      if (contentTop + lineHeight >= viewTop) {
+      if (contentTop + visualYOffset > viewBottom) break;
+
+      if (contentTop + visualYOffset + lineHeight >= viewTop) {
+        _drawGutterDecorations(
+          canvas,
+          offset,
+          i,
+          contentTop + visualYOffset,
+          lineHeight,
+        );
+
         Color lineNumberColor;
         final severity = lineSeverityMap[i];
         if (severity == 1) {
@@ -4956,7 +5064,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                 (_gutterWidth - numWidth) / 2 -
                     (enableFolding ? (lineNumberStyle.fontSize ?? 14) / 2 : 0),
                 (innerPadding?.top ?? 0) +
-                    contentTop -
+                    contentTop +
+                    visualYOffset -
                     vscrollController.offset,
               ),
         );
@@ -4999,7 +5108,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             final bulbY =
                 offset.dy +
                 (innerPadding?.top ?? 0) +
-                contentTop -
+                contentTop +
+                visualYOffset -
                 vscrollController.offset +
                 (_lineHeight - actionBulbPainter.height) / 2;
 
@@ -5038,7 +5148,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                 icon,
                 iconColor!,
                 lineNumberStyle.fontSize ?? 14,
-                contentTop - vscrollController.offset,
+                contentTop + visualYOffset - vscrollController.offset,
               );
             }
           }
@@ -5985,14 +6095,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     bool hasActiveFolds,
   ) {
     if (_aiResponse == null || _aiResponse!.isEmpty) return;
+    if (_ghostTextAnchorLine == null) return;
     if (!controller.selection.isValid || !controller.selection.isCollapsed) {
       return;
     }
 
     final cursorOffset = controller.selection.extentOffset;
-    final cursorLine = controller.getLineAtOffset(cursorOffset);
+    final cursorLine = _ghostTextAnchorLine!;
 
-    if (cursorLine < firstVisibleLine || cursorLine > lastVisibleLine) return;
     if (hasActiveFolds && _isLineFolded(cursorLine)) return;
 
     final lineStartOffset = controller.getLineStartOffset(cursorLine);
@@ -6031,38 +6141,23 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         (textStyle?.color ?? editorTheme['root']?.color ?? Colors.white)
             .withAlpha(100);
     final ghostStyle = ui.TextStyle(
-      color: _aiCompletionTextStyle?.color ?? defaultGhostColor,
-      fontSize: _aiCompletionTextStyle?.fontSize ?? textStyle?.fontSize ?? 14.0,
-      fontFamily: _aiCompletionTextStyle?.fontFamily ?? textStyle?.fontFamily,
-      fontStyle: _aiCompletionTextStyle?.fontStyle ?? FontStyle.italic,
-      fontWeight: _aiCompletionTextStyle?.fontWeight,
-      letterSpacing: _aiCompletionTextStyle?.letterSpacing,
-      wordSpacing: _aiCompletionTextStyle?.wordSpacing,
-      decoration: _aiCompletionTextStyle?.decoration,
-      decorationColor: _aiCompletionTextStyle?.decorationColor,
+      color: _ghostTextStyle?.color ?? defaultGhostColor,
+      fontSize: _ghostTextStyle?.fontSize ?? textStyle?.fontSize ?? 14.0,
+      fontFamily: _ghostTextStyle?.fontFamily ?? textStyle?.fontFamily,
+      fontStyle: _ghostTextStyle?.fontStyle ?? FontStyle.italic,
+      fontWeight: _ghostTextStyle?.fontWeight,
+      letterSpacing: _ghostTextStyle?.letterSpacing,
+      wordSpacing: _ghostTextStyle?.wordSpacing,
+      decoration: _ghostTextStyle?.decoration,
+      decorationColor: _ghostTextStyle?.decorationColor,
     );
 
     final aiLines = _aiResponse?.split('\n') ?? [];
+    final isSingleLineGhost = aiLines.length == 1;
+    final clampedCol = cursorCol.clamp(0, lineText.length);
 
-    for (int i = 0; i < aiLines.length; i++) {
-      if (aiLines.isEmpty) break;
-      final aiLineText = aiLines[i];
-      if (aiLineText.isEmpty && i < aiLines.length - 1) continue;
-
-      final lineIndex = cursorLine + i;
-
-      if (lineIndex < firstVisibleLine) continue;
-
-      double lineY;
-      if (i == 0) {
-        lineY = cursorY;
-      } else {
-        lineY = _getLineYOffset(lineIndex, hasActiveFolds);
-      }
-
-      final lineX = (i == 0) ? cursorX : 0;
-
-      final builder =
+    if (isSingleLineGhost && aiLines.isNotEmpty && aiLines[0].isNotEmpty) {
+      final ghostBuilder =
           ui.ParagraphBuilder(
               ui.ParagraphStyle(
                 fontFamily: textStyle?.fontFamily,
@@ -6071,24 +6166,667 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               ),
             )
             ..pushStyle(ghostStyle)
-            ..addText(aiLineText);
+            ..addText(aiLines[0]);
+      final ghostPara = ghostBuilder.build();
+      ghostPara.layout(const ui.ParagraphConstraints(width: double.infinity));
+      final firstLineGhostWidth = ghostPara.longestLine;
 
-      final para = builder.build();
-      para.layout(const ui.ParagraphConstraints(width: double.infinity));
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          cursorY -
+          vscrollController.offset;
 
       final screenX =
           offset.dx +
           _gutterWidth +
           (innerPadding?.left ?? 0) +
-          lineX -
+          cursorX -
           (lineWrap ? 0 : hscrollController.offset);
+
+      final bgColor = editorTheme['root']?.backgroundColor ?? Colors.black;
+      final originalPara = _paragraphCache[cursorLine];
+      if (originalPara != null && clampedCol < lineText.length) {
+        final remainingWidth = originalPara.longestLine - cursorX;
+        if (remainingWidth > 0) {
+          canvas.drawRect(
+            Rect.fromLTWH(screenX, screenY, remainingWidth + 2, _lineHeight),
+            Paint()..color = bgColor,
+          );
+        }
+      }
+
+      canvas.drawParagraph(ghostPara, Offset(screenX, screenY));
+
+      if (clampedCol < lineText.length) {
+        final remainingText = lineText.substring(clampedCol);
+
+        final normalStyle = ui.TextStyle(
+          color: textStyle?.color ?? editorTheme['root']?.color ?? Colors.white,
+          fontSize: textStyle?.fontSize ?? 14.0,
+          fontFamily: textStyle?.fontFamily,
+          fontWeight: textStyle?.fontWeight,
+        );
+
+        final remainingBuilder =
+            ui.ParagraphBuilder(
+                ui.ParagraphStyle(
+                  fontFamily: textStyle?.fontFamily,
+                  fontSize: textStyle?.fontSize ?? 14.0,
+                  height: textStyle?.height ?? 1.2,
+                ),
+              )
+              ..pushStyle(normalStyle)
+              ..addText(remainingText);
+
+        final remainingPara = remainingBuilder.build();
+        remainingPara.layout(
+          const ui.ParagraphConstraints(width: double.infinity),
+        );
+
+        canvas.drawParagraph(
+          remainingPara,
+          Offset(screenX + firstLineGhostWidth, screenY),
+        );
+      }
+      return;
+    }
+
+    if (aiLines.isNotEmpty && aiLines[0].isNotEmpty) {
+      final ghostBuilder =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontFamily: textStyle?.fontFamily,
+                fontSize: textStyle?.fontSize ?? 14.0,
+                height: textStyle?.height ?? 1.2,
+              ),
+            )
+            ..pushStyle(ghostStyle)
+            ..addText(aiLines[0]);
+      final ghostPara = ghostBuilder.build();
+      ghostPara.layout(const ui.ParagraphConstraints(width: double.infinity));
+
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          cursorY -
+          vscrollController.offset;
+
+      final screenX =
+          offset.dx +
+          _gutterWidth +
+          (innerPadding?.left ?? 0) +
+          cursorX -
+          (lineWrap ? 0 : hscrollController.offset);
+
+      final bgColor = editorTheme['root']?.backgroundColor ?? Colors.black;
+      final originalPara = _paragraphCache[cursorLine];
+      if (originalPara != null && clampedCol < lineText.length) {
+        final remainingWidth = originalPara.longestLine - cursorX;
+        if (remainingWidth > 0) {
+          canvas.drawRect(
+            Rect.fromLTWH(screenX, screenY, remainingWidth + 2, _lineHeight),
+            Paint()..color = bgColor,
+          );
+        }
+      }
+
+      canvas.drawParagraph(ghostPara, Offset(screenX, screenY));
+    }
+
+    double lastGhostLineWidth = 0;
+    double lastGhostLineScreenY = 0;
+    double lastGhostLineScreenX = 0;
+
+    for (int i = 1; i < aiLines.length; i++) {
+      final aiLineText = aiLines[i];
+      final isLastLine = i == aiLines.length - 1;
+
+      final lineY = cursorY + (i * _lineHeight);
+
       final screenY =
           offset.dy +
           (innerPadding?.top ?? 0) +
           lineY -
           vscrollController.offset;
 
-      canvas.drawParagraph(para, Offset(screenX, screenY));
+      final screenX =
+          offset.dx +
+          _gutterWidth +
+          (innerPadding?.left ?? 0) -
+          (lineWrap ? 0 : hscrollController.offset);
+
+      if (screenY + _lineHeight < offset.dy ||
+          screenY > offset.dy + vscrollController.position.viewportDimension) {
+        if (isLastLine) {
+          lastGhostLineScreenY = screenY;
+          lastGhostLineScreenX = screenX;
+        }
+        continue;
+      }
+
+      if (aiLineText.isNotEmpty || isLastLine) {
+        final builder =
+            ui.ParagraphBuilder(
+                ui.ParagraphStyle(
+                  fontFamily: textStyle?.fontFamily,
+                  fontSize: textStyle?.fontSize ?? 14.0,
+                  height: textStyle?.height ?? 1.2,
+                ),
+              )
+              ..pushStyle(ghostStyle)
+              ..addText(aiLineText);
+
+        final para = builder.build();
+        para.layout(const ui.ParagraphConstraints(width: double.infinity));
+
+        canvas.drawParagraph(para, Offset(screenX, screenY));
+
+        if (isLastLine) {
+          lastGhostLineWidth = para.longestLine;
+          lastGhostLineScreenY = screenY;
+          lastGhostLineScreenX = screenX;
+        }
+      }
+    }
+
+    if (clampedCol < lineText.length && aiLines.length > 1) {
+      final remainingText = lineText.substring(clampedCol);
+
+      final normalStyle = ui.TextStyle(
+        color: textStyle?.color ?? editorTheme['root']?.color ?? Colors.white,
+        fontSize: textStyle?.fontSize ?? 14.0,
+        fontFamily: textStyle?.fontFamily,
+        fontWeight: textStyle?.fontWeight,
+      );
+
+      final remainingBuilder =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontFamily: textStyle?.fontFamily,
+                fontSize: textStyle?.fontSize ?? 14.0,
+                height: textStyle?.height ?? 1.2,
+              ),
+            )
+            ..pushStyle(normalStyle)
+            ..addText(remainingText);
+
+      final remainingPara = remainingBuilder.build();
+      remainingPara.layout(
+        const ui.ParagraphConstraints(width: double.infinity),
+      );
+
+      canvas.drawParagraph(
+        remainingPara,
+        Offset(lastGhostLineScreenX + lastGhostLineWidth, lastGhostLineScreenY),
+      );
+    }
+  }
+
+  void _drawLineDecorations(
+    Canvas canvas,
+    Offset offset,
+    int firstVisibleLine,
+    int lastVisibleLine,
+    double firstVisibleLineY,
+    bool hasActiveFolds,
+  ) {
+    final decorations = controller.lineDecorations;
+    if (decorations.isEmpty) return;
+
+    for (final decoration in decorations) {
+      if (decoration.endLine < firstVisibleLine ||
+          decoration.startLine > lastVisibleLine) {
+        continue;
+      }
+
+      final paint = Paint()
+        ..color = decoration.color
+        ..style = PaintingStyle.fill;
+
+      double currentY = firstVisibleLineY;
+      for (
+        int i = firstVisibleLine;
+        i <= lastVisibleLine && i < controller.lineCount;
+        i++
+      ) {
+        if (hasActiveFolds && _isLineFolded(i)) continue;
+
+        final lineHeight = lineWrap ? _getWrappedLineHeight(i) : _lineHeight;
+
+        if (i >= decoration.startLine && i <= decoration.endLine) {
+          final screenY =
+              offset.dy +
+              (innerPadding?.top ?? 0) +
+              currentY -
+              vscrollController.offset;
+          final screenX =
+              offset.dx +
+              _gutterWidth +
+              (innerPadding?.left ?? 0) -
+              (lineWrap ? 0 : hscrollController.offset);
+
+          switch (decoration.type) {
+            case LineDecorationType.background:
+              final width =
+                  size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+              canvas.drawRect(
+                Rect.fromLTWH(screenX, screenY, width, lineHeight),
+                paint,
+              );
+              break;
+
+            case LineDecorationType.leftBorder:
+              paint.style = PaintingStyle.fill;
+              canvas.drawRect(
+                Rect.fromLTWH(
+                  offset.dx + _gutterWidth,
+                  screenY,
+                  decoration.thickness,
+                  lineHeight,
+                ),
+                paint,
+              );
+              break;
+
+            case LineDecorationType.underline:
+              paint.style = PaintingStyle.stroke;
+              paint.strokeWidth = decoration.thickness;
+              final width =
+                  size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+              canvas.drawLine(
+                Offset(screenX, screenY + lineHeight - decoration.thickness),
+                Offset(
+                  screenX + width,
+                  screenY + lineHeight - decoration.thickness,
+                ),
+                paint,
+              );
+              break;
+
+            case LineDecorationType.wavyUnderline:
+              paint.style = PaintingStyle.stroke;
+              paint.strokeWidth = decoration.thickness;
+              final width =
+                  size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+              final path = Path();
+              final waveHeight = decoration.thickness * 2;
+              final waveWidth = waveHeight * 2;
+              double x = screenX;
+              final y = screenY + lineHeight - decoration.thickness;
+              path.moveTo(x, y);
+              while (x < screenX + width) {
+                path.quadraticBezierTo(
+                  x + waveWidth / 4,
+                  y - waveHeight,
+                  x + waveWidth / 2,
+                  y,
+                );
+                path.quadraticBezierTo(
+                  x + waveWidth * 3 / 4,
+                  y + waveHeight,
+                  x + waveWidth,
+                  y,
+                );
+                x += waveWidth;
+              }
+              canvas.drawPath(path, paint);
+              break;
+          }
+        }
+
+        currentY += lineHeight;
+      }
+    }
+  }
+
+  void _drawGutterDecorations(
+    Canvas canvas,
+    Offset offset,
+    int lineIndex,
+    double contentTop,
+    double lineHeight,
+  ) {
+    final decorations = controller.gutterDecorations;
+    if (decorations.isEmpty) return;
+
+    for (final decoration in decorations) {
+      if (lineIndex < decoration.startLine || lineIndex > decoration.endLine) {
+        continue;
+      }
+
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          contentTop -
+          vscrollController.offset;
+
+      switch (decoration.type) {
+        case GutterDecorationType.colorBar:
+          final paint = Paint()
+            ..color = decoration.color
+            ..style = PaintingStyle.fill;
+          canvas.drawRect(
+            Rect.fromLTWH(offset.dx, screenY, decoration.width, lineHeight),
+            paint,
+          );
+          break;
+
+        case GutterDecorationType.icon:
+          if (decoration.icon != null) {
+            final iconPainter = TextPainter(
+              text: TextSpan(
+                text: String.fromCharCode(decoration.icon!.codePoint),
+                style: TextStyle(
+                  fontSize: textStyle?.fontSize ?? 14,
+                  color: decoration.color,
+                  fontFamily: decoration.icon!.fontFamily,
+                  package: decoration.icon!.fontPackage,
+                ),
+              ),
+              textDirection: TextDirection.ltr,
+            );
+            iconPainter.layout();
+            iconPainter.paint(
+              canvas,
+              Offset(
+                offset.dx + 2,
+                screenY + (lineHeight - iconPainter.height) / 2,
+              ),
+            );
+          }
+          break;
+
+        case GutterDecorationType.dot:
+          final paint = Paint()
+            ..color = decoration.color
+            ..style = PaintingStyle.fill;
+          final radius = (textStyle?.fontSize ?? 14) / 4;
+          canvas.drawCircle(
+            Offset(
+              offset.dx + decoration.width / 2 + 2,
+              screenY + lineHeight / 2,
+            ),
+            radius,
+            paint,
+          );
+          break;
+      }
+    }
+  }
+
+  void _drawGhostText(
+    Canvas canvas,
+    Offset offset,
+    int firstVisibleLine,
+    int lastVisibleLine,
+    double firstVisibleLineY,
+    bool hasActiveFolds,
+  ) {
+    final ghost = controller.ghostText;
+    if (ghost == null || ghost.text.isEmpty) return;
+
+    final cursorLine = ghost.line;
+    final cursorCol = ghost.column;
+
+    if (hasActiveFolds && _isLineFolded(cursorLine)) return;
+
+    final lineText =
+        _lineTextCache[cursorLine] ?? controller.getLineText(cursorLine);
+
+    double cursorX;
+    double cursorYInLine = 0;
+    if (lineText.isNotEmpty && cursorCol > 0) {
+      final para =
+          _paragraphCache[cursorLine] ??
+          _buildHighlightedParagraph(
+            cursorLine,
+            lineText,
+            width: lineWrap ? _wrapWidth : null,
+          );
+      final boxes = para.getBoxesForRange(
+        0,
+        cursorCol.clamp(0, lineText.length),
+      );
+      if (boxes.isNotEmpty) {
+        cursorX = boxes.last.right;
+        cursorYInLine = boxes.last.top;
+      } else {
+        cursorX = 0;
+      }
+    } else {
+      cursorX = 0;
+    }
+
+    final cursorY = _getLineYOffset(cursorLine, hasActiveFolds) + cursorYInLine;
+
+    final defaultGhostColor =
+        (textStyle?.color ?? editorTheme['root']?.color ?? Colors.white)
+            .withAlpha(100);
+    final customStyle = ghost.style;
+    final ghostStyle = ui.TextStyle(
+      color: customStyle?.color ?? defaultGhostColor,
+      fontSize: customStyle?.fontSize ?? textStyle?.fontSize ?? 14.0,
+      fontFamily: customStyle?.fontFamily ?? textStyle?.fontFamily,
+      fontStyle: customStyle?.fontStyle ?? FontStyle.italic,
+      fontWeight: customStyle?.fontWeight,
+      letterSpacing: customStyle?.letterSpacing,
+      wordSpacing: customStyle?.wordSpacing,
+      decoration: customStyle?.decoration,
+      decorationColor: customStyle?.decorationColor,
+    );
+
+    final ghostLines = ghost.text.split('\n');
+    final isSingleLineGhost = ghostLines.length == 1;
+
+    double firstLineGhostWidth = 0;
+    if (isSingleLineGhost && ghostLines[0].isNotEmpty) {
+      final ghostBuilder =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontFamily: textStyle?.fontFamily,
+                fontSize: textStyle?.fontSize ?? 14.0,
+                height: textStyle?.height ?? 1.2,
+              ),
+            )
+            ..pushStyle(ghostStyle)
+            ..addText(ghostLines[0]);
+      final ghostPara = ghostBuilder.build();
+      ghostPara.layout(const ui.ParagraphConstraints(width: double.infinity));
+      firstLineGhostWidth = ghostPara.longestLine;
+
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          cursorY -
+          vscrollController.offset;
+
+      final screenX =
+          offset.dx +
+          _gutterWidth +
+          (innerPadding?.left ?? 0) +
+          cursorX -
+          (lineWrap ? 0 : hscrollController.offset);
+
+      final clampedCol = cursorCol.clamp(0, lineText.length);
+      final bgColor = editorTheme['root']?.backgroundColor ?? Colors.black;
+      final originalPara = _paragraphCache[cursorLine];
+      if (originalPara != null && clampedCol < lineText.length) {
+        final remainingWidth = originalPara.longestLine - cursorX;
+        if (remainingWidth > 0) {
+          canvas.drawRect(
+            Rect.fromLTWH(screenX, screenY, remainingWidth + 2, _lineHeight),
+            Paint()..color = bgColor,
+          );
+        }
+      }
+
+      canvas.drawParagraph(ghostPara, Offset(screenX, screenY));
+
+      if (clampedCol < lineText.length) {
+        final remainingText = lineText.substring(clampedCol);
+
+        final normalStyle = ui.TextStyle(
+          color: textStyle?.color ?? editorTheme['root']?.color ?? Colors.white,
+          fontSize: textStyle?.fontSize ?? 14.0,
+          fontFamily: textStyle?.fontFamily,
+          fontWeight: textStyle?.fontWeight,
+        );
+
+        final remainingBuilder =
+            ui.ParagraphBuilder(
+                ui.ParagraphStyle(
+                  fontFamily: textStyle?.fontFamily,
+                  fontSize: textStyle?.fontSize ?? 14.0,
+                  height: textStyle?.height ?? 1.2,
+                ),
+              )
+              ..pushStyle(normalStyle)
+              ..addText(remainingText);
+
+        final remainingPara = remainingBuilder.build();
+        remainingPara.layout(
+          const ui.ParagraphConstraints(width: double.infinity),
+        );
+
+        canvas.drawParagraph(
+          remainingPara,
+          Offset(screenX + firstLineGhostWidth, screenY),
+        );
+      }
+      return;
+    }
+
+    final multiClampedCol = cursorCol.clamp(0, lineText.length);
+
+    if (ghostLines.isNotEmpty && ghostLines[0].isNotEmpty) {
+      final ghostBuilder =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontFamily: textStyle?.fontFamily,
+                fontSize: textStyle?.fontSize ?? 14.0,
+                height: textStyle?.height ?? 1.2,
+              ),
+            )
+            ..pushStyle(ghostStyle)
+            ..addText(ghostLines[0]);
+      final ghostPara = ghostBuilder.build();
+      ghostPara.layout(const ui.ParagraphConstraints(width: double.infinity));
+
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          cursorY -
+          vscrollController.offset;
+
+      final screenX =
+          offset.dx +
+          _gutterWidth +
+          (innerPadding?.left ?? 0) +
+          cursorX -
+          (lineWrap ? 0 : hscrollController.offset);
+
+      final bgColor = editorTheme['root']?.backgroundColor ?? Colors.black;
+      final originalPara = _paragraphCache[cursorLine];
+      if (originalPara != null && multiClampedCol < lineText.length) {
+        final remainingWidth = originalPara.longestLine - cursorX;
+        if (remainingWidth > 0) {
+          canvas.drawRect(
+            Rect.fromLTWH(screenX, screenY, remainingWidth + 2, _lineHeight),
+            Paint()..color = bgColor,
+          );
+        }
+      }
+
+      canvas.drawParagraph(ghostPara, Offset(screenX, screenY));
+    }
+
+    double lastGhostLineWidth = 0;
+    double lastGhostLineScreenY = 0;
+    double lastGhostLineScreenX = 0;
+
+    for (int i = 1; i < ghostLines.length; i++) {
+      final ghostLineText = ghostLines[i];
+      final isLastLine = i == ghostLines.length - 1;
+
+      final lineY = cursorY + (i * _lineHeight);
+
+      final screenY =
+          offset.dy +
+          (innerPadding?.top ?? 0) +
+          lineY -
+          vscrollController.offset;
+
+      final screenX =
+          offset.dx +
+          _gutterWidth +
+          (innerPadding?.left ?? 0) -
+          (lineWrap ? 0 : hscrollController.offset);
+
+      if (screenY + _lineHeight < offset.dy ||
+          screenY > offset.dy + vscrollController.position.viewportDimension) {
+        if (isLastLine) {
+          lastGhostLineScreenY = screenY;
+          lastGhostLineScreenX = screenX;
+        }
+        continue;
+      }
+
+      if (ghostLineText.isNotEmpty || isLastLine) {
+        final builder =
+            ui.ParagraphBuilder(
+                ui.ParagraphStyle(
+                  fontFamily: textStyle?.fontFamily,
+                  fontSize: textStyle?.fontSize ?? 14.0,
+                  height: textStyle?.height ?? 1.2,
+                ),
+              )
+              ..pushStyle(ghostStyle)
+              ..addText(ghostLineText);
+
+        final para = builder.build();
+        para.layout(const ui.ParagraphConstraints(width: double.infinity));
+
+        canvas.drawParagraph(para, Offset(screenX, screenY));
+
+        if (isLastLine) {
+          lastGhostLineWidth = para.longestLine;
+          lastGhostLineScreenY = screenY;
+          lastGhostLineScreenX = screenX;
+        }
+      }
+    }
+
+    if (multiClampedCol < lineText.length && ghostLines.length > 1) {
+      final remainingText = lineText.substring(multiClampedCol);
+
+      final normalStyle = ui.TextStyle(
+        color: textStyle?.color ?? editorTheme['root']?.color ?? Colors.white,
+        fontSize: textStyle?.fontSize ?? 14.0,
+        fontFamily: textStyle?.fontFamily,
+        fontWeight: textStyle?.fontWeight,
+      );
+
+      final remainingBuilder =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                fontFamily: textStyle?.fontFamily,
+                fontSize: textStyle?.fontSize ?? 14.0,
+                height: textStyle?.height ?? 1.2,
+              ),
+            )
+            ..pushStyle(normalStyle)
+            ..addText(remainingText);
+
+      final remainingPara = remainingBuilder.build();
+      remainingPara.layout(
+        const ui.ParagraphConstraints(width: double.infinity),
+      );
+
+      canvas.drawParagraph(
+        remainingPara,
+        Offset(lastGhostLineScreenX + lastGhostLineWidth, lastGhostLineScreenY),
+      );
     }
   }
 

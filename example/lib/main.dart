@@ -5,6 +5,7 @@ import 'package:code_forge/code_forge.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
+import 'package:re_highlight/styles/atom-one-dark-reasonable.dart';
 
 void main() {
   runApp(const MyApp());
@@ -42,6 +43,14 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            codeController?.setGitDiffDecorations(
+              addedRanges: [(1, 5), (10, 25)],
+              removedRanges: [(30, 37)],
+            );
+          },
+        ),
         body: SafeArea(
           child: FutureBuilder<LspConfig>(
             future: getLsp(),
@@ -63,6 +72,7 @@ class _MyAppState extends State<MyApp> {
               return CodeForge(
                 undoController: undoController,
                 language: langDart,
+                editorTheme: atomOneDarkReasonableTheme,
                 controller: codeController,
                 textStyle: GoogleFonts.jetBrainsMono(),
                 filePath: absFilePath,

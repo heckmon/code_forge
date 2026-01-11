@@ -247,3 +247,251 @@ class MatchHighlightStyle {
     required this.otherMatchStyle,
   });
 }
+
+/// Defines decoration types for line decorations in the editor.
+///
+/// Used to specify how a line range should be visually decorated,
+/// such as for git diff highlighting, bookmarks, or custom markers.
+enum LineDecorationType {
+  /// Full line background highlight
+  background,
+
+  /// Left border/bar indicator (like git diff added/removed)
+  leftBorder,
+
+  /// Underline decoration
+  underline,
+
+  /// Wavy underline (like error indicators)
+  wavyUnderline,
+}
+
+/// Represents a decoration applied to a range of lines in the editor.
+///
+/// Line decorations can be used to highlight code changes (git diff),
+/// mark breakpoints, show coverage information, or any custom highlighting.
+///
+/// Example - Git diff added lines:
+/// ```dart
+/// controller.addLineDecoration(LineDecoration(
+///   startLine: 10,
+///   endLine: 15,
+///   type: LineDecorationType.background,
+///   color: Colors.green.withOpacity(0.2),
+/// ));
+/// ```
+///
+/// Example - Git diff left border:
+/// ```dart
+/// controller.addLineDecoration(LineDecoration(
+///   startLine: 10,
+///   endLine: 15,
+///   type: LineDecorationType.leftBorder,
+///   color: Colors.green,
+///   thickness: 3,
+/// ));
+/// ```
+class LineDecoration {
+  /// Unique identifier for this decoration
+  final String id;
+
+  /// The start line (0-based) of the decoration range
+  final int startLine;
+
+  /// The end line (0-based, inclusive) of the decoration range
+  final int endLine;
+
+  /// The type of decoration to apply
+  final LineDecorationType type;
+
+  /// The color of the decoration
+  final Color color;
+
+  /// Thickness for border/underline decorations (default: 3.0)
+  final double thickness;
+
+  /// Optional priority for overlapping decorations (higher = on top)
+  final int priority;
+
+  /// Creates a line decoration.
+  ///
+  /// [id] - Unique identifier for managing the decoration
+  /// [startLine] - First line to decorate (0-based)
+  /// [endLine] - Last line to decorate (0-based, inclusive)
+  /// [type] - The decoration style to apply
+  /// [color] - Color of the decoration
+  /// [thickness] - Width for border/underline decorations
+  /// [priority] - Z-order for overlapping decorations
+  const LineDecoration({
+    required this.id,
+    required this.startLine,
+    required this.endLine,
+    required this.type,
+    required this.color,
+    this.thickness = 3.0,
+    this.priority = 0,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LineDecoration &&
+          id == other.id &&
+          startLine == other.startLine &&
+          endLine == other.endLine;
+
+  @override
+  int get hashCode => Object.hash(id, startLine, endLine);
+}
+
+/// Defines decoration types for gutter decorations.
+enum GutterDecorationType {
+  /// Colored bar/stripe in the gutter
+  colorBar,
+
+  /// Custom icon in the gutter
+  icon,
+
+  /// Dot/circle indicator
+  dot,
+}
+
+/// Represents a decoration in the gutter area (line numbers column).
+///
+/// Gutter decorations are useful for showing git diff status,
+/// breakpoints, bookmarks, or other line-level indicators.
+///
+/// Example - Git diff added indicator:
+/// ```dart
+/// controller.addGutterDecoration(GutterDecoration(
+///   startLine: 10,
+///   endLine: 15,
+///   type: GutterDecorationType.colorBar,
+///   color: Colors.green,
+/// ));
+/// ```
+///
+/// Example - Breakpoint icon:
+/// ```dart
+/// controller.addGutterDecoration(GutterDecoration(
+///   startLine: 25,
+///   endLine: 25,
+///   type: GutterDecorationType.icon,
+///   color: Colors.red,
+///   icon: Icons.circle,
+/// ));
+/// ```
+class GutterDecoration {
+  /// Unique identifier for this decoration
+  final String id;
+
+  /// The start line (0-based) of the decoration range
+  final int startLine;
+
+  /// The end line (0-based, inclusive) of the decoration range
+  final int endLine;
+
+  /// The type of gutter decoration
+  final GutterDecorationType type;
+
+  /// The color of the decoration
+  final Color color;
+
+  /// Icon to display (only used when type is [GutterDecorationType.icon])
+  final IconData? icon;
+
+  /// Width of the color bar (default: 3.0)
+  final double width;
+
+  /// Optional tooltip text shown on hover
+  final String? tooltip;
+
+  /// Optional priority for overlapping decorations (higher = on top)
+  final int priority;
+
+  /// Creates a gutter decoration.
+  const GutterDecoration({
+    required this.id,
+    required this.startLine,
+    required this.endLine,
+    required this.type,
+    required this.color,
+    this.icon,
+    this.width = 3.0,
+    this.tooltip,
+    this.priority = 0,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GutterDecoration &&
+          id == other.id &&
+          startLine == other.startLine &&
+          endLine == other.endLine;
+
+  @override
+  int get hashCode => Object.hash(id, startLine, endLine);
+}
+
+/// Represents ghost text (inline suggestion) displayed in the editor.
+///
+/// Ghost text appears as semi-transparent text at the cursor position,
+/// typically used for AI code completion suggestions.
+///
+/// When [shouldPersist] is false (default), the ghost text will be:
+/// - Cleared when the cursor moves or text changes don't match
+/// - Accepted (inserted) when Tab or Right Arrow is pressed
+///
+/// When [shouldPersist] is true, the ghost text will only be cleared
+/// by explicitly calling [CodeForgeController.clearGhostText].
+///
+/// Example:
+/// ```dart
+/// controller.setGhostText(GhostText(
+///   line: 10,
+///   column: 15,
+///   text: 'print("Hello, World!");',
+///   style: TextStyle(
+///     color: Colors.grey.withOpacity(0.5),
+///     fontStyle: FontStyle.italic,
+///   ),
+/// ));
+/// ```
+class GhostText {
+  /// The line where the ghost text starts (0-based)
+  final int line;
+
+  /// The column where the ghost text starts (0-based)
+  final int column;
+
+  /// The ghost text content (can be multi-line with \n)
+  final String text;
+
+  /// Text style for the ghost text
+  final TextStyle? style;
+
+  /// Whether the ghost text should persist until explicitly cleared.
+  ///
+  /// When false (default), the ghost text will be cleared on cursor
+  /// movement or mismatched typing, and accepted on Tab/Right Arrow.
+  /// When true, the ghost text can only be cleared by calling
+  /// [CodeForgeController.clearGhostText].
+  final bool shouldPersist;
+
+  /// Creates a ghost text decoration.
+  ///
+  /// [line] - The line number where text appears (0-based)
+  /// [column] - The column position where text starts (0-based)
+  /// [text] - The suggestion text to display
+  /// [style] - Optional custom style (defaults to semi-transparent italic)
+  /// [shouldPersist] - If true, only cleared by clearGhostText(); if false,
+  ///   cleared on cursor movement and accepted on Tab/Right Arrow
+  const GhostText({
+    required this.line,
+    required this.column,
+    required this.text,
+    this.style,
+    this.shouldPersist = false,
+  });
+}
