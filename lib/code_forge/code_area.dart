@@ -476,6 +476,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
               inputType: widget.keyboardType,
               inputAction: TextInputAction.newline,
               autocorrect: false,
+              viewId: View.of(context).viewId,
             ),
           );
 
