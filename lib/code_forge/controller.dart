@@ -117,10 +117,10 @@ class CodeForgeController implements DeltaTextInputClient {
               for (final item in rawDiagnostics) {
                 if (item is! Map<String, dynamic>) continue;
                 int severity = item['severity'] ?? 0;
-                if (severity == 1 && lspConfig!.disableError) {
+                if (severity == 1 && lspConfig!.config.disableError) {
                   severity = 0;
                 }
-                if (severity == 2 && lspConfig!.disableWarning) {
+                if (severity == 2 && lspConfig!.config.disableWarning) {
                   severity = 0;
                 }
                 if (severity > 0) {

@@ -6,10 +6,10 @@ import 'package:flutter/services.dart';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-part 'lsp_socket.dart';
-part 'lsp_stdio.dart';
+part 'lsp_transport.dart';
 
-sealed class LspConfig {
+// *only* the config options, not the LSP functionality itself
+class LspOptions {
   /// The language ID of the language.
   ///
   /// languageId depends on the server you are using.
@@ -31,39 +31,20 @@ sealed class LspConfig {
 
   /// Whether to disable errors from the LSP server.
   final bool disableError;
+  /// Map of user provided LSP initialization options.
+  final Map<String, dynamic> initializationOptions;
 
-  final StreamController<Map<String, dynamic>> _responseController =
-      StreamController.broadcast();
-  int _nextId = 1;
-  final _openDocuments = <String, int>{};
-  List<String>? _serverTokenTypes;
-  List<String>? _serverTokenModifiers;
-
-  bool isInitialized = false;
-
-  /// Stream of responses from the LSP server.
-  /// Use this to listen for notifications like diagnostics.
-  Stream<Map<String, dynamic>> get responses => _responseController.stream;
-
-  /// The server's semantic token types legend.
-  /// Returns null if not yet initialized.
-  List<String>? get serverTokenTypes => _serverTokenTypes;
-
-  /// The server's semantic token modifiers legend.
-  /// Returns null if not yet initialized.
-  List<String>? get serverTokenModifiers => _serverTokenModifiers;
-
-  LspConfig({
-    required this.workspacePath,
+  LspOptions({
     required this.languageId,
+    required this.workspacePath,
+    this.initializationOptions = const {},
     this.capabilities = const LspClientCapabilities(),
     this.disableWarning = false,
     this.disableError = false,
   });
-
   @override
   bool operator ==(Object other) {
-    return (other is LspConfig &&
+    return (other is LspOptions &&
         languageId == other.languageId &&
         workspacePath == other.workspacePath &&
         disableError == other.disableError &&
@@ -73,25 +54,73 @@ sealed class LspConfig {
   @override
   int get hashCode =>
       Object.hash(languageId, workspacePath, disableError, disableWarning);
+}
 
-  void dispose();
+class LspConfig {
+  final LspTransport transport;
+  final LspOptions config;
+
+  final _openDocuments = <String, int>{};
+  List<String>? _serverTokenTypes;
+  List<String>? _serverTokenModifiers;
+
+  int _nextId = 1;
+  bool isInitialized = false;
+  String get languageId => config.languageId;
+
+  LspConfig({required this.config, required this.transport});
+
+  /// Stream of responses from the LSP server.
+  /// Use this to listen for notifications like diagnostics.
+  Stream<Map<String, dynamic>> get responses => transport.stream;
+
+  /// The server's semantic token types legend.
+  /// Returns null if not yet initialized.
+  List<String>? get serverTokenTypes => _serverTokenTypes;
+
+  /// The server's semantic token modifiers legend.
+  /// Returns null if not yet initialized.
+  List<String>? get serverTokenModifiers => _serverTokenModifiers;
 
   Future<Map<String, dynamic>> _sendRequest({
     required String method,
     required Map<String, dynamic> params,
-  });
+  }) async {
+    final id = _nextId++;
+    final request = {
+      'jsonrpc': '2.0',
+      'id': id,
+      'method': method,
+      'params': params,
+    };
+
+    await transport.send(request);
+
+    return await transport.stream.firstWhere(
+      (response) => response['id'] == id,
+      orElse: () => throw TimeoutException('No response for request $id'),
+    );
+  }
 
   Future<void> _sendNotification({
     required String method,
     required Map<String, dynamic> params,
-  });
+  }) async {
+    await transport.send({
+      'jsonrpc': '2.0',
+      'method': method,
+      'params': params,
+    });
+  }
 
   /// This method is used to initialize the LSP server.
   ///
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   /// It may crash the LSP server if called multiple times.
   Future<void> initialize() async {
-    final workspaceUri = Uri.directory(workspacePath).toString();
+    final workspaceUri = Uri.directory(
+      config.workspacePath,
+    ).toString(); // note that rootUri is deprecated in favor of workspaceFolders
     final response = await _sendRequest(
       method: 'initialize',
       params: {
@@ -100,9 +129,7 @@ sealed class LspConfig {
         'workspaceFolders': [
           {'uri': workspaceUri, 'name': 'workspace'},
         ],
-        'initializationOptions': {
-          'highlight': {'enabled': true},
-        },
+        'initializationOptions': config.initializationOptions,
         'capabilities': _buildCapabilities(),
       },
     );
@@ -127,12 +154,11 @@ sealed class LspConfig {
     await _sendNotification(method: 'initialized', params: {});
     isInitialized = true;
   }
-
   /// Builds the capabilities map based on enabled features.
   Map<String, dynamic> _buildCapabilities() {
     final textDocumentCapabilities = <String, dynamic>{};
 
-    if (capabilities.codeCompletion) {
+    if (config.capabilities.codeCompletion) {
       textDocumentCapabilities['completion'] = {
         'completionItem': {
           'resolveSupport': {
@@ -143,7 +169,7 @@ sealed class LspConfig {
       };
     }
 
-    if (capabilities.signatureHelp) {
+    if (config.capabilities.signatureHelp) {
       textDocumentCapabilities['signatureHelp'] = {
         'dynamicRegistration': false,
         'signatureInformation': {
@@ -155,13 +181,13 @@ sealed class LspConfig {
       };
     }
 
-    if (capabilities.hoverInfo) {
+    if (config.capabilities.hoverInfo) {
       textDocumentCapabilities['hover'] = {
         'contentFormat': ['markdown'],
       };
     }
 
-    if (capabilities.semanticHighlighting) {
+    if (config.capabilities.semanticHighlighting) {
       textDocumentCapabilities['semanticTokens'] = {
         'dynamicRegistration': false,
         'tokenTypes': sematicMap['tokenTypes'],
@@ -174,21 +200,21 @@ sealed class LspConfig {
       };
     }
 
-    if (capabilities.inlayHint) {
+    if (config.capabilities.inlayHint) {
       textDocumentCapabilities['inlayHint'] = {'dynamicRegistration': false};
     }
 
-    if (capabilities.documentColor) {
+    if (config.capabilities.documentColor) {
       textDocumentCapabilities['colorProvider'] = {
         'dynamicRegistration': false,
       };
     }
 
-    if (capabilities.codeFolding) {
+    if (config.capabilities.codeFolding) {
       textDocumentCapabilities['foldingRange'] = {'dynamicRegistration': false};
     }
 
-    if (capabilities.documentHighlight) {
+    if (config.capabilities.documentHighlight) {
       textDocumentCapabilities['documentHighlight'] = {
         'dynamicRegistration': false,
       };
@@ -230,7 +256,7 @@ sealed class LspConfig {
       params: {
         'textDocument': {
           'uri': Uri.file(filePath).toString(),
-          'languageId': languageId,
+          'languageId': config.languageId,
           'version': version,
           'text': text,
         },
@@ -315,7 +341,7 @@ sealed class LspConfig {
     int line,
     int character,
   ) async {
-    if (!capabilities.codeCompletion) return [];
+    if (!config.capabilities.codeCompletion) return [];
     List<LspCompletion> completion = [];
     final response = await _sendRequest(
       method: 'textDocument/completion',
@@ -365,7 +391,7 @@ sealed class LspConfig {
   /// This method is used internally by the [CodeForge], calling this with appropriate parameters will returns a [String].
   /// If the LSP server does not support hover or the location provided is invalid, it will return an empty string.
   Future<String> getHover(String filePath, int line, int character) async {
-    if (!capabilities.hoverInfo) return '';
+    if (!config.capabilities.hoverInfo) return '';
     final response = await _sendRequest(
       method: 'textDocument/hover',
       params: _commonParams(filePath, line, character),
@@ -435,7 +461,7 @@ sealed class LspConfig {
     String? triggerCharacter,
     bool isRetrigger = false,
   }) async {
-    if (!capabilities.signatureHelp) {
+    if (!config.capabilities.signatureHelp) {
       return LspSignatureHelps(
         activeParameter: -1,
         activeSignature: -1,
@@ -526,7 +552,7 @@ sealed class LspConfig {
     int line,
     int character,
   ) async {
-    if (!capabilities.documentHighlight) return [];
+    if (!config.capabilities.documentHighlight) return [];
     final response = await _sendRequest(
       method: 'textDocument/documentHighlight',
       params: _commonParams(filePath, line, character),
@@ -545,7 +571,7 @@ sealed class LspConfig {
     required double alpha,
     required Map<String, dynamic> range,
   }) async {
-    if (!capabilities.documentColor) return {'result': []};
+    if (!config.capabilities.documentColor) return {'result': []};
 
     /// Requests color presentation(s) for a color at a given range.
     ///
@@ -575,7 +601,7 @@ sealed class LspConfig {
   /// the raw server response as a map; callers should read `response['result']`
   /// to obtain the list of color entries.
   Future<Map<String, dynamic>> getDocumentColor(String filePath) async {
-    if (!capabilities.documentColor) return {'result': []};
+    if (!config.capabilities.documentColor) return {'result': []};
     final response = await _sendRequest(
       method: "textDocument/documentColor",
       params: {
@@ -592,7 +618,7 @@ sealed class LspConfig {
   /// folded in the editor. This method returns the raw server response as a
   /// map; examine `response['result']` for the folding range list.
   Future<Map<String, dynamic>> getLSPFoldRanges(String filePath) async {
-    if (!capabilities.codeFolding) return {'result': []};
+    if (!config.capabilities.codeFolding) return {'result': []};
     final response = await _sendRequest(
       method: "textDocument/foldingRange",
       params: {
@@ -617,7 +643,7 @@ sealed class LspConfig {
     int endLine,
     int endCharacter,
   ) async {
-    if (!capabilities.inlayHint) return {'result': []};
+    if (!config.capabilities.inlayHint) return {'result': []};
     final response = await _sendRequest(
       method: "textDocument/inlayHint",
       params: {
@@ -639,7 +665,7 @@ sealed class LspConfig {
     int line,
     int character,
   ) async {
-    if (!capabilities.goToDefinition) return {};
+    if (!config.capabilities.goToDefinition) return {};
     final response = await _sendRequest(
       method: 'textDocument/definition',
       params: _commonParams(filePath, line, character),
@@ -783,7 +809,7 @@ sealed class LspConfig {
     int character,
     String newName,
   ) async {
-    if (!capabilities.rename) return {};
+    if (!config.capabilities.rename) return {};
     final response = await _sendRequest(
       method: 'textDocument/rename',
       params: {..._commonParams(filePath, line, character), 'newName': newName},
@@ -800,7 +826,7 @@ sealed class LspConfig {
     int line,
     int character,
   ) async {
-    if (!capabilities.rename) return null;
+    if (!config.capabilities.rename) return null;
     final response = await _sendRequest(
       method: 'textDocument/prepareRename',
       params: _commonParams(filePath, line, character),
@@ -820,7 +846,7 @@ sealed class LspConfig {
     required int endCharacter,
     List<Map<String, dynamic>> diagnostics = const [],
   }) async {
-    if (!capabilities.codeAction) return [];
+    if (!config.capabilities.codeAction) return [];
     final response = await _sendRequest(
       method: 'textDocument/codeAction',
       params: {
@@ -976,7 +1002,7 @@ sealed class LspConfig {
   ///
   /// Returns a list of [LspSemanticToken] objects representing syntax tokens for highlighting.
   Future<List<LspSemanticToken>> getSemanticTokensFull(String filePath) async {
-    if (!capabilities.semanticHighlighting) return [];
+    if (!config.capabilities.semanticHighlighting) return [];
     final response = await _sendRequest(
       method: 'textDocument/semanticTokens/full',
       params: {
@@ -1022,6 +1048,68 @@ sealed class LspConfig {
 
     return result;
   }
+
+}
+/// LspStdioConfig short for IO connect
+class LspStdioConfig extends LspConfig {
+  LspStdioConfig._(LspOptions config, StdioTransport transport)
+      : super(config: config, transport: transport);
+
+  static Future<LspStdioConfig> start({
+    required String executable,
+    required String workspacePath,
+    required String languageId,
+    LspClientCapabilities capabilities = const LspClientCapabilities(),
+    List<String>? args,
+    Map<String, String>? environment,
+    bool disableWarning = false,
+    bool disableError = false,
+  }) async {
+    final process = await Process.start(
+      executable,
+      args ?? [],
+      environment: environment,
+    );
+
+    final transport = StdioTransport(process);
+    final config = LspOptions(
+      workspacePath: workspacePath,
+      languageId: languageId,
+      capabilities: capabilities,
+      disableWarning: disableWarning,
+      disableError: disableError,
+    );
+
+    final client = LspStdioConfig._(config, transport);
+    await client.initialize();
+    return client;
+  }
+
+  // calling .lspConfig still works
+  LspConfig get lspConfig => this;
+}
+
+/// LspSocketConfig short for ws connect
+class LspSocketConfig extends LspConfig {
+  LspSocketConfig({
+    required String workspacePath,
+    required String languageId,
+    required String serverUrl,
+    LspClientCapabilities capabilities = const LspClientCapabilities(),
+    bool disableWarning = false,
+    bool disableError = false,
+  }) : super(
+          config: LspOptions(
+            workspacePath: workspacePath,
+            languageId: languageId,
+            capabilities: capabilities,
+            disableWarning: disableWarning,
+            disableError: disableError,
+          ),
+          transport: SocketTransport(WebSocketChannel.connect(Uri.parse(serverUrl))),
+        );
+
+  Future<void> connect() async => await initialize();
 }
 
 enum CompletionItemType {
