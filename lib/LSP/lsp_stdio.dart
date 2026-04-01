@@ -155,11 +155,12 @@ class LspStdioConfig extends LspConfig {
   }
 
   int _findHeaderEnd() {
-    for (var i = 0; i <= _buffer.length - 4; i++) {
-      if (_buffer[i] == 13 &&
-          _buffer[i + 1] == 10 &&
-          _buffer[i + 2] == 13 &&
-          _buffer[i + 3] == 10) {
+    const crlfCrlf = [13, 10, 13, 10];
+    for (var i = 0; i <= _buffer.length - crlfCrlf.length; i++) {
+      if (_buffer[i] == crlfCrlf[0] &&
+          _buffer[i + 1] == crlfCrlf[1] &&
+          _buffer[i + 2] == crlfCrlf[2] &&
+          _buffer[i + 3] == crlfCrlf[3]) {
         return i;
       }
     }
@@ -199,13 +200,9 @@ class LspStdioConfig extends LspConfig {
   }
 
   @override
-  Future<Map<String, dynamic>> sendResponse(
-    int id,
-    List<dynamic> result,
-  ) async {
-    final request = {'jsonrpc': '2.0', 'id': id, 'result': result};
-    await _sendLspMessage(request);
-    return request;
+  Future<void> sendResponse(int id, List<dynamic> result) async {
+    final response = {'jsonrpc': '2.0', 'id': id, 'result': result};
+    await _sendLspMessage(response);
   }
 
   Future<void> _sendLspMessage(Map<String, dynamic> message) async {

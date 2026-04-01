@@ -15,8 +15,8 @@ class CodeSelectionStyle {
   final Color cursorBubbleColor;
 
   CodeSelectionStyle({
-    this.cursorColor,
-    this.selectionColor = const Color(0x6E2195F3),
+    this.cursorColor = const Color(0xFFAEAFAD),
+    this.selectionColor = const Color(0xFF264F78),
     this.cursorBubbleColor = Colors.blue,
   });
 }
@@ -73,6 +73,10 @@ class GutterStyle {
   /// If null, a low opacity version of the selection color is used.
   final Color? foldedLineHighlightColor;
 
+  /// Spacing between line number columns when rendering multi-column gutters.
+  /// Defaults to half the gutter padding when null.
+  final double? lineNumberColumnSpacing;
+
   GutterStyle({
     this.lineNumberStyle,
     this.backgroundColor,
@@ -87,6 +91,7 @@ class GutterStyle {
     this.errorLineNumberColor = const Color(0xFFE53935),
     this.warningLineNumberColor = const Color(0xFFFFA726),
     this.foldedLineHighlightColor,
+    this.lineNumberColumnSpacing,
   });
 }
 

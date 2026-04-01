@@ -76,11 +76,12 @@ class Render2DCodeField extends RenderTwoDimensionalViewport {
     final child = buildOrObtainChildFor(ChildVicinity(xIndex: 0, yIndex: 0));
 
     if (child != null) {
+      final viewportWidth = viewportDimension.width;
       child.layout(
         BoxConstraints(
           minHeight: 0,
-          minWidth: 0,
-          maxWidth: lineWrap ? viewportDimension.width : double.infinity,
+          minWidth: viewportWidth,
+          maxWidth: lineWrap ? viewportWidth : double.infinity,
           maxHeight: double.infinity,
         ),
         parentUsesSize: true,

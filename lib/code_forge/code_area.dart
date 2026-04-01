@@ -11,6 +11,7 @@ import 'find_controller.dart';
 import 'scroll.dart';
 import 'styling.dart';
 import 'syntax_highlighter.dart';
+import 'textmate_sidecar.dart';
 import 'undo_redo.dart';
 
 import 'package:re_highlight/re_highlight.dart';
@@ -136,6 +137,12 @@ class CodeForge extends StatefulWidget {
 
   /// Styling options for search match highlighting.
   final MatchHighlightStyle? matchHighlightStyle;
+
+  /// Called when the user performs a "go to definition" gesture (Cmd/Ctrl+Click)
+  /// on a word in the editor.
+  ///
+  /// The callback receives the document character offset of the click.
+  final Future<void> Function(int offset)? onGoToDefinition;
 
   /// The file path for LSP features.
   ///
@@ -277,6 +284,7 @@ class CodeForge extends StatefulWidget {
     this.suggestionStyle,
     this.hoverDetailsStyle,
     this.matchHighlightStyle,
+    this.onGoToDefinition,
     this.finderBuilder,
     this.findController,
   }) : _tabSize = tabSize ?? (useSpaceAsTab ? 2 : 1);
@@ -324,14 +332,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
   final Map<String, Map<String, dynamic>> _hoverCache = {};
-  final _isMac = Platform.isMacOS;
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
   bool _isHovering = false, _isSignatureInvoked = false;
   bool _isMobileSuggActive = false, _isInjectingSnippets = false;
   bool _snippetsActive = false, _hoverSetByTap = false;
-  int _prevSnippetTextLength = 0, _semanticTokensVersion = 0;
-  List<LspSemanticToken>? _semanticTokens;
+  int _prevSnippetTextLength = 0;
+  bool _linkModifierPressed = false;
+  SemanticTokensUpdate? _semanticTokensUpdate;
   List<Map<String, dynamic>> _extraText = [];
   int _sugSelIndex = 0, _actionSelIndex = 0;
   String? _selectedSuggestionMd;
@@ -367,6 +375,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _readOnly = widget.readOnly;
     _deleteFoldRangeOnDeletingFirstLine =
         widget.deleteFoldRangeOnDeletingFirstLine;
+    _linkModifierPressed = _computeLinkModifierPressed();
     _controller.setUndoController(_undoRedoController);
     _controller.deleteFoldRangeOnDeletingFirstLine =
         _deleteFoldRangeOnDeletingFirstLine;
@@ -495,12 +504,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 800),
     );
 
+    // Preserve semantic highlighting when re-mounting an existing controller
+    // (for example when switching tabs). The listener below only fires on
+    // changes, so without seeding from the current value we'd render without
+    // semantic tokens until the next update.
+    _semanticTokensUpdate = _controller.semanticTokens.value;
     _semanticTokensListener = () {
       final tokens = _controller.semanticTokens.value;
       if (!mounted) return;
       setState(() {
-        _semanticTokens = tokens.$1;
-        _semanticTokensVersion = tokens.$2;
+        _semanticTokensUpdate = tokens;
       });
     };
     _controller.semanticTokens.addListener(_semanticTokensListener);
@@ -699,6 +712,24 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         _focusNode.requestFocus();
       }
     });
+  }
+
+  bool _computeLinkModifierPressed() {
+    final keyboard = HardwareKeyboard.instance;
+    return Platform.isMacOS
+        ? keyboard.isMetaPressed
+        : keyboard.isControlPressed;
+  }
+
+  void _syncLinkModifierPressed() {
+    final next = _computeLinkModifierPressed();
+    if (_linkModifierPressed == next) return;
+    if (!mounted) return;
+    setState(() {
+      _linkModifierPressed = next;
+    });
+    // Ensure the cursor updates even if the pointer doesn't move.
+    RendererBinding.instance.mouseTracker.updateAllDevices();
   }
 
   void _scrollToSelectedSuggestion() {
@@ -927,10 +958,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     } else {
       _moveSelectionRight(withShift);
     }
-
-    if (_controller.hasMultiCursors) {
-      _controller.moveMultiCursorsRight(isShiftPressed: withShift);
-    }
   }
 
   void _handleArrowLeft(bool withShift) {
@@ -942,10 +969,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _moveSelectionRight(withShift);
     } else {
       _controller.pressLetfArrowKey(isShiftPressed: withShift);
-    }
-
-    if (_controller.hasMultiCursors) {
-      _controller.moveMultiCursorsLeft(isShiftPressed: withShift);
     }
   }
 
@@ -1368,13 +1391,158 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     );
   }
 
+  void _moveLineUp() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+    final lineStart = selStart > 0
+        ? text.lastIndexOf('\n', selStart - 1) + 1
+        : 0;
+    int effectiveEnd = selEnd;
+    if (!selection.isCollapsed &&
+        effectiveEnd > selStart &&
+        effectiveEnd > 0 &&
+        text[effectiveEnd - 1] == '\n') {
+      effectiveEnd -= 1;
+    }
+    int lineEnd = text.indexOf('\n', effectiveEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+    if (lineStart == 0) return;
+
+    final prevLineEnd = lineStart - 1;
+    final prevLineStart = text.lastIndexOf('\n', prevLineEnd - 1) + 1;
+    final prevLine = text.substring(prevLineStart, prevLineEnd);
+    final currentLines = text.substring(lineStart, lineEnd);
+
+    _controller.replaceRange(
+      prevLineStart,
+      lineEnd,
+      '$currentLines\n$prevLine',
+    );
+
+    final prevLineLen = prevLineEnd - prevLineStart;
+    final offsetDelta = prevLineLen + 1;
+    final newSelection = TextSelection(
+      baseOffset: selection.baseOffset - offsetDelta,
+      extentOffset: selection.extentOffset - offsetDelta,
+    );
+    _controller.setSelectionSilently(newSelection);
+  }
+
+  void _moveLineDown() {
+    if (widget.readOnly) return;
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+    final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
+    int effectiveEnd = selEnd;
+    if (!selection.isCollapsed &&
+        effectiveEnd > selStart &&
+        effectiveEnd > 0 &&
+        text[effectiveEnd - 1] == '\n') {
+      effectiveEnd -= 1;
+    }
+    int lineEnd = text.indexOf('\n', effectiveEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+    final nextLineStart = lineEnd + 1;
+    if (nextLineStart >= text.length) return;
+    int nextLineEnd = text.indexOf('\n', nextLineStart);
+    if (nextLineEnd == -1) nextLineEnd = text.length;
+
+    final currentLines = text.substring(lineStart, lineEnd);
+    final nextLine = text.substring(nextLineStart, nextLineEnd);
+
+    _controller.replaceRange(
+      lineStart,
+      nextLineEnd,
+      '$nextLine\n$currentLines',
+    );
+
+    final offsetDelta = nextLine.length + 1;
+    final newSelection = TextSelection(
+      baseOffset: selection.baseOffset + offsetDelta,
+      extentOffset: selection.extentOffset + offsetDelta,
+    );
+    _controller.setSelectionSilently(newSelection);
+  }
+
+  void _copyLineUp() {
+    if (widget.readOnly) return;
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+
+    final lineStart = selStart > 0
+        ? text.lastIndexOf('\n', selStart - 1) + 1
+        : 0;
+
+    int effectiveEnd = selEnd;
+    if (!selection.isCollapsed &&
+        effectiveEnd > selStart &&
+        effectiveEnd > 0 &&
+        text[effectiveEnd - 1] == '\n') {
+      effectiveEnd -= 1;
+    }
+
+    int lineEnd = text.indexOf('\n', effectiveEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+
+    final blockText = text.substring(lineStart, lineEnd);
+    _controller.replaceRange(lineStart, lineStart, '$blockText\n');
+
+    // Keep the selection on the duplicated block (above).
+    _controller.setSelectionSilently(
+      TextSelection(
+        baseOffset: selection.baseOffset,
+        extentOffset: selection.extentOffset,
+      ),
+    );
+  }
+
+  void _copyLineDown() {
+    if (widget.readOnly) return;
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final selStart = selection.start;
+    final selEnd = selection.end;
+
+    final lineStart = selStart > 0
+        ? text.lastIndexOf('\n', selStart - 1) + 1
+        : 0;
+
+    int effectiveEnd = selEnd;
+    if (!selection.isCollapsed &&
+        effectiveEnd > selStart &&
+        effectiveEnd > 0 &&
+        text[effectiveEnd - 1] == '\n') {
+      effectiveEnd -= 1;
+    }
+
+    int lineEnd = text.indexOf('\n', effectiveEnd);
+    if (lineEnd == -1) lineEnd = text.length;
+
+    final blockText = text.substring(lineStart, lineEnd);
+    _controller.replaceRange(lineEnd, lineEnd, '\n$blockText');
+
+    final offsetDelta = blockText.length + 1;
+    _controller.setSelectionSilently(
+      TextSelection(
+        baseOffset: selection.baseOffset + offsetDelta,
+        extentOffset: selection.extentOffset + offsetDelta,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final screenHeight = mediaQuery.size.height;
     return LayoutBuilder(
       builder: (_, constraints) {
+        final viewWidth = constraints.maxWidth;
+        final viewHeight = constraints.maxHeight;
         final editorHeight = constraints.maxHeight;
         return Column(
           children: [
@@ -1478,6 +1646,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                             return Focus(
                                               focusNode: _focusNode,
                                               onKeyEvent: (node, event) {
+                                                _syncLinkModifierPressed();
+
                                                 final isCtrlAltPressed =
                                                     (HardwareKeyboard
                                                             .instance
@@ -1520,21 +1690,26 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
                                                 if (event is KeyDownEvent ||
                                                     event is KeyRepeatEvent) {
-                                                  final isAltPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isAltPressed;
+                                                  final keyboard =
+                                                      HardwareKeyboard.instance;
                                                   final isShiftPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isShiftPressed;
+                                                      keyboard.isShiftPressed;
                                                   final isCtrlPressed =
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isControlPressed ||
-                                                      HardwareKeyboard
-                                                          .instance
-                                                          .isMetaPressed;
+                                                      keyboard.isControlPressed;
+                                                  final isMetaPressed =
+                                                      keyboard.isMetaPressed;
+                                                  final isAltPressed =
+                                                      keyboard.isAltPressed;
+                                                  final isMac =
+                                                      Platform.isMacOS;
+                                                  final isPrimaryModifier =
+                                                      isMac
+                                                      ? isMetaPressed
+                                                      : isCtrlPressed;
+                                                  final isWordModifier = isMac
+                                                      ? isAltPressed
+                                                      : isCtrlPressed;
+
                                                   if (_suggestionNotifier
                                                               .value !=
                                                           null &&
@@ -1680,55 +1855,37 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     }
                                                   }
 
-                                                  if (isCtrlPressed &&
-                                                      isShiftPressed) {
+                                                  // Cmd/Ctrl+Shift+Space: signature help
+                                                  if (isPrimaryModifier &&
+                                                      isShiftPressed &&
+                                                      event.logicalKey ==
+                                                          LogicalKeyboardKey
+                                                              .space) {
+                                                    setState(() {
+                                                      _isSignatureInvoked =
+                                                          true;
+                                                    });
+                                                    (() async => await _controller
+                                                        .callSignatureHelp())();
+                                                    return KeyEventResult
+                                                        .handled;
+                                                  }
+
+                                                  // Cmd/Ctrl+Alt: insert cursor above/below
+                                                  if (isPrimaryModifier &&
+                                                      isAltPressed) {
                                                     switch (event.logicalKey) {
-                                                      case LogicalKeyboardKey
-                                                          .space:
-                                                        setState(() {
-                                                          _isSignatureInvoked =
-                                                              true;
-                                                        });
-                                                        (() async =>
-                                                            await _controller
-                                                                .callSignatureHelp())();
-                                                        return KeyEventResult
-                                                            .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowUp:
                                                         _controller
-                                                            .moveLineUp();
+                                                            .insertCursorAbove();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowDown:
                                                         _controller
-                                                            .moveLineDown();
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .arrowLeft:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordRight(true);
-                                                        } else {
-                                                          _moveWordLeft(true);
-                                                        }
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .arrowRight:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordLeft(true);
-                                                        } else {
-                                                          _moveWordRight(true);
-                                                        }
+                                                            .insertCursorBelow();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
@@ -1737,27 +1894,56 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     }
                                                   }
 
-                                                  if (isCtrlPressed) {
+                                                  // Cmd/Ctrl+Shift+L: select all occurrences
+                                                  if (isPrimaryModifier &&
+                                                      isShiftPressed &&
+                                                      event.logicalKey ==
+                                                          LogicalKeyboardKey
+                                                              .keyL) {
+                                                    _controller
+                                                        .selectAllOccurrencesOfSelectionOrWord();
+                                                    _commonKeyFunctions();
+                                                    return KeyEventResult
+                                                        .handled;
+                                                  }
+
+                                                  // Word modifier + Shift: word selection
+                                                  if (isWordModifier &&
+                                                      isShiftPressed) {
+                                                    switch (event.logicalKey) {
+                                                      case LogicalKeyboardKey
+                                                          .arrowLeft:
+                                                        _moveWordLeft(true);
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .arrowRight:
+                                                        _moveWordRight(true);
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      default:
+                                                        break;
+                                                    }
+                                                  }
+
+                                                  // Primary modifier (Cmd on Mac, Ctrl on others)
+                                                  if (isPrimaryModifier) {
                                                     switch (event.logicalKey) {
                                                       case LogicalKeyboardKey
                                                           .keyF:
-                                                        final isAlt =
-                                                            HardwareKeyboard
-                                                                .instance
-                                                                .isAltPressed;
                                                         _findController
                                                                 .isActive =
                                                             true;
                                                         _findController
                                                                 .isReplaceMode =
-                                                            isAlt;
+                                                            isAltPressed;
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyH:
-                                                        if (!HardwareKeyboard
-                                                            .instance
-                                                            .isMetaPressed) {
+                                                        if (!isMetaPressed) {
                                                           _findController
                                                                   .isActive =
                                                               true;
@@ -1804,7 +1990,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                               .handled;
                                                         }
                                                         _controller
-                                                            .duplicateLine();
+                                                            .addSelectionToNextFindMatch();
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .keyU:
+                                                        _controller
+                                                            .cursorUndo();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
@@ -1814,11 +2007,20 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
-                                                        if (_undoRedoController
-                                                            .canUndo) {
-                                                          _undoRedoController
-                                                              .undo();
-                                                          _commonKeyFunctions();
+                                                        if (isShiftPressed) {
+                                                          if (_undoRedoController
+                                                              .canRedo) {
+                                                            _undoRedoController
+                                                                .redo();
+                                                            _commonKeyFunctions();
+                                                          }
+                                                        } else {
+                                                          if (_undoRedoController
+                                                              .canUndo) {
+                                                            _undoRedoController
+                                                                .undo();
+                                                            _commonKeyFunctions();
+                                                          }
                                                         }
                                                         return KeyEventResult
                                                             .handled;
@@ -1838,30 +2040,37 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .backspace:
-                                                        if (_readOnly) {
+                                                        if (widget.readOnly) {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
-                                                        _deleteWordBackward();
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
+                                                        if (!isMac) {
+                                                          _deleteWordBackward();
+                                                          _commonKeyFunctions();
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        break;
                                                       case LogicalKeyboardKey
                                                           .delete:
-                                                        if (_readOnly) {
+                                                        if (widget.readOnly) {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
-                                                        _deleteWordForward();
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
+                                                        if (!isMac) {
+                                                          _deleteWordForward();
+                                                          _commonKeyFunctions();
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        break;
                                                       case LogicalKeyboardKey
                                                           .arrowLeft:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordRight(false);
+                                                        if (isMac) {
+                                                          _controller.pressHomeKey(
+                                                            isShiftPressed:
+                                                                isShiftPressed,
+                                                          );
                                                         } else {
                                                           _moveWordLeft(false);
                                                         }
@@ -1870,16 +2079,43 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowRight:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordLeft(false);
+                                                        if (isMac) {
+                                                          _controller.pressEndKey(
+                                                            isShiftPressed:
+                                                                isShiftPressed,
+                                                          );
                                                         } else {
                                                           _moveWordRight(false);
                                                         }
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
+                                                      case LogicalKeyboardKey
+                                                          .arrowUp:
+                                                        if (isMac) {
+                                                          _controller
+                                                              .pressDocumentHomeKey(
+                                                                isShiftPressed:
+                                                                    isShiftPressed,
+                                                              );
+                                                          _commonKeyFunctions();
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        break;
+                                                      case LogicalKeyboardKey
+                                                          .arrowDown:
+                                                        if (isMac) {
+                                                          _controller
+                                                              .pressDocumentEnd(
+                                                                isShiftPressed:
+                                                                    isShiftPressed,
+                                                              );
+                                                          _commonKeyFunctions();
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        break;
                                                       case LogicalKeyboardKey
                                                           .period:
                                                         (() async {
@@ -1890,94 +2126,19 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         })();
                                                         return KeyEventResult
                                                             .handled;
-                                                      case LogicalKeyboardKey
-                                                          .home:
-                                                        _controller
-                                                            .pressDocumentHomeKey(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .end:
-                                                        _controller
-                                                            .pressDocumentEndKey(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
                                                       default:
                                                         break;
                                                     }
                                                   }
 
-                                                  if (isAltPressed &&
-                                                      !isCtrlPressed &&
-                                                      _isMac) {
-                                                    switch (event.logicalKey) {
-                                                      case LogicalKeyboardKey
-                                                          .arrowLeft:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordRight(
-                                                            isShiftPressed,
-                                                          );
-                                                        } else {
-                                                          _moveWordLeft(
-                                                            isShiftPressed,
-                                                          );
-                                                        }
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .arrowRight:
-                                                        if (widget
-                                                                .textDirection ==
-                                                            TextDirection.rtl) {
-                                                          _moveWordLeft(
-                                                            isShiftPressed,
-                                                          );
-                                                        } else {
-                                                          _moveWordRight(
-                                                            isShiftPressed,
-                                                          );
-                                                        }
-                                                        _commonKeyFunctions();
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .backspace:
-                                                        if (!_readOnly) {
-                                                          _deleteWordBackward();
-                                                          _commonKeyFunctions();
-                                                        }
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      case LogicalKeyboardKey
-                                                          .delete:
-                                                        if (!_readOnly) {
-                                                          _deleteWordForward();
-                                                          _commonKeyFunctions();
-                                                        }
-                                                        return KeyEventResult
-                                                            .handled;
-                                                      default:
-                                                        break;
-                                                    }
-                                                  }
-
+                                                  // Shift only (no primary/word mod)
                                                   if (isShiftPressed &&
-                                                      !isCtrlPressed) {
+                                                      !isPrimaryModifier &&
+                                                      !isWordModifier) {
                                                     switch (event.logicalKey) {
                                                       case LogicalKeyboardKey
                                                           .tab:
-                                                        if (_readOnly) {
+                                                        if (widget.readOnly) {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
@@ -2040,6 +2201,72 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     }
                                                   }
 
+                                                  // Alt only (no primary mod): line move/copy + word movement on Mac
+                                                  if (isAltPressed &&
+                                                      !isPrimaryModifier) {
+                                                    switch (event.logicalKey) {
+                                                      case LogicalKeyboardKey
+                                                          .arrowUp:
+                                                        if (isShiftPressed) {
+                                                          _copyLineUp();
+                                                        } else {
+                                                          _moveLineUp();
+                                                        }
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .arrowDown:
+                                                        if (isShiftPressed) {
+                                                          _copyLineDown();
+                                                        } else {
+                                                          _moveLineDown();
+                                                        }
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .arrowLeft:
+                                                        _moveWordLeft(
+                                                          isShiftPressed,
+                                                        );
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .arrowRight:
+                                                        _moveWordRight(
+                                                          isShiftPressed,
+                                                        );
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .backspace:
+                                                        if (widget.readOnly) {
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        _deleteWordBackward();
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      case LogicalKeyboardKey
+                                                          .delete:
+                                                        if (widget.readOnly) {
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        }
+                                                        _deleteWordForward();
+                                                        _commonKeyFunctions();
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      default:
+                                                        break;
+                                                    }
+                                                  }
+
+                                                  // No modifier (base keys)
                                                   switch (event.logicalKey) {
                                                     case LogicalKeyboardKey
                                                         .backspace:
@@ -2048,13 +2275,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       }
 
-                                                      if (_controller
-                                                          .hasMultiCursors) {
-                                                        _controller
-                                                            .backspaceAtAllCursors();
-                                                      } else {
-                                                        _controller.backspace();
-                                                      }
+                                                      _controller.backspace();
 
                                                       if (_suggestionNotifier
                                                               .value !=
@@ -2093,15 +2314,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                                 isShiftPressed,
                                                           );
 
-                                                      if (_controller
-                                                          .hasMultiCursors) {
-                                                        _controller
-                                                            .moveMultiCursorsDown(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
-                                                      }
-
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
                                                           .handled;
@@ -2113,15 +2325,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             isShiftPressed:
                                                                 isShiftPressed,
                                                           );
-
-                                                      if (_controller
-                                                          .hasMultiCursors) {
-                                                        _controller
-                                                            .moveMultiCursorsUp(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
-                                                      }
 
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
@@ -2244,9 +2447,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     ?.languageId,
                                                 lspConfig:
                                                     _controller.lspConfig,
-                                                semanticTokens: _semanticTokens,
-                                                semanticTokensVersion:
-                                                    _semanticTokensVersion,
+                                                semanticTokensUpdate:
+                                                    _semanticTokensUpdate,
+                                                onGoToDefinition:
+                                                    widget.onGoToDefinition,
+                                                linkModifierPressed:
+                                                    _linkModifierPressed,
                                                 innerPadding:
                                                     widget.innerPadding,
                                                 vscrollController:
@@ -2334,15 +2540,15 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                           }
                           final sigScrollCtrl = ScrollController();
 
-                          final desiredWidth = screenWidth < 700
-                              ? screenWidth * 0.63
+                          final desiredWidth = viewWidth < 700
+                              ? viewWidth * 0.63
                               : 420.0;
                           final maxBoxHeight = 400.0;
                           final fontSize = widget.textStyle?.fontSize ?? 14;
 
                           double adjustedLeft = offset.dx;
-                          if (adjustedLeft + desiredWidth > screenWidth) {
-                            adjustedLeft = screenWidth - desiredWidth;
+                          if (adjustedLeft + desiredWidth > viewWidth) {
+                            adjustedLeft = viewWidth - desiredWidth;
                           }
                           if (adjustedLeft < 0) {
                             adjustedLeft = 0;
@@ -2595,9 +2801,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             return SizedBox.shrink();
                           }
                           final completionScrlCtrl = ScrollController();
-                          final desiredWidth = screenWidth < 700
-                              ? screenWidth * 0.63
-                              : screenWidth * 0.3;
+                          final desiredWidth = viewWidth < 700
+                              ? viewWidth * 0.63
+                              : viewWidth * 0.3;
                           final suggestionWidth = min(desiredWidth, 400.0);
                           final itemExtent =
                               _suggestionStyle.itemHeight ?? 24.0;
@@ -2606,8 +2812,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             400.0,
                           );
                           double adjustedLeft = offset.dx;
-                          if (adjustedLeft + suggestionWidth > screenWidth) {
-                            adjustedLeft = screenWidth - suggestionWidth;
+                          if (adjustedLeft + suggestionWidth > viewWidth) {
+                            adjustedLeft = viewWidth - suggestionWidth;
                           }
                           if (adjustedLeft < 0) {
                             adjustedLeft = 0;
@@ -3013,17 +3219,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                   if (_selectedSuggestionMd != null &&
                                       _lspSignatureNotifier.value == null)
                                     Positioned(
-                                      width: screenWidth < 700
-                                          ? screenWidth * 0.63
+                                      width: viewWidth < 700
+                                          ? viewWidth * 0.63
                                           : null,
                                       top:
                                           offset.dy +
                                           (widget.textStyle?.fontSize ?? 14) +
                                           10 +
-                                          (screenWidth < 700
-                                              ? (offset.dy <
-                                                            (screenWidth / 2) &&
-                                                        400 < screenHeight)
+                                          (viewWidth < 700
+                                              ? (offset.dy < (viewWidth / 2) &&
+                                                        400 < viewHeight)
                                                     ? (((widget.textStyle?.fontSize ??
                                                                       14) +
                                                                   6.5) *
@@ -3034,12 +3239,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                           .clamp(0, 400)
                                                     : -100
                                               : 0),
-                                      left: screenWidth < 700
+                                      left: viewWidth < 700
                                           ? offset.dx
                                           : ((adjustedLeft +
                                                         suggestionWidth +
                                                         420) >
-                                                    screenWidth
+                                                    viewWidth
                                                 ? adjustedLeft - 420 - 10
                                                 : adjustedLeft +
                                                       suggestionWidth),
@@ -3139,13 +3344,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       }
                       final Offset position = hov.$1;
                       final width = _isMobile
-                          ? screenWidth * 0.63
-                          : screenWidth * 0.3;
-                      final maxHeight = _isMobile ? screenHeight * 0.4 : 550.0;
+                          ? viewWidth * 0.63
+                          : viewWidth * 0.3;
+                      final maxHeight = _isMobile ? viewHeight * 0.4 : 550.0;
 
                       double adjustedLeft = position.dx;
-                      if (adjustedLeft + width > screenWidth) {
-                        adjustedLeft = screenWidth - width;
+                      if (adjustedLeft + width > viewWidth) {
+                        adjustedLeft = viewWidth - width;
                       }
                       if (adjustedLeft < 0) {
                         adjustedLeft = 0;
@@ -3457,9 +3662,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       }
 
                       return Positioned(
-                        width: screenWidth < 700
-                            ? screenWidth * 0.63
-                            : screenWidth * 0.3,
+                        width: viewWidth < 700
+                            ? viewWidth * 0.63
+                            : viewWidth * 0.3,
                         top:
                             offset.dy + (widget.textStyle?.fontSize ?? 14) + 10,
                         left: offset.dx,
@@ -3702,8 +3907,9 @@ class _CodeField extends LeafRenderObjectWidget {
   final List<Mode> extraLanguages;
   final String? languageId;
   final LspConfig? lspConfig;
-  final List<LspSemanticToken>? semanticTokens;
-  final int semanticTokensVersion;
+  final SemanticTokensUpdate? semanticTokensUpdate;
+  final Future<void> Function(int offset)? onGoToDefinition;
+  final bool linkModifierPressed;
   final EdgeInsets? innerPadding;
   final ScrollController vscrollController, hscrollController;
   final FocusNode focusNode;
@@ -3768,8 +3974,9 @@ class _CodeField extends LeafRenderObjectWidget {
     this.textStyle,
     this.languageId,
     this.lspConfig,
-    this.semanticTokens,
-    this.semanticTokensVersion = 0,
+    this.semanticTokensUpdate,
+    this.onGoToDefinition,
+    this.linkModifierPressed = false,
     this.innerPadding,
     this.ghostTextStyle,
     this.matchHighlightStyle,
@@ -3819,6 +4026,7 @@ class _CodeField extends LeafRenderObjectWidget {
       ghostTextStyle: ghostTextStyle,
       filePath: filePath,
       onHoverSetByTap: onHoverSetByTap,
+      onGoToDefinition: onGoToDefinition,
       textDirection: textDirection,
     );
   }
@@ -3828,12 +4036,10 @@ class _CodeField extends LeafRenderObjectWidget {
     BuildContext context,
     covariant _CodeFieldRenderer renderObject,
   ) {
-    if (semanticTokens != null) {
+    final update = semanticTokensUpdate;
+    if (update != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        renderObject.updateSemanticTokens(
-          semanticTokens!,
-          semanticTokensVersion,
-        );
+        renderObject.applySemanticTokensUpdate(update);
       });
     }
     renderObject
@@ -3852,6 +4058,7 @@ class _CodeField extends LeafRenderObjectWidget {
       ..gutterStyle = gutterStyle
       ..selectionStyle = selectionStyle
       ..ghostTextStyle = ghostTextStyle
+      ..linkModifierPressed = linkModifierPressed
       ..textDirection = textDirection;
   }
 }
@@ -3875,6 +4082,21 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final BuildContext context;
   final LspConfig? lspConfig;
   final VoidCallback? onHoverSetByTap;
+  final Future<void> Function(int offset)? onGoToDefinition;
+  bool _linkModifierPressed = false;
+  // Definition link system
+  String? _goToDefinitionWord;
+  TextSelection? _goToDefinitionPosition;
+  Timer? _definitionLinkTimer;
+  int? _lastHoverOffset;
+  // TextMate integration fields
+  int? _lastRequestedSemanticStartLine, _lastRequestedSemanticEndLineExclusive;
+  bool _requestedInitialSemanticTokens = false;
+  static const int _maxTextMatePrefetchLines = 600;
+  int? _lastRequestedTextMateStartLine, _lastRequestedTextMateEndLineExclusive;
+  int? _lastRequestedTextMatePriorityStartLine,
+      _lastRequestedTextMatePriorityEndLineExclusive;
+  bool _requestedInitialTextMateTokens = false;
   final Map<int, double> _lineWidthCache = {};
   final Map<int, String> _lineTextCache = {};
   final Map<int, Rect> _actionBulbRects = {};
@@ -3955,16 +4177,43 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   int? _cachedSelectionMagnifierStartLine, _cachedSelectionMagnifierEndLine;
   int? _ghostTextAnchorLine, _highlightedLine;
   int _lastAppliedSemanticVersion = -1, _lastDocumentVersion = -1;
+
+  set linkModifierPressed(bool value) {
+    if (_linkModifierPressed == value) return;
+    _linkModifierPressed = value;
+    if (!value) {
+      _clearDefinitionLink();
+    } else if (_lastHoverOffset != null) {
+      _maybeUpdateDefinitionLinkForHoverOffset(_lastHoverOffset!);
+    }
+    markNeedsPaint();
+  }
+
   int _previousLineCount = 0;
   int _ghostTextLineCount = 0, _cachedLineCount = 0;
   int _virtualRemovedTotalLineCount = 0;
   Animation<double>? _lineHighlightAnimation;
 
-  void updateSemanticTokens(List<LspSemanticToken> tokens, int version) {
-    if (version < _lastAppliedSemanticVersion) return;
-    _lastAppliedSemanticVersion = version;
-    _syntaxHighlighter.updateSemanticTokens(tokens, controller.text);
-    _paragraphCache.clear();
+  void applySemanticTokensUpdate(SemanticTokensUpdate update) {
+    if (update.version <= _lastAppliedSemanticVersion) return;
+    _lastAppliedSemanticVersion = update.version;
+    if (update.isFull) {
+      _syntaxHighlighter.updateSemanticTokensFull(update.tokens);
+      _paragraphCache.clear();
+    } else {
+      _syntaxHighlighter.updateSemanticTokensRange(
+        update.tokens,
+        startLine: update.startLine,
+        endLineExclusive: update.endLineExclusive,
+      );
+      for (
+        int line = update.startLine;
+        line < update.endLineExclusive;
+        line++
+      ) {
+        _paragraphCache.remove(line);
+      }
+    }
     _bracketCache.clear();
     _indentGuideCache.clear();
     _indentEndLineCache.clear();
@@ -3973,6 +4222,204 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _lineOffsetCache.clear();
     _caretInfoCache.clear();
     _lineIndentCache.clear();
+    markNeedsPaint();
+  }
+
+  void _applyGrammarLineUpdates(Set<int> updatedLines) {
+    for (final line in updatedLines) {
+      _paragraphCache.remove(line);
+    }
+    markNeedsPaint();
+  }
+
+  // --- Definition link system ---
+
+  void _clearDefinitionLink() {
+    if (_goToDefinitionWord != null || _goToDefinitionPosition != null) {
+      _goToDefinitionWord = null;
+      _goToDefinitionPosition = null;
+      _definitionLinkTimer?.cancel();
+      markNeedsPaint();
+    }
+  }
+
+  void _maybeUpdateDefinitionLinkForHoverOffset(int offset) {
+    _lastHoverOffset = offset;
+    if (!_linkModifierPressed) {
+      _clearDefinitionLink();
+      return;
+    }
+    final range = _wordRangeAtOffset(offset);
+    if (range == null) {
+      _clearDefinitionLink();
+      return;
+    }
+    final word = controller.text.substring(range.start, range.end);
+    if (word == _goToDefinitionWord && _goToDefinitionPosition == range) return;
+    _goToDefinitionWord = word;
+    _goToDefinitionPosition = range;
+    _definitionLinkTimer?.cancel();
+    markNeedsPaint();
+  }
+
+  TextSelection? _wordRangeAtOffset(int offset) {
+    final text = controller.text;
+    if (offset < 0 || offset >= text.length) return null;
+    final pattern = RegExp(r'\w+');
+    for (final match in pattern.allMatches(text)) {
+      if (offset >= match.start && offset < match.end) {
+        return TextSelection(baseOffset: match.start, extentOffset: match.end);
+      }
+    }
+    return null;
+  }
+
+  void _drawDefinitionLinkUnderline(Canvas canvas) {
+    if (!_linkModifierPressed) return;
+    final pos = _goToDefinitionPosition;
+    if (pos == null) return;
+    final text = controller.text;
+    if (pos.start < 0 || pos.end > text.length) return;
+    final startLine = controller.getLineAtOffset(pos.start);
+    final startLineStart = controller.getLineStartOffset(startLine);
+    final charInLine = pos.start - startLineStart;
+    final endCharInLine = pos.end - startLineStart;
+    final lineIndex = startLine;
+
+    final voffset = vscrollController.hasClients
+        ? vscrollController.offset
+        : 0.0;
+    final hoffset = hscrollController.hasClients
+        ? hscrollController.offset
+        : 0.0;
+
+    final hasActiveFolds = _hasActiveFolds;
+    final lineY = _getLineYOffset(lineIndex, hasActiveFolds) - voffset;
+
+    final para = _paragraphCache[lineIndex];
+    if (para == null) return;
+
+    final boxes = para.getBoxesForRange(charInLine, endCharInLine);
+    if (boxes.isEmpty) return;
+
+    final paint = Paint()
+      ..color = _editorTheme['root']?.color?.withAlpha(200) ?? Colors.blue
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    for (final box in boxes) {
+      final left = _gutterWidth + box.left - hoffset;
+      final right = _gutterWidth + box.right - hoffset;
+      final bottom = lineY + box.bottom;
+      canvas.drawLine(Offset(left, bottom), Offset(right, bottom), paint);
+    }
+  }
+
+  // --- TextMate prefetch methods ---
+
+  void _maybeRequestViewportSemanticTokens(
+    int firstVisibleLine,
+    int lastVisibleLine,
+  ) {
+    if (controller.lspConfig == null) return;
+    if (!_requestedInitialSemanticTokens) {
+      _requestedInitialSemanticTokens = true;
+      controller.requestSemanticTokensForViewport(
+        startLine: firstVisibleLine,
+        endLineExclusive: lastVisibleLine + 1,
+      );
+      _lastRequestedSemanticStartLine = firstVisibleLine;
+      _lastRequestedSemanticEndLineExclusive = lastVisibleLine + 1;
+      return;
+    }
+    if (_lastRequestedSemanticStartLine == firstVisibleLine &&
+        _lastRequestedSemanticEndLineExclusive == lastVisibleLine + 1) {
+      return;
+    }
+    _lastRequestedSemanticStartLine = firstVisibleLine;
+    _lastRequestedSemanticEndLineExclusive = lastVisibleLine + 1;
+    controller.requestSemanticTokensForViewport(
+      startLine: firstVisibleLine,
+      endLineExclusive: lastVisibleLine + 1,
+    );
+  }
+
+  void _maybePrefetchViewportTextMateTokens(
+    int firstVisibleLine,
+    int lastVisibleLine,
+  ) {
+    final viewportLines = lastVisibleLine - firstVisibleLine + 1;
+    final margin = viewportLines;
+    final prefetchStart = (firstVisibleLine - margin).clamp(
+      0,
+      controller.lineCount - 1,
+    );
+    final prefetchEnd = (lastVisibleLine + margin).clamp(
+      0,
+      controller.lineCount - 1,
+    );
+    if (_lastRequestedTextMateStartLine == prefetchStart &&
+        _lastRequestedTextMateEndLineExclusive == prefetchEnd + 1) {
+      return;
+    }
+    _lastRequestedTextMateStartLine = prefetchStart;
+    _lastRequestedTextMateEndLineExclusive = prefetchEnd + 1;
+
+    String getLineText(int lineIndex) => controller.getLineText(lineIndex);
+
+    if (!_requestedInitialTextMateTokens) {
+      _requestedInitialTextMateTokens = true;
+      final initialEnd = min(
+        prefetchStart + _maxTextMatePrefetchLines,
+        controller.lineCount,
+      );
+      _syntaxHighlighter.prefetchTextMateTokens(
+        startLine: prefetchStart,
+        endLineExclusive: initialEnd,
+        getLineText: getLineText,
+      );
+    }
+
+    // Priority prefetch for the visible range
+    if (_lastRequestedTextMatePriorityStartLine != firstVisibleLine ||
+        _lastRequestedTextMatePriorityEndLineExclusive != lastVisibleLine + 1) {
+      _lastRequestedTextMatePriorityStartLine = firstVisibleLine;
+      _lastRequestedTextMatePriorityEndLineExclusive = lastVisibleLine + 1;
+      _syntaxHighlighter.prefetchTextMateTokens(
+        startLine: firstVisibleLine,
+        endLineExclusive: lastVisibleLine + 1,
+        getLineText: getLineText,
+      );
+    }
+  }
+
+  // --- Diff view helpers ---
+
+  int _lineNumberColumns() {
+    final diffData = controller.diffViewData;
+    if (diffData == null) {
+      return max('${controller.lineCount}'.length, 1);
+    }
+    final maxLine = max(
+      controller.lineCount,
+      max(diffData.maxOldLine, diffData.maxNewLine),
+    );
+    return max('$maxLine'.length, 1);
+  }
+
+  double _computeGutterWidth() {
+    final columns = _lineNumberColumns();
+    final diffData = controller.diffViewData;
+    final numSets = (diffData != null) ? 2 : 1;
+    final charWidth = (_textStyle?.fontSize ?? 14) * 0.6;
+    final foldIconWidth = enableFolding
+        ? (_textStyle?.fontSize ?? 14) + 4
+        : 0.0;
+    return _gutterPadding +
+        (columns * charWidth * numSets) +
+        (numSets > 1 ? 4.0 : 0) +
+        foldIconWidth +
+        _gutterPadding;
   }
 
   void _invalidateFoldRanges([int startLine = 0]) {
@@ -4163,6 +4610,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineOffsetCache.clear();
       _caretInfoCache.clear();
       _lineIndentCache.clear();
+      // Reset TextMate prefetch tracking so the next paint cycle re-requests
+      _lastRequestedTextMateStartLine = null;
+      _lastRequestedTextMateEndLineExclusive = null;
+      _lastRequestedTextMatePriorityStartLine = null;
+      _lastRequestedTextMatePriorityEndLineExclusive = null;
+      _clearDefinitionLink();
     }
   }
 
@@ -4237,6 +4690,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     this.filePath,
     this.matchHighlightStyle,
     this.onHoverSetByTap,
+    this.onGoToDefinition,
     EdgeInsets? innerPadding,
     TextStyle? textStyle,
     TextStyle? ghostTextStyle,
@@ -4272,6 +4726,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: _editorTheme,
       baseTextStyle: _textStyle,
       languageId: languageId,
+      filePath: filePath,
+      initialText: controller.text,
+      onGrammarUpdated: _applyGrammarLineUpdates,
     );
 
     _gutterPadding = fontSize;
@@ -4506,7 +4963,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: theme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      filePath: filePath,
+      initialText: controller.text,
+      onGrammarUpdated: _applyGrammarLineUpdates,
     );
+    _lastAppliedSemanticVersion = -1;
     _paragraphCache.clear();
     _bracketCache.clear();
     markNeedsLayout();
@@ -4525,7 +4986,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      filePath: filePath,
+      initialText: controller.text,
+      onGrammarUpdated: _applyGrammarLineUpdates,
     );
+    _lastAppliedSemanticVersion = -1;
     _paragraphCache.clear();
     _bracketCache.clear();
     markNeedsLayout();
@@ -4533,7 +4998,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   set textStyle(TextStyle? style) {
-    if (identical(style, _textStyle)) return;
+    if (style == _textStyle) return;
     _textStyle = style;
 
     final fontSize = style?.fontSize ?? 14.0;
@@ -4583,7 +5048,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: style,
       languageId: languageId,
+      filePath: filePath,
+      initialText: controller.text,
+      onGrammarUpdated: _applyGrammarLineUpdates,
     );
+    _lastAppliedSemanticVersion = -1;
 
     _paragraphCache.clear();
     _lineWidthCache.clear();
@@ -4627,7 +5096,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      filePath: filePath,
+      initialText: controller.text,
+      onGrammarUpdated: _applyGrammarLineUpdates,
     );
+    _lastAppliedSemanticVersion = -1;
     _paragraphCache.clear();
     _bracketCache.clear();
     markNeedsLayout();
@@ -4761,7 +5234,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
   }
 
-  void _deferLayout({required int lineDelta}) {
+  void _deferLayout({int lineDelta = 0}) {
     _layoutDebounceTimer?.cancel();
 
     if (lineDelta.abs() <= 4) {
@@ -4995,11 +5468,39 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final removedLength = max(insertedText.length - delta, 0);
       final oldEnd = dirtyRange.start + removedLength;
 
+      TextMateEdit? textMateEdit;
+      final tmEnabled = CodeForgeTextMate.client != null && filePath != null;
+      if (tmEnabled) {
+        final safeStart = dirtyRange.start.clamp(0, newText.length);
+        final startLine = controller.getLineAtOffset(safeStart);
+        final lineStart = controller.getLineStartOffset(startLine);
+        final startChar = (safeStart - lineStart).clamp(0, newText.length);
+
+        final safeOldEnd = oldEnd.clamp(safeStart, previousText.length);
+        final removedText = safeOldEnd > safeStart
+            ? previousText.substring(safeStart, safeOldEnd)
+            : '';
+        final removedParts = removedText.split('\n');
+        final endLine = startLine + removedParts.length - 1;
+        final endChar = removedParts.length == 1
+            ? startChar + removedParts[0].length
+            : removedParts.last.length;
+
+        textMateEdit = TextMateEdit(
+          startLine: startLine,
+          startChar: startChar,
+          endLine: endLine,
+          endChar: endChar,
+          text: insertedText,
+        );
+      }
+
       _syntaxHighlighter.applyDocumentEdit(
         dirtyRange.start,
         oldEnd,
         insertedText,
         newText,
+        textMateEdit: textMateEdit,
       );
 
       _paragraphCache.clear();
@@ -5111,6 +5612,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
 
       _deferLayout(lineDelta: lineDelta);
+    } else if (controller.lineStructureChanged) {
+      controller.lineStructureChanged = false;
+      _cachedLineCount = newLineCount;
+      if (enableGutter && gutterStyle.gutterWidth == null) {
+        _gutterWidth = _computeGutterWidth();
+      }
+      _paragraphCache.clear();
+      _lineTextCache.clear();
+      _lineHeightCache.clear();
+      _lineWidthCache.clear();
+      _deferLayout();
     } else if (affectedLine != null) {
       _foldRanges.remove(affectedLine);
       if (affectedLine > 0) {
@@ -6140,6 +6652,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _resizeTimer?.cancel();
     _layoutDebounceTimer?.cancel();
     _foldComputeTimer?.cancel();
+    _definitionLinkTimer?.cancel();
     super.detach();
   }
 
@@ -6190,7 +6703,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (isRTL && !lineWrap) {
       final viewportWidth = constraints.maxWidth.isFinite
           ? constraints.maxWidth
-          : MediaQuery.of(context).size.width;
+          : constraints.minWidth;
       final newContentWidth =
           viewportWidth - _gutterWidth - (innerPadding?.horizontal ?? 0);
       if ((_cachedRtlContentWidth - newContentWidth).abs() > 1) {
@@ -6214,9 +6727,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final computedWidth = lineWrap
           ? (constraints.maxWidth.isFinite
                 ? constraints.maxWidth
-                : MediaQuery.of(context).size.width)
+                : constraints.minWidth)
           : _longLineWidth + (innerPadding?.left ?? 0) + _gutterWidth;
-      final minWidth = lineWrap ? 0.0 : MediaQuery.of(context).size.width;
+      final minWidth = lineWrap ? 0.0 : constraints.minWidth;
       final contentWidth = max(computedWidth, minWidth);
       size = constraints.constrain(
         Size(
@@ -6234,7 +6747,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (lineWrap) {
       final viewportWidth = constraints.maxWidth.isFinite
           ? constraints.maxWidth
-          : MediaQuery.of(context).size.width;
+          : constraints.minWidth;
       final newWrapWidth =
           viewportWidth - _gutterWidth - (innerPadding?.horizontal ?? 0);
       final clampedWrapWidth = newWrapWidth < 100 ? 100.0 : newWrapWidth;
@@ -6298,7 +6811,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             viewTop +
             (vscrollController.hasClients
                 ? vscrollController.position.viewportDimension
-                : MediaQuery.of(context).size.height);
+                : constraints.minHeight);
         final firstVisible = (viewTop / _lineHeight).floor().clamp(
           0,
           lineCount - 1,
@@ -6331,10 +6844,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final computedWidth = lineWrap
         ? (constraints.maxWidth.isFinite
               ? constraints.maxWidth
-              : MediaQuery.of(context).size.width)
+              : constraints.minWidth)
         : maxLineWidth + (innerPadding?.left ?? 0) + _gutterWidth;
 
-    final minWidth = lineWrap ? 0.0 : MediaQuery.of(context).size.width;
+    final minWidth = lineWrap ? 0.0 : constraints.minWidth;
     final contentWidth = max(computedWidth, minWidth);
 
     size = constraints.constrain(
@@ -6553,6 +7066,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       firstVisibleLineY,
       hasActiveFolds,
     );
+
+    _drawDefinitionLinkUnderline(canvas);
+
+    // TextMate viewport prefetch
+    _maybeRequestViewportSemanticTokens(firstVisibleLine, lastVisibleLine);
+    _maybePrefetchViewportTextMateTokens(firstVisibleLine, lastVisibleLine);
 
     if (enableGuideLines && (lastVisibleLine - firstVisibleLine) < 200) {
       _drawIndentGuides(
@@ -6817,7 +7336,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                 cursor.line.clamp(0, controller.lineCount - 1),
               ) +
               cursor.character;
-          final safeOffset = cursorOffset.clamp(0, controller.text.length);
+          final int safeOffset = cursorOffset.clamp(0, controller.text.length);
           final info = _getCaretInfoAtOffset(safeOffset);
           final cx = offset.dx + textX + info.offset.dx;
           final cy =
@@ -10108,8 +10627,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   @override
   void handleEvent(PointerEvent event, covariant BoxHitTestEntry entry) {
     final localPosition = event.localPosition;
-    final clickY =
-        localPosition.dy + vscrollController.offset - (innerPadding?.top ?? 0);
+    final vOffset = vscrollController.hasClients
+        ? vscrollController.offset
+        : 0.0;
+    final clickY = localPosition.dy + vOffset - (innerPadding?.top ?? 0);
     _currentPosition = localPosition;
 
     final contentX = localPosition.dx -
@@ -10141,6 +10662,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         _hoverTimer?.cancel();
         hoverNotifier.value = null;
       }
+
+      // Update definition link for Cmd/Ctrl+hover
+      _maybeUpdateDefinitionLinkForHoverOffset(textOffset);
     }
 
     if ((event is PointerDownEvent && event.buttons == kSecondaryButton) ||
@@ -10174,6 +10698,18 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
       if (contextMenuOffsetNotifier.value.dx >= 0) {
         contextMenuOffsetNotifier.value = const Offset(-1, -1);
+      }
+
+      // Definition link click (Cmd/Ctrl+Click)
+      if (_linkModifierPressed &&
+          _goToDefinitionWord != null &&
+          onGoToDefinition != null) {
+        final pos = _goToDefinitionPosition;
+        if (pos != null) {
+          _clearDefinitionLink();
+          onGoToDefinition!(pos.start);
+          return;
+        }
       }
 
       if (lspActionNotifier.value != null && _actionBulbRects.isNotEmpty) {
@@ -10526,6 +11062,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
     }
 
+    if (_linkModifierPressed && _goToDefinitionWord != null) {
+      return SystemMouseCursors.click;
+    }
+
     return SystemMouseCursors.text;
   }
 
@@ -10534,6 +11074,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
   @override
   PointerExitEventListener? get onExit => (event) {
+    _clearDefinitionLink();
     _hoverTimer?.cancel();
   };
 

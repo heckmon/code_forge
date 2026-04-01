@@ -7,3 +7,4 @@ export 'code_forge/scroll.dart';
 export 'code_forge/undo_redo.dart';
 export 'LSP/lsp.dart';
 export 'code_forge/find_controller.dart';
+export 'code_forge/textmate_sidecar.dart';

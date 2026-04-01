@@ -8,6 +8,75 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+enum DiffViewMode { sideBySideLeft, sideBySideRight, combined }
+
+enum DiffLineKind { context, added, removed, placeholder }
+
+class DiffViewLine {
+  const DiffViewLine({
+    required this.text,
+    required this.kind,
+    this.oldLine,
+    this.newLine,
+  });
+
+  final String text;
+  final DiffLineKind kind;
+  final int? oldLine;
+  final int? newLine;
+
+  bool get isPlaceholder => kind == DiffLineKind.placeholder;
+}
+
+class DiffViewData {
+  const DiffViewData({
+    required this.lines,
+    required this.mode,
+    this.maxOldLine = 0,
+    this.maxNewLine = 0,
+  });
+
+  final List<DiffViewLine> lines;
+  final DiffViewMode mode;
+  final int maxOldLine;
+  final int maxNewLine;
+
+  int get maxOldLineDigits =>
+      maxOldLine <= 0 ? 1 : maxOldLine.toString().length;
+  int get maxNewLineDigits =>
+      maxNewLine <= 0 ? 1 : maxNewLine.toString().length;
+}
+
+class SemanticTokensUpdate {
+  const SemanticTokensUpdate.full({required this.tokens, required this.version})
+    : startLine = 0,
+      endLineExclusive = -1,
+      isFull = true;
+
+  const SemanticTokensUpdate.range({
+    required this.tokens,
+    required this.version,
+    required this.startLine,
+    required this.endLineExclusive,
+  }) : isFull = false;
+
+  final List<LspSemanticToken> tokens;
+  final int version;
+  final int startLine;
+  final int endLineExclusive;
+  final bool isFull;
+}
+
+const bool _kDebugTextInput = bool.fromEnvironment(
+  'CODEFORGE_DEBUG_TEXT_INPUT',
+  defaultValue: false,
+);
+
+void _debugTextInput(String message) {
+  if (!_kDebugTextInput) return;
+  debugPrint('[code_forge/text_input] $message');
+}
+
 /// Controller for the [CodeForge] code editor widget.
 ///
 /// This controller manages the text content, selection state, and various
@@ -33,179 +102,87 @@ import 'package:flutter/services.dart';
 /// controller.unfoldAll();
 /// ```
 class CodeForgeController implements DeltaTextInputClient {
-  static const _flushDelay = Duration(milliseconds: 300);
-  static const _semanticTokenDebounce = Duration(milliseconds: 500);
+  static const _flushDelay = Duration(milliseconds: 150);
+  static const _lspSyncDebounceIdle = Duration(milliseconds: 75);
+  static const _lspSyncDebounceTyping = Duration(milliseconds: 200);
+  static const _lspSyncMaxLatency = Duration(milliseconds: 500);
+  static const _semanticTokenDebounce = Duration(milliseconds: 150);
   static const _documentColorDebounce = Duration(milliseconds: 50);
   static const _documentHighlightDebounce = Duration(milliseconds: 300);
+  static const _completionDebounce = Duration(milliseconds: 75);
   static const _cclsRefreshDebounce = Duration(milliseconds: 1000);
   final List<VoidCallback> _listeners = [];
   final _isMobile = Platform.isAndroid || Platform.isIOS;
   final List<LineDecoration> _lineDecorations = [];
   final List<GutterDecoration> _gutterDecorations = [];
-  final List<({int line, int character})> _multiCursors = [];
+  final List<VirtualRemovedBlock> _virtualRemovedBlocks = [];
   Timer? _flushTimer, _semanticTokenTimer, _codeActionTimer, _syncTimer;
-  Timer? _documentColorTimer, _foldRangesTimer, _documentHighlightTimer;
+  Timer? _documentColorTimer;
+  Timer? _foldRangesTimer;
+  Timer? _documentHighlightTimer;
+  Timer? _lspSyncTimer, _lspSyncMaxLatencyTimer, _completionTimer;
   Timer? _cclsRefreshTimer, _debounceTimer;
-  Timer? _lspTypingTimer;
-  static const Duration _lspTypingDebounce = Duration(milliseconds: 300);
   String? _cachedText, _bufferLineText, _openedFile, _lastSentText;
   String _previousValue = "";
   TextSelection _prevSelection = const TextSelection.collapsed(offset: 0);
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
+  bool _syncToConnectionMicrotaskScheduled = false;
   int _bufferLineRopeStart = 0, _bufferLineOriginalLength = 0;
   List<String>? _cachedBufferLines;
   int _cachedTextVersion = -1, _currentVersion = 0, _semanticTokensVersion = 0;
+  ({int startLine, int endLineExclusive})? _lastVisibleSemanticRange;
+  ({int startLine, int endLineExclusive})? _pendingSemanticRangeRequest;
+  int _pendingSemanticRangeDocVersion = -1;
+  int _semanticRangeRequestSerial = 0;
+  int _semanticCoverageDocVersion = -1;
+  String? _semanticCoverageFilePath;
+  final List<({int startLine, int endLineExclusive})> _semanticCoveredRanges =
+      [];
   int? dirtyLine, _bufferLineIndex;
   bool deleteFoldRangeOnDeletingFirstLine = false;
   TextSelection? _lastSentSelection;
   String? _lastTypedCharacter;
   UndoRedoController? _undoController;
   void Function(int lineNumber)? _toggleFoldCallback;
-  void Function(int line)? _scrollToLineCallback;
   VoidCallback? _foldAllCallback, _unfoldAllCallback;
+  void Function(int line)? _scrollToLineCallback;
   bool _lspReady = false, _isTyping = false, _isDisposed = false;
+  bool _suppressLspSync = false;
   bool _usesCclsSemanticHighlight = false;
+  final List<Map<String, dynamic>> _pendingLspContentChanges = [];
+  List<dynamic> _lastPublishedDiagnostics = const [];
   List<dynamic> _suggestions = [];
   StreamSubscription? _lspResponsesSubscription;
   Set<String> _wordCache = {};
   GhostText? _ghostText;
-  final List<VirtualRemovedBlock> _virtualRemovedBlocks = [];
   List<InlayHint> _inlayHints = [];
   List<DocumentColor> _documentColors = [];
   List<DocumentHighlight> _documentHighlights = [];
   Map<int, FoldRange>? _lspFoldRanges;
   bool _lspFoldRangesAdjustedNotFetched = false;
-  bool _inlayHintsVisible = false, documentHighlightsChanged = false;
+  bool _inlayHintsVisible = false;
+  bool documentHighlightsChanged = false;
+  Future<void>? _lspInitFuture;
+  Future<void>? _lastLspSyncFuture;
+  Future<void> _lspSyncQueue = Future.value();
+  int _completionRequestSerial = 0;
+  int _codeActionRequestSerial = 0;
+  bool _enableSuggestions = true;
 
   CodeForgeController({this.lspConfig}) {
     if (lspConfig != null) {
-      (() async {
-        try {
-          if (lspConfig is LspSocketConfig) {
-            await (lspConfig! as LspSocketConfig).connect();
-          }
-          if (!lspConfig!.isInitialized) {
-            await lspConfig!.initialize();
-          }
-          if (openedFile != null) {
-            await _openDocumentInLsp();
-          }
-        } catch (e) {
-          debugPrint('Error initializing LSP: $e');
-        } finally {
-          _listeners.add(_highlightListener);
-        }
-      })();
-
-      _lspResponsesSubscription = lspConfig!.responses.listen((data) async {
-        try {
-          if (data['method'] == 'workspace/applyEdit') {
-            final Map<String, dynamic>? params = data['params'];
-            if (params != null && params.isNotEmpty) {
-              if (params.containsKey('edit')) {
-                await applyWorkspaceEdit(params);
-              }
-            }
-          }
-
-          if (data['method'] == 'workspace/configuration') {
-            final id = data['id'];
-            await lspConfig!.sendResponse(id, [
-              lspConfig!.workspaceConfiguration,
-            ]);
-          }
-
-          if (data['method'] == 'textDocument/publishDiagnostics') {
-            final List<dynamic> rawDiagnostics =
-                data['params']?['diagnostics'] ?? [];
-            if (rawDiagnostics.isNotEmpty) {
-              final List<LspErrors> errors = [];
-              for (final item in rawDiagnostics) {
-                if (item is! Map<String, dynamic>) continue;
-                int severity = item['severity'] ?? 0;
-                if (severity == 1 && lspConfig!.disableError) {
-                  severity = 0;
-                }
-                if (severity == 2 && lspConfig!.disableWarning) {
-                  severity = 0;
-                }
-                if (severity > 0) {
-                  errors.add(
-                    LspErrors(
-                      severity: severity,
-                      range: item['range'],
-                      message: item['message'] ?? '',
-                    ),
-                  );
-                }
-              }
-              if (!_isDisposed) diagnosticsNotifier.value = errors;
-
-              _codeActionTimer?.cancel();
-              _codeActionTimer = Timer(
-                const Duration(milliseconds: 250),
-                () async {
-                  if (errors.isEmpty) {
-                    if (!_isDisposed) codeActionsNotifier.value = null;
-                    return;
-                  }
-                  int minStartLine = errors
-                      .map((d) => d.range['start']?['line'] as int? ?? 0)
-                      .reduce((a, b) => a < b ? a : b);
-                  int minStartChar = errors
-                      .map((d) => d.range['start']?['character'] as int? ?? 0)
-                      .reduce((a, b) => a < b ? a : b);
-                  int maxEndLine = errors
-                      .map((d) => d.range['end']?['line'] as int? ?? 0)
-                      .reduce((a, b) => a > b ? a : b);
-                  int maxEndChar = errors
-                      .map((d) => d.range['end']?['character'] as int? ?? 0)
-                      .reduce((a, b) => a > b ? a : b);
-
-                  try {
-                    final actions = await lspConfig!.getCodeActions(
-                      filePath: openedFile!,
-                      startLine: minStartLine,
-                      startCharacter: minStartChar,
-                      endLine: maxEndLine,
-                      endCharacter: maxEndChar,
-                      diagnostics: rawDiagnostics.cast<Map<String, dynamic>>(),
-                    );
-                    if (!_isDisposed) codeActionsNotifier.value = actions;
-                  } catch (e) {
-                    debugPrint('Error fetching code actions: $e');
-                  }
-                },
-              );
-            } else {
-              if (!_isDisposed) diagnosticsNotifier.value = [];
-            }
-          }
-
-          if (data['method'] == r'$ccls/publishSemanticHighlight') {
-            final params = data['params'] as Map<String, dynamic>?;
-            if (params != null) {
-              final uri = params['uri'] as String?;
-              final symbols = params['symbols'] as List<dynamic>?;
-
-              if (uri != null &&
-                  openedFile != null &&
-                  uri.endsWith(openedFile!.split('/').last) &&
-                  symbols != null) {
-                _usesCclsSemanticHighlight = true;
-                final tokens = _convertCclsSymbolsToTokens(symbols);
-                if (!_isDisposed) {
-                  semanticTokens.value = (tokens, _semanticTokensVersion++);
-                }
-              }
-            }
-          }
-        } catch (e, st) {
-          debugPrint('Error handling LSP response: $e\n$st');
-        }
-      });
+      _attachLspConfig(lspConfig!);
     } else {
       _listeners.add(() async {
+        // When LSP is attached later, we switch to `_highlightListener`.
+        // Keeping this fallback listener active would overwrite `_previousValue`
+        // and prevent LSP didChange/diagnostics from ever being flushed.
+        if (lspConfig != null) return;
+        if (!_enableSuggestions) {
+          if (!_isDisposed) suggestionsNotifier.value = null;
+          return;
+        }
+
         _debounceTimer?.cancel();
         _debounceTimer = Timer(const Duration(milliseconds: 200), () async {
           if (text != _previousValue) {
@@ -257,79 +234,504 @@ class CodeForgeController implements DeltaTextInputClient {
     }
   }
 
-  Future<void> _openDocumentInLsp({String? previousFile}) async {
-    if (lspConfig == null || !lspConfig!.isInitialized || openedFile == null) {
-      return;
+  bool _hasHighlightListener = false;
+  DiffViewData? _diffViewData;
+
+  Future<void> attachLspConfig(LspConfig config) async {
+    if (_isDisposed) return;
+    if (lspConfig == config) return;
+    lspConfig = config;
+    _attachLspConfig(config);
+  }
+
+  DiffViewData? get diffViewData => _diffViewData;
+
+  void setDiffView(DiffViewData? data) {
+    if (_diffViewData == data) return;
+    _diffViewData = data;
+    lineStructureChanged = true;
+    notifyListeners();
+  }
+
+  int _skipPlaceholderLine(int lineIndex, {required bool preferDown}) {
+    final diffView = _diffViewData;
+    if (diffView == null) return lineIndex;
+    if (lineIndex < 0 || lineIndex >= lineCount) return lineIndex;
+    if (!diffView.lines[lineIndex].isPlaceholder) return lineIndex;
+
+    int down = lineIndex;
+    while (down < lineCount && diffView.lines[down].isPlaceholder) {
+      down++;
+    }
+    int up = lineIndex;
+    while (up >= 0 && diffView.lines[up].isPlaceholder) {
+      up--;
     }
 
-    try {
-      if (previousFile != null && previousFile != openedFile) {
-        await lspConfig!.closeDocument(previousFile);
+    if (preferDown) {
+      if (down < lineCount) return down;
+      if (up >= 0) return up;
+    } else {
+      if (up >= 0) return up;
+      if (down < lineCount) return down;
+    }
+    return lineIndex.clamp(0, lineCount - 1);
+  }
+
+  void _attachLspConfig(LspConfig config) {
+    if (!_hasHighlightListener) {
+      _listeners.add(_highlightListener);
+      _hasHighlightListener = true;
+    }
+
+    _lspReady = false;
+    final initFuture = (() async {
+      try {
+        if (config is LspSocketConfig) {
+          await config.connect();
+        }
+        if (!config.isInitialized) {
+          await config.initialize();
+        }
+
+        _pendingLspContentChanges.clear();
+        if (openedFile != null) {
+          await config.openDocument(openedFile!, content: text);
+        }
+        _lspReady = true;
+        // Prime semantic highlighting immediately so opening a tab doesn't
+        // require a scroll to populate the initial visible range.
+        if (config.serverSupportsSemanticTokensRange) {
+          final visible = _lastVisibleSemanticRange;
+          final startLine = visible?.startLine ?? 0;
+          final endLineExclusive =
+              visible?.endLineExclusive ?? lineCount.clamp(0, 200);
+          _scheduleSemanticTokensRange(
+            startLine: startLine,
+            endLineExclusive: endLineExclusive,
+            immediate: true,
+          );
+        } else {
+          unawaited(_fetchSemanticTokensFull());
+        }
+        unawaited(fetchDocumentColors());
+        unawaited(fetchLSPFoldRanges());
+        // Trigger a repaint/viewport request (semantic tokens, definition links,
+        // etc.) for editors that mounted before LSP became ready.
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Error initializing LSP: $e');
       }
-      await lspConfig!.openDocument(openedFile!);
-      _lspReady = true;
-      await _fetchSemanticTokensFull();
-      await fetchDocumentColors();
-      await fetchLSPFoldRanges();
-    } catch (e) {
-      debugPrint('Error opening LSP document: $e');
+    })();
+    _lspInitFuture = initFuture;
+
+    _lspResponsesSubscription?.cancel();
+    _lspResponsesSubscription = config.responses.listen((data) async {
+      try {
+        if (data['method'] == 'workspace/applyEdit') {
+          final Map<String, dynamic>? params = data['params'];
+          if (params != null && params.isNotEmpty) {
+            if (params.containsKey('edit')) {
+              await applyWorkspaceEdit(params);
+            }
+          }
+        }
+
+        if (data['method'] == 'workspace/configuration') {
+          final id = data['id'];
+          await config.sendResponse(id, [config.workspaceConfiguration]);
+        }
+
+        if (data['method'] == 'textDocument/publishDiagnostics') {
+          final params = data['params'];
+          if (params is! Map) return;
+
+          // publishDiagnostics is per-document; ignore diagnostics for other URIs
+          // when multiple editors share the same LSP process.
+          final uriString = params['uri'];
+          if (uriString is! String || uriString.isEmpty) return;
+
+          final opened = openedFile;
+          if (opened == null || opened.isEmpty) return;
+          final openedUri = Uri.file(opened).toString();
+          if (uriString != openedUri) return;
+
+          final rawDiagnostics = params['diagnostics'];
+          final List<dynamic> diagnosticList = rawDiagnostics is List
+              ? rawDiagnostics
+              : const [];
+
+          final List<LspErrors> errors = [];
+          final List<Map<String, dynamic>> filteredDiagnostics = [];
+          for (final item in diagnosticList) {
+            if (item is! Map<String, dynamic>) continue;
+            int severity = item['severity'] ?? 0;
+            if (severity == 1 && config.disableError) {
+              severity = 0;
+            }
+            if (severity == 2 && config.disableWarning) {
+              severity = 0;
+            }
+            if (severity > 0) {
+              filteredDiagnostics.add({...item, 'severity': severity});
+              errors.add(
+                LspErrors(
+                  severity: severity,
+                  range: item['range'],
+                  message: item['message'] ?? '',
+                ),
+              );
+            }
+          }
+
+          if (!_isDisposed) diagnosticsNotifier.value = errors;
+          _lastPublishedDiagnostics = filteredDiagnostics;
+          _scheduleCodeActionsForCursor(filteredDiagnostics);
+        }
+
+        if (data['method'] == r'$ccls/publishSemanticHighlight') {
+          final params = data['params'] as Map<String, dynamic>?;
+          if (params != null) {
+            final uri = params['uri'] as String?;
+            final symbols = params['symbols'] as List<dynamic>?;
+
+            if (uri != null &&
+                openedFile != null &&
+                uri.endsWith(openedFile!.split('/').last) &&
+                symbols != null) {
+              _usesCclsSemanticHighlight = true;
+              final tokens = _convertCclsSymbolsToTokens(symbols);
+              if (!_isDisposed && tokens.isNotEmpty) {
+                semanticTokens.value = SemanticTokensUpdate.full(
+                  tokens: tokens,
+                  version: _semanticTokensVersion++,
+                );
+              }
+            }
+          }
+        }
+      } catch (e, st) {
+        debugPrint('Error handling LSP response: $e\n$st');
+      }
+    });
+  }
+
+  void _queueLspContentChange(
+    int startOffset,
+    int endOffset,
+    String replacementText,
+  ) {
+    if (_suppressLspSync) return;
+    if (!_lspReady) return;
+    if (lspConfig == null) return;
+    if (openedFile == null) return;
+
+    final safeStart = startOffset.clamp(0, length);
+    final safeEnd = endOffset.clamp(safeStart, length);
+
+    final startLine = getLineAtOffset(safeStart);
+    final startCharacter = safeStart - getLineStartOffset(startLine);
+    final endLine = getLineAtOffset(safeEnd);
+    final endCharacter = safeEnd - getLineStartOffset(endLine);
+
+    _pendingLspContentChanges.add({
+      'range': {
+        'start': {'line': startLine, 'character': startCharacter},
+        'end': {'line': endLine, 'character': endCharacter},
+      },
+      'text': replacementText,
+    });
+  }
+
+  void _scheduleLspSync() {
+    if (_suppressLspSync) return;
+    if (!_lspReady) return;
+    if (lspConfig == null) return;
+    if (openedFile == null) return;
+
+    final debounce = _isTyping ? _lspSyncDebounceTyping : _lspSyncDebounceIdle;
+
+    _lspSyncTimer?.cancel();
+    _lspSyncTimer = Timer(debounce, _flushPendingLspSync);
+
+    // If typing never pauses long enough for the debounce, still flush within a
+    // bounded time so diagnostics stay reasonably fresh.
+    if (_pendingLspContentChanges.isNotEmpty &&
+        _lspSyncMaxLatencyTimer == null) {
+      _lspSyncMaxLatencyTimer = Timer(_lspSyncMaxLatency, _flushPendingLspSync);
     }
   }
 
-  Future<void> _highlightListener() async {
-    if (text != _previousValue && _lspReady) {
-      final currentText = text;
-      final currentSelection = selection;
-      final isTypingLenMatch =
-          currentText.length == _previousValue.length + 1 &&
-          currentSelection.extentOffset == _prevSelection.extentOffset + 1 &&
-          _isTyping;
-
-      _lspTypingTimer?.cancel();
-      _lspTypingTimer = Timer(_lspTypingDebounce, () async {
-        if (_isDisposed || !_lspReady || openedFile == null) return;
-
-        // Push the document update at the end of the typing debounce
-        await lspConfig!.updateDocument(openedFile!, currentText);
-
-        if (_usesCclsSemanticHighlight && !_isDisposed) {
-          semanticTokens.value = (null, _semanticTokensVersion++);
-          _scheduleCclsRefresh();
-        }
-
-        _scheduleSemantictokenRefresh();
-        _scheduleDocumentColorRefresh();
-        _scheduleFoldRangesRefresh();
-
-        if (isTypingLenMatch) {
-          final cursorPosition = currentSelection.extentOffset;
-          final line = getLineAtOffset(cursorPosition);
-          final lineStartOffset = getLineStartOffset(line);
-          if (cursorPosition - 1 >= currentText.length) return;
-          final character = cursorPosition - lineStartOffset;
-          final prefix = getCurrentWordPrefix(currentText, cursorPosition);
-          final triggerChar = currentText[cursorPosition - 1];
-          final isTriggerChar = _isCompletionTriggerChar(triggerChar);
-          final isAlphaChar = _isAlpha(triggerChar);
-
-          if ((isTriggerChar || isAlphaChar) && !_isDisposed) {
-            _suggestions = await lspConfig!.getCompletions(
-              openedFile!,
-              line,
-              character,
-            );
-            _sortSuggestions(prefix);
-            if (!_isDisposed) suggestionsNotifier.value = _suggestions;
-          } else {
-            if (!_isDisposed) suggestionsNotifier.value = null;
-          }
-        } else {
-          if (!_isDisposed) suggestionsNotifier.value = null;
-        }
-      });
+  void _flushPendingLspSync() {
+    _lspSyncTimer?.cancel();
+    _lspSyncTimer = null;
+    _lspSyncMaxLatencyTimer?.cancel();
+    _lspSyncMaxLatencyTimer = null;
+    if (_suppressLspSync) {
+      _pendingLspContentChanges.clear();
+      return;
     }
-    _previousValue = text;
-    _prevSelection = selection;
+    if (!_lspReady) return;
+    final config = lspConfig;
+    final filePath = openedFile;
+    if (config == null || filePath == null) return;
+    if (_pendingLspContentChanges.isEmpty) return;
+
+    final changes = List<Map<String, dynamic>>.from(_pendingLspContentChanges);
+    _pendingLspContentChanges.clear();
+    final fullTextFallback = text;
+
+    _lspSyncQueue = _lspSyncQueue
+        .catchError((_) {})
+        .then((_) async {
+          await config.updateDocumentChanges(
+            filePath,
+            changes,
+            fullTextFallback: fullTextFallback,
+          );
+          // Refresh semantic tokens when typing has paused so we don't
+          // starve diagnostics/validation on the server.
+          if (!_isTyping) {
+            _scheduleSemantictokenRefresh();
+          }
+        })
+        .catchError((_) {});
+
+    _lastLspSyncFuture = _lspSyncQueue;
+    unawaited(
+      _lspSyncQueue.whenComplete(() {
+        if (_lastLspSyncFuture == _lspSyncQueue) {
+          _lastLspSyncFuture = null;
+        }
+        // If edits arrived while syncing, schedule another flush.
+        if (_pendingLspContentChanges.isNotEmpty) {
+          _scheduleLspSync();
+        }
+      }),
+    );
+  }
+
+  void _scheduleCompletions(String currentText) {
+    if (!_enableSuggestions) {
+      _completionTimer?.cancel();
+      if (!_isDisposed) suggestionsNotifier.value = null;
+      return;
+    }
+    if (!_lspReady) return;
+    final config = lspConfig;
+    final filePath = openedFile;
+    if (config == null || filePath == null) return;
+
+    final cursorOffset = selection.extentOffset;
+    if (cursorOffset <= 0 || cursorOffset > currentText.length) {
+      if (!_isDisposed) suggestionsNotifier.value = null;
+      return;
+    }
+
+    final triggerChar = currentText[cursorOffset - 1];
+    if (!_isAlpha(triggerChar) && !_isCompletionTriggerChar(triggerChar)) {
+      if (!_isDisposed) suggestionsNotifier.value = null;
+      return;
+    }
+
+    _completionTimer?.cancel();
+    final serial = ++_completionRequestSerial;
+
+    _completionTimer = Timer(_completionDebounce, () async {
+      if (_isDisposed) return;
+      if (serial != _completionRequestSerial) return;
+
+      // Ensure the server has received the latest didChange before requesting
+      // completions.
+      try {
+        await waitForLspSync();
+      } catch (_) {}
+
+      if (_isDisposed) return;
+      if (serial != _completionRequestSerial) return;
+
+      final freshText = text;
+      final freshCursor = selection.extentOffset;
+      if (freshCursor != cursorOffset) return;
+      if (freshCursor <= 0 || freshCursor > freshText.length) return;
+
+      final line = getLineAtOffset(freshCursor);
+      final lineStartOffset = getLineStartOffset(line);
+      final character = freshCursor - lineStartOffset;
+      final prefix = getCurrentWordPrefix(freshText, freshCursor);
+
+      try {
+        _suggestions = await config.getCompletions(filePath, line, character);
+      } catch (_) {
+        if (!_isDisposed) suggestionsNotifier.value = null;
+        return;
+      }
+
+      if (_isDisposed) return;
+      if (serial != _completionRequestSerial) return;
+
+      _sortSuggestions(prefix);
+      if (!_isDisposed) suggestionsNotifier.value = _suggestions;
+    });
+  }
+
+  void _scheduleCodeActionsForCursor(List<dynamic> diagnosticList) {
+    if (_isDisposed) return;
+    if (!_lspReady) return;
+    final config = lspConfig;
+    final filePath = openedFile;
+    if (config == null || filePath == null) return;
+
+    _codeActionTimer?.cancel();
+
+    if (diagnosticList.isEmpty) {
+      if (!_isDisposed) codeActionsNotifier.value = null;
+      return;
+    }
+
+    final cursorOffset = selection.extentOffset.clamp(0, length);
+    final cursorLine = getLineAtOffset(cursorOffset);
+    final cursorChar = cursorOffset - getLineStartOffset(cursorLine);
+
+    final relevant = <Map<String, dynamic>>[];
+    for (final d in diagnosticList) {
+      if (d is! Map) continue;
+      final range = d['range'];
+      if (range is! Map) continue;
+      final start = range['start'];
+      final end = range['end'];
+      if (start is! Map || end is! Map) continue;
+      final startLine = start['line'] as int? ?? 0;
+      final endLine = end['line'] as int? ?? 0;
+      if (cursorLine < startLine || cursorLine > endLine) continue;
+      relevant.add(Map<String, dynamic>.from(d));
+    }
+
+    if (relevant.isEmpty) {
+      if (!_isDisposed) codeActionsNotifier.value = null;
+      return;
+    }
+
+    int minStartLine = cursorLine;
+    int minStartChar = cursorChar;
+    int maxEndLine = cursorLine;
+    int maxEndChar = cursorChar;
+
+    for (final d in relevant) {
+      final range = d['range'];
+      if (range is! Map) continue;
+      final start = range['start'];
+      final end = range['end'];
+      if (start is Map) {
+        final l = start['line'] as int? ?? cursorLine;
+        final c = start['character'] as int? ?? cursorChar;
+        if (l < minStartLine || (l == minStartLine && c < minStartChar)) {
+          minStartLine = l;
+          minStartChar = c;
+        }
+      }
+      if (end is Map) {
+        final l = end['line'] as int? ?? cursorLine;
+        final c = end['character'] as int? ?? cursorChar;
+        if (l > maxEndLine || (l == maxEndLine && c > maxEndChar)) {
+          maxEndLine = l;
+          maxEndChar = c;
+        }
+      }
+    }
+
+    final serial = ++_codeActionRequestSerial;
+    _codeActionTimer = Timer(const Duration(milliseconds: 400), () async {
+      if (_isDisposed) return;
+      if (serial != _codeActionRequestSerial) return;
+
+      // Only surface code actions when the cursor is still on the same line.
+      final currentOffset = selection.extentOffset.clamp(0, length);
+      final currentLine = getLineAtOffset(currentOffset);
+      if (currentLine != cursorLine) return;
+
+      try {
+        await waitForLspSync();
+      } catch (_) {}
+
+      if (_isDisposed) return;
+      if (serial != _codeActionRequestSerial) return;
+
+      try {
+        final actions = await config.getCodeActions(
+          filePath: filePath,
+          startLine: minStartLine,
+          startCharacter: minStartChar,
+          endLine: maxEndLine,
+          endCharacter: maxEndChar,
+          diagnostics: relevant,
+        );
+        if (!_isDisposed && serial == _codeActionRequestSerial) {
+          codeActionsNotifier.value = actions;
+        }
+      } catch (_) {
+        // ignore
+      }
+    });
+  }
+
+  Future<void> _highlightListener() async {
+    final currentText = text;
+    final currentSelection = selection;
+    if (_suppressLspSync) {
+      _pendingLspContentChanges.clear();
+      _previousValue = currentText;
+      _prevSelection = currentSelection;
+      return;
+    }
+    bool hasPendingLspChanges = _pendingLspContentChanges.isNotEmpty;
+    final textChanged = currentText != _previousValue;
+    if (textChanged &&
+        !hasPendingLspChanges &&
+        _lspReady &&
+        lspConfig != null &&
+        openedFile != null) {
+      _pendingLspContentChanges.add({'text': currentText});
+      hasPendingLspChanges = true;
+    }
+    if ((hasPendingLspChanges || textChanged) &&
+        _lspReady &&
+        lspConfig != null &&
+        openedFile != null) {
+      if (_usesCclsSemanticHighlight && !_isDisposed) {
+        semanticTokens.value = const SemanticTokensUpdate.full(
+          tokens: [],
+          version: 0,
+        );
+        _scheduleCclsRefresh();
+      }
+      _scheduleLspSync();
+      _scheduleDocumentColorRefresh();
+      _scheduleFoldRangesRefresh();
+      if (currentText.length == _previousValue.length + 1 &&
+          selection.extentOffset == _prevSelection.extentOffset + 1 &&
+          _isTyping) {
+        _scheduleCompletions(currentText);
+      } else {
+        if (!_isDisposed) suggestionsNotifier.value = null;
+      }
+    }
+
+    if (_lspReady && lspConfig != null && openedFile != null) {
+      final prev = _prevSelection;
+      if (prev != currentSelection) {
+        final prevOffset = prev.extentOffset.clamp(0, length);
+        final currentOffset = currentSelection.extentOffset.clamp(0, length);
+        final prevLine = getLineAtOffset(prevOffset);
+        final currentLine = getLineAtOffset(currentOffset);
+        if (prevLine != currentLine) {
+          _scheduleCodeActionsForCursor(_lastPublishedDiagnostics);
+        }
+      }
+    }
+
+    _previousValue = currentText;
+    _prevSelection = currentSelection;
   }
 
   void _scheduleDocumentColorRefresh() {
@@ -343,7 +745,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   void _scheduleFoldRangesRefresh() {
     _foldRangesTimer?.cancel();
-    _foldRangesTimer = Timer(const Duration(milliseconds: 500), () {
+    _foldRangesTimer = Timer(const Duration(milliseconds: 50), () {
       if (!_isDisposed && _lspReady) {
         fetchLSPFoldRanges();
       }
@@ -362,8 +764,38 @@ class CodeForgeController implements DeltaTextInputClient {
     });
   }
 
-  final ValueNotifier<(List<LspSemanticToken>?, int)> semanticTokens =
-      ValueNotifier((null, 0));
+  /// Best-effort: waits for any in-flight LSP `didChange`/`didOpen` sync to finish.
+  ///
+  /// Useful before issuing requests like "go to definition" to reduce the
+  /// chance of querying the server with a stale document version.
+  Future<void> waitForLspSync() async {
+    final initFuture = _lspInitFuture;
+    if (initFuture != null) {
+      try {
+        await initFuture;
+      } catch (_) {
+        // Ignore errors; the caller can still attempt the request.
+      }
+    }
+
+    while (true) {
+      // Ensure any pending debounced didChange gets sent.
+      _flushPendingLspSync();
+
+      final pending = _lastLspSyncFuture;
+      if (pending == null) return;
+      try {
+        await pending;
+      } catch (_) {
+        // Ignore errors; the caller can still attempt the request.
+        return;
+      }
+    }
+  }
+
+  final ValueNotifier<SemanticTokensUpdate> semanticTokens = ValueNotifier(
+    const SemanticTokensUpdate.full(tokens: [], version: 0),
+  );
   final ValueNotifier<List<dynamic>?> suggestionsNotifier = ValueNotifier(null);
   final ValueNotifier<int?> selectedSuggestionNotifier = ValueNotifier(null);
   final ValueNotifier<List<LspErrors>> diagnosticsNotifier = ValueNotifier([]);
@@ -380,18 +812,51 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge]
   set openedFile(String? file) {
+    if (_openedFile == file) return;
     final previousFile = _openedFile;
     _openedFile = file;
+    _lastPublishedDiagnostics = const [];
+    if (!_isDisposed) {
+      diagnosticsNotifier.value = const [];
+      codeActionsNotifier.value = null;
+      suggestionsNotifier.value = null;
+    }
     if (openedFile != null) {
       text = File(_openedFile!).readAsStringSync();
     }
 
     if (previousFile != openedFile &&
         lspConfig != null &&
-        lspConfig!.isInitialized &&
-        openedFile != null) {
+        lspConfig!.isInitialized) {
+      final config = lspConfig!;
       (() async {
-        await _openDocumentInLsp(previousFile: previousFile);
+        try {
+          if (previousFile != null) {
+            await config.closeDocument(previousFile);
+          }
+          if (openedFile == null) return;
+          _pendingLspContentChanges.clear();
+          await config.openDocument(openedFile!, content: text);
+          _lspReady = true;
+          if (config.serverSupportsSemanticTokensRange) {
+            final visible = _lastVisibleSemanticRange;
+            final startLine = visible?.startLine ?? 0;
+            final endLineExclusive =
+                visible?.endLineExclusive ?? lineCount.clamp(0, 200);
+            _scheduleSemanticTokensRange(
+              startLine: startLine,
+              endLineExclusive: endLineExclusive,
+              immediate: true,
+            );
+          } else {
+            unawaited(_fetchSemanticTokensFull());
+          }
+          unawaited(fetchDocumentColors());
+          unawaited(fetchLSPFoldRanges());
+          notifyListeners();
+        } catch (e) {
+          debugPrint('Error opening LSP document: $e');
+        }
       })();
     }
   }
@@ -406,6 +871,18 @@ class CodeForgeController implements DeltaTextInputClient {
   /// else a [List<String>] with locally available words will be returned.
   List<dynamic>? get suggestions => suggestionsNotifier.value;
 
+  bool get enableSuggestions => _enableSuggestions;
+
+  set enableSuggestions(bool value) {
+    if (_enableSuggestions == value) return;
+    _enableSuggestions = value;
+    if (!value) {
+      _completionTimer?.cancel();
+      _completionRequestSerial++;
+      if (!_isDisposed) suggestionsNotifier.value = null;
+    }
+  }
+
   /// The last character that was typed by the user.
   /// Returns an empty string if no character has been typed or if the last input was not a single character.
   String get lastTypedCharacter => _lastTypedCharacter ?? '';
@@ -417,6 +894,9 @@ class CodeForgeController implements DeltaTextInputClient {
 
   Rope _rope = Rope('');
   TextSelection _selection = const TextSelection.collapsed(offset: 0);
+  List<TextSelection> _selections = const [TextSelection.collapsed(offset: 0)];
+  final List<List<TextSelection>> _cursorUndoStack = [];
+  String? _multiCursorSearchText;
 
   /// The text input connection to the platform.
   TextInputConnection? connection;
@@ -429,7 +909,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// This map is automatically populated based on code structure
   /// (braces, indentation, etc.) when folding is enabled.
   ///
-  /// Use the setter to update this map — it rebuilds internal sorted caches
+  /// Use the setter to update this map -- it rebuilds internal sorted caches
   /// used for O(log n) fold-region lookups.
   Map<int, FoldRange?> get foldings => _foldings;
 
@@ -442,6 +922,12 @@ class CodeForgeController implements DeltaTextInputClient {
     _rebuildFoldSortedCache();
   }
 
+  /// Checks if the given line is the first line of a currently folded range.
+  bool _isFirstLineOfFoldedRange(int lineIndex) {
+    final fold = foldings[lineIndex];
+    return fold != null && fold.isFolded;
+  }
+
   /// List of search highlights to display in the editor.
   ///
   /// Add [SearchHighlight] objects to this list to highlight
@@ -451,21 +937,14 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Whether the search highlights have changed and need repaint.
   bool searchHighlightsChanged = false;
 
-  /// Whether multi-cursor positions have changed and the editor needs repaint.
-  bool multiCursorsChanged = false;
-
-  /// Returns an unmodifiable view of the secondary cursor positions.
-  List<({int line, int character})> get multiCursors =>
-      List.unmodifiable(_multiCursors);
-
-  /// Whether there are active secondary cursors.
-  bool get hasMultiCursors => _multiCursors.isNotEmpty;
-
   /// Whether inlay hints have changed and need repaint
   bool inlayHintsChanged = false;
 
   /// Whether document colors have changed and need repaint
   bool documentColorsChanged = false;
+
+  /// Whether multi-cursor state has changed and needs repaint.
+  bool multiCursorsChanged = false;
 
   /// Whether decorations have changed and need repaint
   bool decorationsChanged = false;
@@ -512,391 +991,6 @@ class CodeForgeController implements DeltaTextInputClient {
   int? get currentlySelectedSuggestion => selectedSuggestionNotifier.value;
   set currentlySelectedSuggestion(int? value) =>
       selectedSuggestionNotifier.value = value;
-
-  /// Adds a secondary cursor at the given [line] and [character] position.
-  ///
-  /// The position is clamped to valid bounds. Duplicate positions
-  /// (including the primary cursor) are ignored.
-  void addMultiCursor(int line, int character) {
-    final clampedLine = line.clamp(0, lineCount - 1);
-    final lineText = getLineText(clampedLine);
-    final clampedChar = character.clamp(0, lineText.length);
-
-    for (final c in _multiCursors) {
-      if (c.line == clampedLine && c.character == clampedChar) return;
-    }
-
-    final primaryLine = getLineAtOffset(selection.extentOffset);
-    final primaryChar =
-        selection.extentOffset - getLineStartOffset(primaryLine);
-    if (clampedLine == primaryLine && clampedChar == primaryChar) return;
-
-    _multiCursors.add((line: clampedLine, character: clampedChar));
-    multiCursorsChanged = true;
-    notifyListeners();
-  }
-
-  /// Removes all secondary cursors, keeping only the primary cursor.
-  void clearMultiCursors() {
-    if (_multiCursors.isEmpty) return;
-    _multiCursors.clear();
-    multiCursorsChanged = true;
-    notifyListeners();
-  }
-
-  /// Moves every secondary cursor one character to the left.
-  ///
-  /// When [isShiftPressed] is true the secondary cursors are cleared because
-  /// extending a multi-cursor selection is not supported.
-  void moveMultiCursorsLeft({bool isShiftPressed = false}) {
-    if (_multiCursors.isEmpty) return;
-    if (isShiftPressed) {
-      clearMultiCursors();
-      return;
-    }
-    final updated = <({int line, int character})>[];
-    for (final cursor in _multiCursors) {
-      final offset = _multiCursorToOffset(cursor);
-      final newOffset = (offset - 1).clamp(0, _rope.length);
-      final newLine = _rope.getLineAtOffset(newOffset);
-      final newLineStart = _rope.getLineStartOffset(newLine);
-      updated.add((line: newLine, character: newOffset - newLineStart));
-    }
-    _updateMultiCursorsFromList(updated);
-  }
-
-  /// Moves every secondary cursor one character to the right.
-  ///
-  /// When [isShiftPressed] is true the secondary cursors are cleared.
-  void moveMultiCursorsRight({bool isShiftPressed = false}) {
-    if (_multiCursors.isEmpty) return;
-    if (isShiftPressed) {
-      clearMultiCursors();
-      return;
-    }
-    final updated = <({int line, int character})>[];
-    for (final cursor in _multiCursors) {
-      final offset = _multiCursorToOffset(cursor);
-      final newOffset = (offset + 1).clamp(0, _rope.length);
-      final newLine = _rope.getLineAtOffset(newOffset);
-      final newLineStart = _rope.getLineStartOffset(newLine);
-      updated.add((line: newLine, character: newOffset - newLineStart));
-    }
-    _updateMultiCursorsFromList(updated);
-  }
-
-  /// Moves every secondary cursor up one line, maintaining its column.
-  ///
-  /// Folded regions are skipped exactly as they are for the primary cursor.
-  /// When [isShiftPressed] is true the secondary cursors are cleared.
-  void moveMultiCursorsUp({bool isShiftPressed = false}) {
-    if (_multiCursors.isEmpty) return;
-    if (isShiftPressed) {
-      clearMultiCursors();
-      return;
-    }
-    final updated = <({int line, int character})>[];
-    for (final cursor in _multiCursors) {
-      final cursorLine = cursor.line.clamp(0, lineCount - 1);
-      if (cursorLine <= 0) {
-        updated.add((line: 0, character: 0));
-        continue;
-      }
-      int targetLine = cursorLine - 1;
-      while (targetLine > 0 && _isLineInFoldedRegion(targetLine)) {
-        targetLine--;
-      }
-      if (_isLineInFoldedRegion(targetLine)) {
-        targetLine = _getFoldStartForLine(targetLine) ?? 0;
-      }
-      final prevLineText = getLineText(targetLine);
-      final newChar = cursor.character.clamp(0, prevLineText.length);
-      updated.add((line: targetLine, character: newChar));
-    }
-    _updateMultiCursorsFromList(updated);
-  }
-
-  /// Moves every secondary cursor down one line, maintaining its column.
-  ///
-  /// Folded regions are skipped exactly as they are for the primary cursor.
-  /// When [isShiftPressed] is true the secondary cursors are cleared.
-  void moveMultiCursorsDown({bool isShiftPressed = false}) {
-    if (_multiCursors.isEmpty) return;
-    if (isShiftPressed) {
-      clearMultiCursors();
-      return;
-    }
-    final updated = <({int line, int character})>[];
-    for (final cursor in _multiCursors) {
-      final cursorLine = cursor.line.clamp(0, lineCount - 1);
-      if (cursorLine >= lineCount - 1) {
-        final lastLineText = getLineText(lineCount - 1);
-        updated.add((line: lineCount - 1, character: lastLineText.length));
-        continue;
-      }
-      final foldAtCurrent = _getFoldRangeAtCurrentLine(cursorLine);
-      int targetLine;
-      if (foldAtCurrent != null && foldAtCurrent.isFolded) {
-        targetLine = foldAtCurrent.endIndex + 1;
-      } else {
-        targetLine = cursorLine + 1;
-      }
-      while (targetLine < lineCount && _isLineInFoldedRegion(targetLine)) {
-        final foldStart = _getFoldStartForLine(targetLine);
-        if (foldStart != null) {
-          final fold = foldings[foldStart] ?? FoldRange(targetLine, targetLine);
-          targetLine = fold.endIndex + 1;
-        } else {
-          targetLine++;
-        }
-      }
-      if (targetLine >= lineCount) {
-        final lastLineText = getLineText(lineCount - 1);
-        updated.add((line: lineCount - 1, character: lastLineText.length));
-        continue;
-      }
-      final nextLineText = getLineText(targetLine);
-      final newChar = cursor.character.clamp(0, nextLineText.length);
-      updated.add((line: targetLine, character: newChar));
-    }
-    _updateMultiCursorsFromList(updated);
-  }
-
-  void _updateMultiCursorsFromList(
-    List<({int line, int character})> positions,
-  ) {
-    _multiCursors.clear();
-    final primaryLine = getLineAtOffset(selection.extentOffset);
-    final primaryChar =
-        selection.extentOffset - getLineStartOffset(primaryLine);
-    final seen = <({int line, int character})>{};
-    for (final pos in positions) {
-      if (pos.line == primaryLine && pos.character == primaryChar) continue;
-      if (seen.contains(pos)) continue;
-      seen.add(pos);
-      _multiCursors.add(pos);
-    }
-    multiCursorsChanged = true;
-    notifyListeners();
-  }
-
-  /// Performs backspace at all cursor positions (primary + secondary).
-  void backspaceAtAllCursors() {
-    if (readOnly || _multiCursors.isEmpty) {
-      return;
-    }
-
-    _flushBuffer();
-
-    final selectionBefore = _selection;
-    final primaryOffset = selection.extentOffset.clamp(0, _rope.length);
-    final offsets = <int>[primaryOffset];
-    for (final c in _multiCursors) {
-      offsets.add(_multiCursorToOffset(c).clamp(0, _rope.length));
-    }
-
-    final uniqueOffsets = offsets.toSet().toList()
-      ..sort((a, b) => b.compareTo(a));
-
-    final compound = _undoController?.beginCompoundOperation();
-
-    for (final offset in uniqueOffsets) {
-      if (offset > 0) {
-        final deleteStart = (offset - 1).clamp(0, _rope.length);
-        final deletedChar = _rope.substring(deleteStart, offset);
-        _rope.delete(deleteStart, offset);
-        _currentVersion++;
-
-        _recordDeletion(
-          deleteStart,
-          deletedChar,
-          selectionBefore,
-          TextSelection.collapsed(offset: deleteStart),
-        );
-      }
-    }
-
-    compound?.end();
-
-    int primaryShift = 0;
-    for (final o in uniqueOffsets) {
-      if (o <= primaryOffset && o > 0) {
-        primaryShift += 1;
-      }
-    }
-    _selection = TextSelection.collapsed(
-      offset: (primaryOffset - primaryShift).clamp(0, _rope.length),
-    );
-
-    _multiCursors.clear();
-    final sortedAsc = uniqueOffsets.reversed.toList();
-    for (int i = 0; i < sortedAsc.length; i++) {
-      final origOffset = sortedAsc[i];
-      if (origOffset <= 0) continue;
-      int shift = 0;
-      for (int j = 0; j <= i; j++) {
-        if (sortedAsc[j] > 0) shift++;
-      }
-      final newOffset = (origOffset - shift).clamp(0, _rope.length);
-      final primaryNewOffset = (primaryOffset - primaryShift).clamp(
-        0,
-        _rope.length,
-      );
-      if (newOffset == primaryNewOffset) continue;
-      final newLine = _rope.getLineAtOffset(newOffset);
-      final newLineStart = _rope.getLineStartOffset(newLine);
-      final newChar = newOffset - newLineStart;
-      _multiCursors.add((line: newLine, character: newChar));
-    }
-
-    multiCursorsChanged = true;
-    dirtyRegion = TextRange(start: 0, end: _rope.length);
-    _syncToConnection();
-    notifyListeners();
-  }
-
-  /// Inserts [textToInsert] at all cursor positions (primary + secondary).
-  ///
-  /// Insertions are performed from the last (highest-offset) cursor to the
-  /// first so that earlier offsets are not invalidated by later insertions.
-  /// After insertion, all cursor positions are updated to sit after the
-  /// inserted text.
-  void insertAtAllCursors(String textToInsert) {
-    if (readOnly || _multiCursors.isEmpty) {
-      return;
-    }
-
-    _flushBuffer();
-
-    final selectionBefore = _selection;
-    final primaryOffset = selection.extentOffset.clamp(0, _rope.length);
-    final offsets = <int>[primaryOffset];
-    for (final c in _multiCursors) {
-      offsets.add(_multiCursorToOffset(c).clamp(0, _rope.length));
-    }
-
-    final uniqueOffsets = offsets.toSet().toList()
-      ..sort((a, b) => b.compareTo(a));
-
-    final compound = _undoController?.beginCompoundOperation();
-
-    for (final offset in uniqueOffsets) {
-      final safeOffset = offset.clamp(0, _rope.length);
-      _rope.insert(safeOffset, textToInsert);
-      _currentVersion++;
-
-      _recordInsertion(
-        safeOffset,
-        textToInsert,
-        selectionBefore,
-        TextSelection.collapsed(offset: safeOffset + textToInsert.length),
-      );
-    }
-
-    compound?.end();
-
-    int primaryShift = 0;
-    for (final o in uniqueOffsets) {
-      if (o <= primaryOffset) {
-        primaryShift += textToInsert.length;
-      }
-    }
-    _selection = TextSelection.collapsed(
-      offset: (primaryOffset + primaryShift).clamp(0, _rope.length),
-    );
-
-    _multiCursors.clear();
-    final sortedAsc = uniqueOffsets.reversed.toList();
-    for (int i = 0; i < sortedAsc.length; i++) {
-      final newOffset = sortedAsc[i] + (i + 1) * textToInsert.length;
-      final safeNewOffset = newOffset.clamp(0, _rope.length);
-      final newLine = _rope.getLineAtOffset(safeNewOffset);
-      final newLineStart = _rope.getLineStartOffset(newLine);
-      final newChar = safeNewOffset - newLineStart;
-      final primaryNewOffset = primaryOffset + primaryShift;
-
-      if (safeNewOffset == primaryNewOffset) continue;
-      _multiCursors.add((line: newLine, character: newChar));
-    }
-
-    multiCursorsChanged = true;
-    dirtyRegion = TextRange(start: 0, end: _rope.length);
-    _syncToConnection();
-    notifyListeners();
-  }
-
-  /// Clear LSP suggestions, hover info, code actions and signature help.
-  void clearAllSuggestions() {
-    suggestionsNotifier.value = null;
-    selectedSuggestionNotifier.value = null;
-    signatureNotifier.value = null;
-    codeActionsNotifier.value = null;
-  }
-
-  /// Accepts the currently selected suggestion and inserts it at the cursor position.
-  ///
-  /// For mobile devices, uses [currentlySelectedSuggestion] to determine which
-  /// suggestion to accept. For desktop/non-mobile, uses the provided [selectedIndex].
-  ///
-  /// The method handles different suggestion types:
-  /// - [LspCompletion]: Uses the label property
-  /// - [Map]: Uses 'insertText' or 'label' key
-  /// - [String]: Uses the string directly
-  ///
-  /// After accepting, clears the suggestions and resets the selection index.
-  ///
-  /// Parameters:
-  /// - [selectedIndex]: The index of the selected suggestion for desktop/non-mobile.
-  ///   Defaults to 0 if not provided.
-  void acceptSuggestion({int selectedIndex = 0}) {
-    final suggestions = suggestionsNotifier.value;
-    if (suggestions == null || suggestions.isEmpty) return;
-
-    final isMobile = Platform.isAndroid || Platform.isIOS;
-    final safeSelectedIndex = isMobile
-        ? (currentlySelectedSuggestion ?? 0).clamp(0, suggestions.length - 1)
-        : selectedIndex.clamp(0, suggestions.length - 1);
-    final selected = suggestions[safeSelectedIndex];
-    final insertText = _extractSuggestionText(selected);
-
-    if (insertText.isNotEmpty) {
-      insertAtCurrentCursor(insertText, replaceTypedChar: true);
-    }
-
-    suggestionsNotifier.value = null;
-    currentlySelectedSuggestion = 0;
-  }
-
-  String _extractSuggestionText(dynamic suggestion) {
-    if (suggestion is LspCompletion) {
-      return suggestion.label;
-    }
-    if (suggestion is Map) {
-      final dynamic insertText =
-          suggestion['insertText'] ??
-          suggestion['value'] ??
-          suggestion['label'];
-      return insertText is String ? insertText : '';
-    }
-    if (suggestion is String) {
-      return suggestion;
-    }
-
-    final dynamic dynamicSuggestion = suggestion;
-    try {
-      final dynamic insertText = dynamicSuggestion.insertText;
-      if (insertText is String && insertText.isNotEmpty) return insertText;
-    } catch (_) {}
-    try {
-      final dynamic value = dynamicSuggestion.value;
-      if (value is String && value.isNotEmpty) return value;
-    } catch (_) {}
-    try {
-      final dynamic label = dynamicSuggestion.label;
-      if (label is String) return label;
-    } catch (_) {}
-    return '';
-  }
 
   /// Adds a line decoration to the editor.
   ///
@@ -1342,14 +1436,17 @@ class CodeForgeController implements DeltaTextInputClient {
   ///   virtually without line numbers, similar to ghost text. [afterLine] is the
   ///   0-based line after which the removed content appears, and [content] is the
   ///   deleted text (use `\n` for multiple lines).
+  /// [removedLineRanges] - List of (startLine, endLine) for removed lines (red)
   /// [modifiedRanges] - List of (startLine, endLine) for modified lines (blue)
   void setGitDiffDecorations({
     List<(int startLine, int endLine)>? addedRanges,
     List<({int afterLine, String content})>? removedRanges,
+    List<(int startLine, int endLine)>? removedLineRanges,
     List<(int startLine, int endLine)>? modifiedRanges,
     Color addedColor = const Color(0xFF4CAF50),
     Color removedColor = const Color(0xFFE53935),
     Color modifiedColor = const Color(0xFF2196F3),
+    bool includeLineHighlights = true,
   }) {
     _lineDecorations.removeWhere((d) => d.id.startsWith('git-'));
     _gutterDecorations.removeWhere((d) => d.id.startsWith('git-'));
@@ -1359,15 +1456,17 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (addedRanges != null) {
       for (final range in addedRanges) {
-        _lineDecorations.add(
-          LineDecoration(
-            id: 'git-add-line-$idx',
-            startLine: range.$1,
-            endLine: range.$2,
-            type: LineDecorationType.background,
-            color: addedColor.withValues(alpha: 0.15),
-          ),
-        );
+        if (includeLineHighlights) {
+          _lineDecorations.add(
+            LineDecoration(
+              id: 'git-add-line-$idx',
+              startLine: range.$1,
+              endLine: range.$2,
+              type: LineDecorationType.background,
+              color: addedColor.withValues(alpha: 0.15),
+            ),
+          );
+        }
         _gutterDecorations.add(
           GutterDecoration(
             id: 'git-add-gutter-$idx',
@@ -1396,17 +1495,45 @@ class CodeForgeController implements DeltaTextInputClient {
       }
     }
 
-    if (modifiedRanges != null) {
-      for (final range in modifiedRanges) {
-        _lineDecorations.add(
-          LineDecoration(
-            id: 'git-modify-line-$idx',
+    if (removedLineRanges != null) {
+      for (final range in removedLineRanges) {
+        if (includeLineHighlights) {
+          _lineDecorations.add(
+            LineDecoration(
+              id: 'git-remove-line-$idx',
+              startLine: range.$1,
+              endLine: range.$2,
+              type: LineDecorationType.background,
+              color: removedColor.withValues(alpha: 0.15),
+            ),
+          );
+        }
+        _gutterDecorations.add(
+          GutterDecoration(
+            id: 'git-remove-gutter-$idx',
             startLine: range.$1,
             endLine: range.$2,
-            type: LineDecorationType.background,
-            color: modifiedColor.withValues(alpha: 0.15),
+            type: GutterDecorationType.colorBar,
+            color: removedColor,
           ),
         );
+        idx++;
+      }
+    }
+
+    if (modifiedRanges != null) {
+      for (final range in modifiedRanges) {
+        if (includeLineHighlights) {
+          _lineDecorations.add(
+            LineDecoration(
+              id: 'git-modify-line-$idx',
+              startLine: range.$1,
+              endLine: range.$2,
+              type: LineDecorationType.background,
+              color: modifiedColor.withValues(alpha: 0.15),
+            ),
+          );
+        }
         _gutterDecorations.add(
           GutterDecoration(
             id: 'git-modify-gutter-$idx',
@@ -1485,6 +1612,29 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection.
   void pressLetfArrowKey({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        int newOffset;
+        if (!isShiftPressed && sel.start != sel.end) {
+          newOffset = sel.start;
+        } else if (sel.extentOffset > 0) {
+          newOffset = sel.extentOffset - 1;
+        } else {
+          newOffset = 0;
+        }
+
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: newOffset,
+          );
+        }
+        return TextSelection.collapsed(offset: newOffset);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
+    }
+
     if (suggestionsNotifier.value != null) {
       suggestionsNotifier.value = null;
     }
@@ -1514,6 +1664,29 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection.
   void pressRightArrowKey({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        int newOffset;
+        if (!isShiftPressed && sel.start != sel.end) {
+          newOffset = sel.end;
+        } else if (sel.extentOffset < length) {
+          newOffset = sel.extentOffset + 1;
+        } else {
+          newOffset = length;
+        }
+
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: newOffset,
+          );
+        }
+        return TextSelection.collapsed(offset: newOffset);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
+    }
+
     if (suggestionsNotifier.value != null) {
       suggestionsNotifier.value = null;
     }
@@ -1543,6 +1716,47 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection.
   void pressUpArrowKey({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        final cursor = sel.extentOffset;
+        final currentLine = getLineAtOffset(cursor);
+
+        int newOffset;
+        if (currentLine <= 0) {
+          newOffset = 0;
+        } else {
+          int targetLine = currentLine - 1;
+          while (targetLine > 0 && _isLineInFoldedRegion(targetLine)) {
+            targetLine--;
+          }
+
+          if (_isLineInFoldedRegion(targetLine)) {
+            targetLine = _getFoldStartForLine(targetLine) ?? 0;
+          }
+          targetLine = _skipPlaceholderLine(targetLine, preferDown: false);
+
+          final lineStart = getLineStartOffset(currentLine);
+          final column = cursor - lineStart;
+          final prevLineStart = getLineStartOffset(targetLine);
+          final prevLineText = getLineText(targetLine);
+          final prevLineLength = prevLineText.length;
+          final newColumn = column.clamp(0, prevLineLength);
+          newOffset = (prevLineStart + newColumn).clamp(0, length);
+        }
+
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: newOffset,
+          );
+        }
+        return TextSelection.collapsed(offset: newOffset);
+      }).toList();
+
+      setSelectionsSilently(updated);
+      return;
+    }
+
     final currentLine = getLineAtOffset(selection.extentOffset);
 
     if (_isMobile &&
@@ -1580,6 +1794,7 @@ class CodeForgeController implements DeltaTextInputClient {
     if (_isLineInFoldedRegion(targetLine)) {
       targetLine = _getFoldStartForLine(targetLine) ?? 0;
     }
+    targetLine = _skipPlaceholderLine(targetLine, preferDown: false);
 
     final lineStart = getLineStartOffset(currentLine);
     final column = selection.extentOffset - lineStart;
@@ -1605,6 +1820,64 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection.
   void pressDownArrowKey({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        final cursor = sel.extentOffset;
+        final currentLine = getLineAtOffset(cursor);
+
+        int newOffset;
+        if (currentLine >= lineCount - 1) {
+          newOffset = length;
+        } else {
+          final foldAtCurrent = _getFoldRangeAtCurrentLine(currentLine);
+          int targetLine;
+          if (foldAtCurrent != null && foldAtCurrent.isFolded) {
+            targetLine = foldAtCurrent.endIndex + 1;
+          } else {
+            targetLine = currentLine + 1;
+          }
+
+          while (targetLine < lineCount && _isLineInFoldedRegion(targetLine)) {
+            final foldStart = _getFoldStartForLine(targetLine);
+            if (foldStart != null) {
+              final fold = foldings[foldStart];
+              if (fold != null && fold.isFolded) {
+                targetLine = fold.endIndex + 1;
+              } else {
+                targetLine++;
+              }
+            } else {
+              targetLine++;
+            }
+          }
+
+          if (targetLine >= lineCount) {
+            newOffset = length;
+          } else {
+            targetLine = _skipPlaceholderLine(targetLine, preferDown: true);
+            final lineStart = getLineStartOffset(currentLine);
+            final column = cursor - lineStart;
+            final nextLineStart = getLineStartOffset(targetLine);
+            final nextLineText = getLineText(targetLine);
+            final nextLineLength = nextLineText.length;
+            final newColumn = column.clamp(0, nextLineLength);
+            newOffset = (nextLineStart + newColumn).clamp(0, length);
+          }
+        }
+
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: newOffset,
+          );
+        }
+        return TextSelection.collapsed(offset: newOffset);
+      }).toList();
+
+      setSelectionsSilently(updated);
+      return;
+    }
+
     final currentLine = getLineAtOffset(selection.extentOffset);
 
     if (_isMobile &&
@@ -1671,6 +1944,8 @@ class CodeForgeController implements DeltaTextInputClient {
       return;
     }
 
+    targetLine = _skipPlaceholderLine(targetLine, preferDown: true);
+
     final lineStart = getLineStartOffset(currentLine);
     final column = selection.extentOffset - lineStart;
     final nextLineStart = getLineStartOffset(targetLine);
@@ -1695,8 +1970,20 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection to the line start.
   void pressHomeKey({bool isShiftPressed = false}) {
-    if (suggestionsNotifier.value != null) {
-      suggestionsNotifier.value = null;
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        final currentLine = getLineAtOffset(sel.extentOffset);
+        final lineStart = getLineStartOffset(currentLine);
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: lineStart,
+          );
+        }
+        return TextSelection.collapsed(offset: lineStart);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
     }
 
     final currentLine = getLineAtOffset(selection.extentOffset);
@@ -1714,12 +2001,50 @@ class CodeForgeController implements DeltaTextInputClient {
     }
   }
 
+  /// Moves the cursor to the beginning of the document.
+  ///
+  /// If [isShiftPressed] is true, extends the selection to the document start.
+  void pressDocumentStart({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        if (isShiftPressed) {
+          return TextSelection(baseOffset: sel.baseOffset, extentOffset: 0);
+        }
+        return const TextSelection.collapsed(offset: 0);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
+    }
+
+    if (isShiftPressed) {
+      setSelectionSilently(
+        TextSelection(baseOffset: selection.baseOffset, extentOffset: 0),
+      );
+    } else {
+      setSelectionSilently(const TextSelection.collapsed(offset: 0));
+    }
+  }
+
   /// Moves the cursor to the end of the current line.
   ///
   /// If [isShiftPressed] is true, extends the selection to the line end.
   void pressEndKey({bool isShiftPressed = false}) {
-    if (suggestionsNotifier.value != null) {
-      suggestionsNotifier.value = null;
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        final currentLine = getLineAtOffset(sel.extentOffset);
+        final lineText = getLineText(currentLine);
+        final lineStart = getLineStartOffset(currentLine);
+        final lineEnd = lineStart + lineText.length;
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: lineEnd,
+          );
+        }
+        return TextSelection.collapsed(offset: lineEnd);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
     }
 
     final currentLine = getLineAtOffset(selection.extentOffset);
@@ -1740,6 +2065,17 @@ class CodeForgeController implements DeltaTextInputClient {
   ///
   /// If [isShiftPressed] is true, extends the selection to the document start.
   void pressDocumentHomeKey({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final updated = _selections.map((sel) {
+        if (isShiftPressed) {
+          return TextSelection(baseOffset: sel.baseOffset, extentOffset: 0);
+        }
+        return const TextSelection.collapsed(offset: 0);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
+    }
+
     if (isShiftPressed) {
       setSelectionSilently(
         TextSelection(baseOffset: selection.baseOffset, extentOffset: 0),
@@ -1752,7 +2088,21 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Moves the cursor to the end of the document.
   ///
   /// If [isShiftPressed] is true, extends the selection to the document end.
-  void pressDocumentEndKey({bool isShiftPressed = false}) {
+  void pressDocumentEnd({bool isShiftPressed = false}) {
+    if (hasMultipleSelections) {
+      final endOffset = length;
+      final updated = _selections.map((sel) {
+        if (isShiftPressed) {
+          return TextSelection(
+            baseOffset: sel.baseOffset,
+            extentOffset: endOffset,
+          );
+        }
+        return TextSelection.collapsed(offset: endOffset);
+      }).toList();
+      setSelectionsSilently(updated);
+      return;
+    }
     final endOffset = length;
     if (isShiftPressed) {
       setSelectionSilently(
@@ -1795,6 +2145,10 @@ class CodeForgeController implements DeltaTextInputClient {
     if (readOnly) return;
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data?.text == null || data!.text!.isEmpty) return;
+    if (hasMultipleSelections) {
+      _replaceTextAcrossSelections(data.text!);
+      return;
+    }
     final sel = selection;
     replaceRange(sel.start, sel.end, data.text!);
   }
@@ -1839,11 +2193,20 @@ class CodeForgeController implements DeltaTextInputClient {
   /// For a cursor with no selection, [TextSelection.isCollapsed] will be true.
   TextSelection get selection => _selection;
 
+  /// All active selections (multi-cursor support).
+  ///
+  /// The primary selection is always the last entry in this list.
+  List<TextSelection> get selections => List.unmodifiable(_selections);
+
+  /// Whether more than one selection/cursor is active.
+  bool get hasMultipleSelections => _selections.length > 1;
+
   /// List of all lines in the document.
   List<String> get lines => _rope.cachedLines;
 
   /// The total number of lines in the document.
   int get lineCount {
+    if (_diffViewData != null) return _diffViewData!.lines.length;
     if (_bufferLineIndex != null && _bufferDirty) {
       _cachedBufferLines ??= _bufferLineText!.split('\n');
       final newLines = _cachedBufferLines!.length - 1;
@@ -1877,6 +2240,9 @@ class CodeForgeController implements DeltaTextInputClient {
   /// [lineIndex] is zero-based (0 for the first line).
   /// Returns the text of the line without the newline character.
   String getLineText(int lineIndex) {
+    if (_diffViewData != null) {
+      return _diffViewData!.lines[lineIndex].text;
+    }
     if (_bufferLineIndex != null && _bufferDirty) {
       _cachedBufferLines ??= _bufferLineText!.split('\n');
       final newLines = _cachedBufferLines!.length - 1;
@@ -1962,6 +2328,8 @@ class CodeForgeController implements DeltaTextInputClient {
     _rope = Rope(newText);
     _currentVersion++;
     _selection = TextSelection.collapsed(offset: newText.length);
+    _selections = [_selection];
+    _multiCursorSearchText = null;
     dirtyRegion = TextRange(start: 0, end: newText.length);
     _isTyping = false;
     notifyListeners();
@@ -1977,8 +2345,10 @@ class CodeForgeController implements DeltaTextInputClient {
     _flushBuffer();
 
     _selection = newSelection;
+    _selections = [newSelection];
     selectionOnly = true;
-    _isTyping = false;
+    _isTyping = false; // Explicit selection change resets typing state
+    _multiCursorSearchText = null;
 
     if (connection != null && connection!.attached) {
       _lastSentText = text;
@@ -2009,8 +2379,10 @@ class CodeForgeController implements DeltaTextInputClient {
     );
 
     _selection = newSelection;
+    _selections = [newSelection];
     selectionOnly = true;
     _isTyping = false;
+    _multiCursorSearchText = null;
 
     _scheduleSyncToConnection();
     notifyListeners();
@@ -2030,8 +2402,10 @@ class CodeForgeController implements DeltaTextInputClient {
     );
 
     _selection = newSelection;
+    _selections = [newSelection];
     selectionOnly = true;
     _isTyping = false;
+    _multiCursorSearchText = null;
 
     if (connection != null && connection!.attached) {
       _lastSentText = text;
@@ -2041,6 +2415,564 @@ class CodeForgeController implements DeltaTextInputClient {
       );
     }
 
+    notifyListeners();
+  }
+
+  /// Sets multiple selections (multi-cursor).
+  ///
+  /// The primary selection is the last element of [newSelections].
+  void setSelectionsSilently(List<TextSelection> newSelections) {
+    _flushBuffer();
+
+    final textLength = length;
+    if (newSelections.isEmpty) {
+      newSelections = const [TextSelection.collapsed(offset: 0)];
+    }
+
+    final deduped = <TextSelection>[];
+    final seenRanges = <String>{};
+
+    for (final sel in newSelections) {
+      final base = sel.baseOffset.clamp(0, textLength);
+      final extent = sel.extentOffset.clamp(0, textLength);
+      final clamped = TextSelection(
+        baseOffset: base,
+        extentOffset: extent,
+        affinity: sel.affinity,
+        isDirectional: sel.isDirectional,
+      );
+
+      final key = '${clamped.start}:${clamped.end}';
+      if (seenRanges.add(key)) {
+        deduped.add(clamped);
+      }
+    }
+
+    if (deduped.isEmpty) {
+      deduped.add(const TextSelection.collapsed(offset: 0));
+    }
+
+    _selections = deduped;
+    _selection = deduped.last;
+    selectionOnly = true;
+    _isTyping = false;
+
+    _scheduleSyncToConnection();
+    notifyListeners();
+  }
+
+  void clearSecondarySelections() {
+    if (!hasMultipleSelections) return;
+    _multiCursorSearchText = null;
+    setSelectionsSilently([_selection]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Upstream-compatible multi-cursor API wrappers
+  //
+  // code_area.dart references these names from an older upstream API.  They
+  // delegate to the local _selections-based system.
+  // ---------------------------------------------------------------------------
+
+  /// Alias for [hasMultipleSelections] (upstream API name).
+  bool get hasMultiCursors => hasMultipleSelections;
+
+  /// Returns multi-cursor positions as `({int line, int character})` records.
+  List<({int line, int character})> get multiCursors {
+    if (!hasMultipleSelections) return const [];
+    // Skip the primary (last) selection; code_area draws that separately.
+    final result = <({int line, int character})>[];
+    for (int i = 0; i < _selections.length - 1; i++) {
+      final offset = _selections[i].extentOffset.clamp(0, length);
+      final line = getLineAtOffset(offset);
+      final lineStart = getLineStartOffset(line);
+      result.add((line: line, character: offset - lineStart));
+    }
+    return result;
+  }
+
+  /// Add a secondary cursor at the given [line] and [character] column.
+  void addMultiCursor(int line, int character) {
+    final safeLine = line.clamp(0, lineCount - 1);
+    final lineStart = getLineStartOffset(safeLine);
+    final lineText = getLineText(safeLine);
+    final safeChar = character.clamp(0, lineText.length);
+    final offset = (lineStart + safeChar).clamp(0, length);
+
+    _pushCursorUndoState();
+    setSelectionsSilently([
+      ..._selections,
+      TextSelection.collapsed(offset: offset),
+    ]);
+    multiCursorsChanged = true;
+  }
+
+  /// Clear all secondary cursors, keeping only the primary selection.
+  void clearMultiCursors() {
+    if (!hasMultipleSelections) return;
+    clearSecondarySelections();
+    multiCursorsChanged = true;
+  }
+
+  /// Accept the completion suggestion at [selectedIndex].
+  ///
+  /// Inserts the suggestion text at the current cursor, replacing the
+  /// partially-typed prefix.
+  void acceptSuggestion({required int selectedIndex}) {
+    final items = suggestionsNotifier.value;
+    if (items == null || selectedIndex < 0 || selectedIndex >= items.length) {
+      return;
+    }
+    final item = items[selectedIndex];
+    final label = _extractSuggestionText(item);
+    insertAtCurrentCursor(label, replaceTypedChar: true);
+    suggestionsNotifier.value = null;
+    currentlySelectedSuggestion = null;
+    callSignatureHelp();
+  }
+
+  String _extractSuggestionText(dynamic suggestion) {
+    if (suggestion is LspCompletion) {
+      return suggestion.label;
+    }
+    if (suggestion is Map) {
+      final dynamic insertText =
+          suggestion['insertText'] ??
+          suggestion['value'] ??
+          suggestion['label'];
+      return insertText is String ? insertText : '';
+    }
+    if (suggestion is String) {
+      return suggestion;
+    }
+
+    try {
+      final dynamic insertText = suggestion.insertText;
+      if (insertText is String && insertText.isNotEmpty) return insertText;
+    } catch (_) {}
+    try {
+      final dynamic value = suggestion.value;
+      if (value is String && value.isNotEmpty) return value;
+    } catch (_) {}
+    try {
+      final dynamic label = suggestion.label;
+      if (label is String) return label;
+    } catch (_) {}
+    return suggestion?.toString() ?? '';
+  }
+
+  void _pushCursorUndoState() {
+    _cursorUndoStack.add(
+      _selections
+          .map(
+            (s) => TextSelection(
+              baseOffset: s.baseOffset,
+              extentOffset: s.extentOffset,
+              affinity: s.affinity,
+              isDirectional: s.isDirectional,
+            ),
+          )
+          .toList(),
+    );
+    if (_cursorUndoStack.length > 50) {
+      _cursorUndoStack.removeAt(0);
+    }
+  }
+
+  void cursorUndo() {
+    if (_cursorUndoStack.isEmpty) return;
+    final prev = _cursorUndoStack.removeLast();
+    setSelectionsSilently(prev);
+  }
+
+  TextSelection? _wordSelectionAt(int offset) {
+    final t = text;
+    if (t.isEmpty) return null;
+
+    final len = t.length;
+    int pos = offset.clamp(0, len);
+    if (pos == len && pos > 0) {
+      pos -= 1;
+    }
+
+    bool isWordChar(String ch) => RegExp(r'\w').hasMatch(ch);
+
+    if (!isWordChar(t[pos])) {
+      if (pos > 0 && isWordChar(t[pos - 1])) {
+        pos -= 1;
+      } else {
+        return null;
+      }
+    }
+
+    int start = pos;
+    int end = pos + 1;
+
+    while (start > 0 && isWordChar(t[start - 1])) {
+      start--;
+    }
+    while (end < len && isWordChar(t[end])) {
+      end++;
+    }
+
+    if (start == end) return null;
+    return TextSelection(baseOffset: start, extentOffset: end);
+  }
+
+  void addSelectionToNextFindMatch() {
+    _flushBuffer();
+
+    final currentText = text;
+    if (currentText.isEmpty) return;
+
+    final active = _selections.last;
+
+    String? pattern = _multiCursorSearchText;
+    if (pattern == null || pattern.isEmpty) {
+      if (!active.isCollapsed) {
+        pattern = currentText.substring(active.start, active.end);
+      } else {
+        final wordSel = _wordSelectionAt(active.extentOffset);
+        if (wordSel == null || wordSel.isCollapsed) return;
+        pattern = currentText.substring(wordSel.start, wordSel.end);
+        _multiCursorSearchText = pattern;
+        _pushCursorUndoState();
+        setSelectionsSilently([wordSel]);
+        return;
+      }
+      if (pattern.isEmpty) return;
+      _multiCursorSearchText = pattern;
+    }
+
+    int searchStart = active.end.clamp(0, currentText.length);
+    int matchIndex = currentText.indexOf(pattern, searchStart);
+    if (matchIndex == -1) {
+      matchIndex = currentText.indexOf(pattern, 0);
+    }
+    if (matchIndex == -1) return;
+
+    // Skip existing selections (prevents infinite loop when wrapping).
+    int guard = 0;
+    while (guard < 1000) {
+      final matchEnd = matchIndex + pattern.length;
+      final exists = _selections.any(
+        (s) => s.start == matchIndex && s.end == matchEnd,
+      );
+      if (!exists) break;
+
+      matchIndex = currentText.indexOf(pattern, matchEnd);
+      if (matchIndex == -1) {
+        matchIndex = currentText.indexOf(pattern, 0);
+      }
+      if (matchIndex == -1) return;
+      guard++;
+    }
+
+    final newSel = TextSelection(
+      baseOffset: matchIndex,
+      extentOffset: matchIndex + pattern.length,
+    );
+
+    _pushCursorUndoState();
+    setSelectionsSilently([..._selections, newSel]);
+  }
+
+  void selectAllOccurrencesOfSelectionOrWord() {
+    _flushBuffer();
+
+    final currentText = text;
+    if (currentText.isEmpty) return;
+
+    final active = _selections.last;
+    String pattern;
+
+    if (!active.isCollapsed) {
+      pattern = currentText.substring(active.start, active.end);
+    } else {
+      final wordSel = _wordSelectionAt(active.extentOffset);
+      if (wordSel == null || wordSel.isCollapsed) return;
+      pattern = currentText.substring(wordSel.start, wordSel.end);
+    }
+
+    if (pattern.isEmpty) return;
+
+    final matches = <TextSelection>[];
+    int offset = 0;
+    while (offset <= currentText.length) {
+      final index = currentText.indexOf(pattern, offset);
+      if (index == -1) break;
+      matches.add(
+        TextSelection(baseOffset: index, extentOffset: index + pattern.length),
+      );
+      offset = index + pattern.length;
+    }
+
+    if (matches.isEmpty) return;
+
+    _multiCursorSearchText = pattern;
+    _pushCursorUndoState();
+    setSelectionsSilently(matches);
+  }
+
+  void insertCursorAbove() {
+    _flushBuffer();
+    final currentText = text;
+    if (currentText.isEmpty) return;
+
+    _pushCursorUndoState();
+
+    final added = <TextSelection>[];
+    for (final sel in _selections) {
+      final cursor = sel.extentOffset.clamp(0, length);
+      final currentLine = getLineAtOffset(cursor);
+      if (currentLine <= 0) continue;
+
+      final lineStart = getLineStartOffset(currentLine);
+      final column = cursor - lineStart;
+
+      final targetLine = currentLine - 1;
+      final targetStart = getLineStartOffset(targetLine);
+      final targetText = getLineText(targetLine);
+      final newOffset = (targetStart + column.clamp(0, targetText.length))
+          .clamp(0, length);
+
+      added.add(TextSelection.collapsed(offset: newOffset));
+    }
+
+    if (added.isEmpty) return;
+    setSelectionsSilently([..._selections, ...added]);
+  }
+
+  void insertCursorBelow() {
+    _flushBuffer();
+    final currentText = text;
+    if (currentText.isEmpty) return;
+
+    _pushCursorUndoState();
+
+    final added = <TextSelection>[];
+    for (final sel in _selections) {
+      final cursor = sel.extentOffset.clamp(0, length);
+      final currentLine = getLineAtOffset(cursor);
+      if (currentLine >= lineCount - 1) continue;
+
+      final lineStart = getLineStartOffset(currentLine);
+      final column = cursor - lineStart;
+
+      final targetLine = currentLine + 1;
+      final targetStart = getLineStartOffset(targetLine);
+      final targetText = getLineText(targetLine);
+      final newOffset = (targetStart + column.clamp(0, targetText.length))
+          .clamp(0, length);
+
+      added.add(TextSelection.collapsed(offset: newOffset));
+    }
+
+    if (added.isEmpty) return;
+    setSelectionsSilently([..._selections, ...added]);
+  }
+
+  void _replaceTextAcrossSelections(String replacementText) {
+    if (readOnly) return;
+    if (_undoController?.isUndoRedoInProgress ?? false) return;
+
+    if (!hasMultipleSelections) {
+      final sel = selection;
+      replaceRange(sel.start, sel.end, replacementText);
+      return;
+    }
+
+    _flushBuffer();
+
+    final originalSelections = List<TextSelection>.from(_selections);
+    final editRanges = <({int index, int start, int end})>[];
+    for (int i = 0; i < originalSelections.length; i++) {
+      final sel = originalSelections[i];
+      editRanges.add((index: i, start: sel.start, end: sel.end));
+    }
+
+    bool changedLineStructure = false;
+    final compound = _undoController?.beginCompoundOperation();
+
+    final desc = List<({int index, int start, int end})>.from(editRanges)
+      ..sort((a, b) {
+        final c = b.start.compareTo(a.start);
+        return c != 0 ? c : b.end.compareTo(a.end);
+      });
+
+    for (final range in desc) {
+      final start = range.start.clamp(0, _rope.length);
+      final end = range.end.clamp(start, _rope.length);
+      if (start == end && replacementText.isEmpty) continue;
+
+      _queueLspContentChange(start, end, replacementText);
+
+      final deletedText = start < end ? _rope.substring(start, end) : '';
+      if (start < end) {
+        _rope.delete(start, end);
+      }
+      if (replacementText.isNotEmpty) {
+        _rope.insert(start, replacementText);
+      }
+
+      _currentVersion++;
+      if (deletedText.contains('\n') || replacementText.contains('\n')) {
+        changedLineStructure = true;
+      }
+
+      final selBefore = TextSelection(baseOffset: start, extentOffset: end);
+      final selAfter = TextSelection.collapsed(
+        offset: (start + replacementText.length).clamp(0, _rope.length),
+      );
+
+      if (deletedText.isNotEmpty && replacementText.isNotEmpty) {
+        _recordReplacement(
+          start,
+          deletedText,
+          replacementText,
+          selBefore,
+          selAfter,
+        );
+      } else if (deletedText.isNotEmpty) {
+        _recordDeletion(start, deletedText, selBefore, selAfter);
+      } else if (replacementText.isNotEmpty) {
+        _recordInsertion(start, replacementText, selBefore, selAfter);
+      }
+    }
+
+    compound?.end();
+
+    // Compute new cursor offsets while preserving original order.
+    final sortedAsc = List<({int index, int start, int end})>.from(editRanges)
+      ..sort((a, b) {
+        final c = a.start.compareTo(b.start);
+        return c != 0 ? c : a.end.compareTo(b.end);
+      });
+
+    final newOffsets = List<int>.filled(originalSelections.length, 0);
+    int cumulativeDelta = 0;
+    for (final range in sortedAsc) {
+      final start = range.start;
+      final end = range.end;
+      final deletedLen = end - start;
+      final newStart = (start + cumulativeDelta).clamp(0, _rope.length);
+      final newOffset = (newStart + replacementText.length).clamp(
+        0,
+        _rope.length,
+      );
+      newOffsets[range.index] = newOffset;
+      cumulativeDelta += replacementText.length - deletedLen;
+    }
+
+    _selections = newOffsets
+        .map((o) => TextSelection.collapsed(offset: o))
+        .toList();
+    _selection = _selections.isNotEmpty
+        ? _selections.last
+        : const TextSelection.collapsed(offset: 0);
+
+    dirtyRegion = TextRange(start: 0, end: length);
+    dirtyLine = 0;
+    lineStructureChanged = changedLineStructure;
+
+    _syncToConnection();
+    notifyListeners();
+  }
+
+  void _deleteAcrossSelections({required bool backward}) {
+    if (readOnly) return;
+    if (_undoController?.isUndoRedoInProgress ?? false) return;
+
+    if (!hasMultipleSelections) {
+      if (backward) {
+        backspace();
+      } else {
+        delete();
+      }
+      return;
+    }
+
+    _flushBuffer();
+
+    final originalSelections = List<TextSelection>.from(_selections);
+    final editRanges = <({int index, int start, int end})>[];
+    for (int i = 0; i < originalSelections.length; i++) {
+      final sel = originalSelections[i];
+      if (!sel.isCollapsed) {
+        editRanges.add((index: i, start: sel.start, end: sel.end));
+        continue;
+      }
+
+      final cursor = sel.extentOffset.clamp(0, length);
+      if (backward) {
+        final start = cursor > 0 ? cursor - 1 : cursor;
+        editRanges.add((index: i, start: start, end: cursor));
+      } else {
+        final end = cursor < length ? cursor + 1 : cursor;
+        editRanges.add((index: i, start: cursor, end: end));
+      }
+    }
+
+    bool changedLineStructure = false;
+    final compound = _undoController?.beginCompoundOperation();
+
+    final desc = List<({int index, int start, int end})>.from(editRanges)
+      ..sort((a, b) {
+        final c = b.start.compareTo(a.start);
+        return c != 0 ? c : b.end.compareTo(a.end);
+      });
+
+    for (final range in desc) {
+      final start = range.start.clamp(0, _rope.length);
+      final end = range.end.clamp(start, _rope.length);
+      if (start == end) continue;
+
+      _queueLspContentChange(start, end, '');
+
+      final deletedText = _rope.substring(start, end);
+      _rope.delete(start, end);
+      _currentVersion++;
+
+      if (deletedText.contains('\n')) {
+        changedLineStructure = true;
+      }
+
+      final selBefore = TextSelection(baseOffset: start, extentOffset: end);
+      final selAfter = TextSelection.collapsed(offset: start);
+      _recordDeletion(start, deletedText, selBefore, selAfter);
+    }
+
+    compound?.end();
+
+    final sortedAsc = List<({int index, int start, int end})>.from(editRanges)
+      ..sort((a, b) {
+        final c = a.start.compareTo(b.start);
+        return c != 0 ? c : a.end.compareTo(b.end);
+      });
+
+    final newOffsets = List<int>.filled(originalSelections.length, 0);
+    int cumulativeDelta = 0;
+    for (final range in sortedAsc) {
+      final start = range.start;
+      final end = range.end;
+      final deletedLen = end - start;
+      final newStart = (start + cumulativeDelta).clamp(0, _rope.length);
+      newOffsets[range.index] = newStart;
+      cumulativeDelta += -deletedLen;
+    }
+
+    _selections = newOffsets
+        .map((o) => TextSelection.collapsed(offset: o))
+        .toList();
+    _selection = _selections.isNotEmpty
+        ? _selections.last
+        : const TextSelection.collapsed(offset: 0);
+
+    dirtyRegion = TextRange(start: 0, end: length);
+    dirtyLine = 0;
+    lineStructureChanged = changedLineStructure;
+
+    _syncToConnection();
     notifyListeners();
   }
 
@@ -2131,34 +3063,39 @@ class CodeForgeController implements DeltaTextInputClient {
     setSelectionSilently(newSelection);
   }
 
-  /// Duplicates the current line or selected text.
+  /// Duplicates the current line or selected lines.
   ///
-  /// If text is selected, duplicates the selected text.
+  /// If text is selected, duplicates the selected lines.
   /// If no selection, duplicates the line at the cursor position.
-  /// The cursor is moved to the end of the duplicated content.
+  /// The cursor is moved to the start of the duplicated line.
   /// Does nothing if the controller is read-only.
   void duplicateLine() {
     if (readOnly) return;
     final text = this.text;
     final selection = this.selection;
 
+    // If text is selected, duplicate the selected text inline.
     if (selection.start != selection.end) {
       final selectedText = text.substring(selection.start, selection.end);
       replaceRange(selection.end, selection.end, selectedText);
       setSelectionSilently(
-        TextSelection.collapsed(offset: selection.end + selectedText.length),
+        TextSelection(
+          baseOffset: selection.end,
+          extentOffset: selection.end + selectedText.length,
+        ),
       );
-    } else {
-      final caret = selection.extentOffset;
-      final prevNewline = (caret > 0) ? text.lastIndexOf('\n', caret - 1) : -1;
-      final nextNewline = text.indexOf('\n', caret);
-      final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
-      final lineEnd = nextNewline == -1 ? text.length : nextNewline;
-      final lineText = text.substring(lineStart, lineEnd);
-
-      replaceRange(lineEnd, lineEnd, '\n$lineText');
-      setSelectionSilently(TextSelection.collapsed(offset: lineEnd + 1));
+      return;
     }
+
+    final caret = selection.extentOffset;
+    final prevNewline = (caret > 0) ? text.lastIndexOf('\n', caret - 1) : -1;
+    final nextNewline = text.indexOf('\n', caret);
+    final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
+    final lineEnd = nextNewline == -1 ? text.length : nextNewline;
+    final lineText = text.substring(lineStart, lineEnd);
+
+    replaceRange(lineEnd, lineEnd, '\n$lineText');
+    setSelectionSilently(TextSelection.collapsed(offset: lineEnd + 1));
   }
 
   @protected
@@ -2166,13 +3103,80 @@ class CodeForgeController implements DeltaTextInputClient {
   void updateEditingValueWithDeltas(List<TextEditingDelta> textEditingDeltas) {
     if (readOnly) return;
 
+    if (_kDebugTextInput) {
+      _debugTextInput(
+        'updateEditingValueWithDeltas deltas=${textEditingDeltas.length} '
+        'len=$length sel=$_selection bufferLine=$_bufferLineIndex bufferDirty=$_bufferDirty',
+      );
+    }
+
+    if (hasMultipleSelections) {
+      // Best-effort support: replicate insert/replace across all selections.
+      // Complex IME/composition flows fall back to single selection behavior.
+      for (final delta in textEditingDeltas) {
+        if (_kDebugTextInput) {
+          _debugTextInput(
+            'delta(multi) ${delta.runtimeType} sel=${delta.selection}',
+          );
+        }
+        if (delta is TextEditingDeltaNonTextUpdate) {
+          selection = delta.selection;
+          continue;
+        }
+
+        if (delta is TextEditingDeltaInsertion) {
+          if (_kDebugTextInput) {
+            _debugTextInput(
+              'delta(multi) insert offset=${delta.insertionOffset} text="${delta.textInserted.replaceAll('\n', '\\n')}" sel=${delta.selection}',
+            );
+          }
+          if (delta.textInserted.length == 1) {
+            _lastTypedCharacter = delta.textInserted;
+          } else {
+            _lastTypedCharacter = null;
+          }
+          _replaceTextAcrossSelections(delta.textInserted);
+          continue;
+        }
+
+        if (delta is TextEditingDeltaReplacement) {
+          if (_kDebugTextInput) {
+            _debugTextInput(
+              'delta(multi) replace range=${delta.replacedRange.start}..${delta.replacedRange.end} text="${delta.replacementText.replaceAll('\n', '\\n')}" sel=${delta.selection}',
+            );
+          }
+          _lastTypedCharacter = null;
+          _replaceTextAcrossSelections(delta.replacementText);
+          continue;
+        }
+
+        // Deletions via IME: clear multi-cursor and apply normally.
+        if (delta is TextEditingDeltaDeletion) {
+          if (_kDebugTextInput) {
+            _debugTextInput(
+              'delta(multi) delete range=${delta.deletedRange.start}..${delta.deletedRange.end} sel=${delta.selection}',
+            );
+          }
+          selection = delta.selection;
+          _handleDeletion(delta.deletedRange, delta.selection);
+          continue;
+        }
+      }
+      return;
+    }
+
     bool typingDetected = false;
 
     for (final delta in textEditingDeltas) {
       if (delta is TextEditingDeltaNonTextUpdate) {
+        if (_kDebugTextInput) {
+          _debugTextInput('delta nonText sel=${delta.selection}');
+        }
         if (_lastSentSelection == null ||
             delta.selection != _lastSentSelection) {
           _selection = delta.selection;
+          _selections = [_selection];
+          _multiCursorSearchText = null;
         }
         _lastSentSelection = null;
         _lastSentText = null;
@@ -2183,6 +3187,11 @@ class CodeForgeController implements DeltaTextInputClient {
       _lastSentText = null;
 
       if (delta is TextEditingDeltaInsertion) {
+        if (_kDebugTextInput) {
+          _debugTextInput(
+            'delta insert offset=${delta.insertionOffset} text="${delta.textInserted.replaceAll('\n', '\\n')}" sel=${delta.selection}',
+          );
+        }
         if (delta.textInserted == '\n' &&
             suggestionsNotifier.value != null &&
             _isMobile &&
@@ -2195,7 +3204,6 @@ class CodeForgeController implements DeltaTextInputClient {
           callSignatureHelp();
           continue;
         }
-
         if (delta.textInserted.length == 1) {
           _lastTypedCharacter = delta.textInserted;
         }
@@ -2210,8 +3218,18 @@ class CodeForgeController implements DeltaTextInputClient {
           delta.selection,
         );
       } else if (delta is TextEditingDeltaDeletion) {
+        if (_kDebugTextInput) {
+          _debugTextInput(
+            'delta delete range=${delta.deletedRange.start}..${delta.deletedRange.end} sel=${delta.selection}',
+          );
+        }
         _handleDeletion(delta.deletedRange, delta.selection);
       } else if (delta is TextEditingDeltaReplacement) {
+        if (_kDebugTextInput) {
+          _debugTextInput(
+            'delta replace range=${delta.replacedRange.start}..${delta.replacedRange.end} text="${delta.replacementText.replaceAll('\n', '\\n')}" sel=${delta.selection}',
+          );
+        }
         if (delta.replacementText.isNotEmpty &&
             _isAlpha(delta.replacementText)) {
           typingDetected = true;
@@ -2225,6 +3243,12 @@ class CodeForgeController implements DeltaTextInputClient {
     }
 
     _isTyping = typingDetected;
+
+    if (_kDebugTextInput) {
+      _debugTextInput(
+        'after deltas len=$length sel=$_selection bufferLine=$_bufferLineIndex bufferDirty=$_bufferDirty',
+      );
+    }
 
     notifyListeners();
   }
@@ -2245,6 +3269,11 @@ class CodeForgeController implements DeltaTextInputClient {
     bool replaceTypedChar = false,
   }) {
     if (readOnly) return;
+
+    if (hasMultipleSelections) {
+      _replaceTextAcrossSelections(textToInsert);
+      return;
+    }
 
     _flushBuffer();
 
@@ -2283,13 +3312,20 @@ class CodeForgeController implements DeltaTextInputClient {
   /// The character position will be clamped to the line's length.
   void insertText(String text, int line, int character) {
     if (readOnly) return;
+
     _flushBuffer();
 
+    // Clamp line to valid range
     final clampedLine = line.clamp(0, lineCount - 1);
+
+    // Get the line text to clamp character position
     final lineText = getLineText(clampedLine);
     final clampedChar = character.clamp(0, lineText.length);
+
+    // Calculate the offset
     final offset = getLineStartOffset(clampedLine) + clampedChar;
 
+    // Insert the text
     replaceRange(offset, offset, text);
   }
 
@@ -2309,23 +3345,33 @@ class CodeForgeController implements DeltaTextInputClient {
     if (readOnly) return;
     if (_undoController?.isUndoRedoInProgress ?? false) return;
 
+    if (hasMultipleSelections) {
+      _deleteAcrossSelections(backward: true);
+      return;
+    }
+
     final selectionBefore = _selection;
     final sel = _selection;
     String deletedText;
 
     if (sel.start < sel.end) {
+      _queueLspContentChange(sel.start, sel.end, '');
       _flushBuffer();
 
+      // Check if we're deleting the entire first line of a folded range
       if (deleteFoldRangeOnDeletingFirstLine) {
         final startLine = _rope.getLineAtOffset(sel.start);
         final endLine = _rope.getLineAtOffset(sel.end);
 
+        // Check if selection is on a single line (or spans to next line's start)
         if (startLine == endLine ||
             (startLine + 1 == endLine &&
                 sel.end == _rope.getLineStartOffset(endLine))) {
           final lineStart = _rope.getLineStartOffset(startLine);
           final lineText = _rope.getLineText(startLine);
           final lineEnd = lineStart + lineText.length;
+
+          // Check if the entire line is selected (whole line or line without newline)
           final selectsWholeLine = sel.start <= lineStart && sel.end >= lineEnd;
 
           if (selectsWholeLine) {
@@ -2351,6 +3397,7 @@ class CodeForgeController implements DeltaTextInputClient {
             }
 
             if (foldToDelete != null) {
+              // Delete the entire folded range
               final foldStart = _rope.getLineStartOffset(
                 foldToDelete.startIndex,
               );
@@ -2368,6 +3415,8 @@ class CodeForgeController implements DeltaTextInputClient {
                 foldStart.clamp(0, _rope.length),
               );
               lineStructureChanged = true;
+
+              // Remove the fold from the foldings map
               foldings.remove(foldToDelete.startIndex);
 
               for (final fold in foldings.values) {
@@ -2394,6 +3443,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.delete(sel.start, sel.end);
       _currentVersion++;
       _selection = TextSelection.collapsed(offset: sel.start);
+      _selections = [_selection];
       dirtyLine = _rope.getLineAtOffset(sel.start);
 
       _recordDeletion(sel.start, deletedText, selectionBefore, _selection);
@@ -2419,10 +3469,12 @@ class CodeForgeController implements DeltaTextInputClient {
     }
 
     if (charToDelete == '\n') {
+      _queueLspContentChange(deleteOffset, sel.start, '');
       _flushBuffer();
       _rope.delete(deleteOffset, sel.start);
       _currentVersion++;
       _selection = TextSelection.collapsed(offset: deleteOffset);
+      _selections = [_selection];
       dirtyLine = _rope.getLineAtOffset(deleteOffset);
       lineStructureChanged = true;
 
@@ -2436,12 +3488,14 @@ class CodeForgeController implements DeltaTextInputClient {
       final bufferEnd = _bufferLineRopeStart + _bufferLineText!.length;
 
       if (deleteOffset >= _bufferLineRopeStart && deleteOffset < bufferEnd) {
+        _queueLspContentChange(deleteOffset, deleteOffset + 1, '');
         final localOffset = deleteOffset - _bufferLineRopeStart;
         deletedText = _bufferLineText![localOffset];
         _bufferLineText =
             _bufferLineText!.substring(0, localOffset) +
             _bufferLineText!.substring(localOffset + 1);
         _selection = TextSelection.collapsed(offset: deleteOffset);
+        _selections = [_selection];
         _currentVersion++;
 
         bufferNeedsRepaint = true;
@@ -2460,6 +3514,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     final localOffset = deleteOffset - _bufferLineRopeStart;
     if (localOffset >= 0 && localOffset < _bufferLineText!.length) {
+      _queueLspContentChange(deleteOffset, deleteOffset + 1, '');
       deletedText = _bufferLineText![localOffset];
       _bufferLineText =
           _bufferLineText!.substring(0, localOffset) +
@@ -2467,6 +3522,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _bufferDirty = true;
       _cachedBufferLines = null;
       _selection = TextSelection.collapsed(offset: deleteOffset);
+      _selections = [_selection];
       _currentVersion++;
       dirtyLine = lineIndex;
 
@@ -2484,23 +3540,33 @@ class CodeForgeController implements DeltaTextInputClient {
     if (readOnly) return;
     if (_undoController?.isUndoRedoInProgress ?? false) return;
 
+    if (hasMultipleSelections) {
+      _deleteAcrossSelections(backward: false);
+      return;
+    }
+
     final selectionBefore = _selection;
     final sel = _selection;
     String deletedText;
 
     if (sel.start < sel.end) {
+      _queueLspContentChange(sel.start, sel.end, '');
       _flushBuffer();
 
+      // Check if we're deleting the entire first line of a folded range
       if (deleteFoldRangeOnDeletingFirstLine) {
         final startLine = _rope.getLineAtOffset(sel.start);
         final endLine = _rope.getLineAtOffset(sel.end);
 
+        // Check if selection is on a single line (or spans to next line's start)
         if (startLine == endLine ||
             (startLine + 1 == endLine &&
                 sel.end == _rope.getLineStartOffset(endLine))) {
           final lineStart = _rope.getLineStartOffset(startLine);
           final lineText = _rope.getLineText(startLine);
           final lineEnd = lineStart + lineText.length;
+
+          // Check if the entire line is selected (whole line or line without newline)
           final selectsWholeLine = sel.start <= lineStart && sel.end >= lineEnd;
 
           if (selectsWholeLine) {
@@ -2526,6 +3592,7 @@ class CodeForgeController implements DeltaTextInputClient {
             }
 
             if (foldToDelete != null) {
+              // Delete the entire folded range
               final foldStart = _rope.getLineStartOffset(
                 foldToDelete.startIndex,
               );
@@ -2543,6 +3610,8 @@ class CodeForgeController implements DeltaTextInputClient {
                 foldStart.clamp(0, _rope.length),
               );
               lineStructureChanged = true;
+
+              // Remove the fold from the foldings map
               foldings.remove(foldToDelete.startIndex);
 
               for (final fold in foldings.values) {
@@ -2569,6 +3638,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.delete(sel.start, sel.end);
       _currentVersion++;
       _selection = TextSelection.collapsed(offset: sel.start);
+      _selections = [_selection];
       dirtyLine = _rope.getLineAtOffset(sel.start);
 
       _recordDeletion(sel.start, deletedText, selectionBefore, _selection);
@@ -2595,6 +3665,7 @@ class CodeForgeController implements DeltaTextInputClient {
     }
 
     if (charToDelete == '\n') {
+      _queueLspContentChange(deleteOffset, deleteOffset + 1, '');
       _flushBuffer();
       _rope.delete(deleteOffset, deleteOffset + 1);
       _currentVersion++;
@@ -2611,6 +3682,7 @@ class CodeForgeController implements DeltaTextInputClient {
       final bufferEnd = _bufferLineRopeStart + _bufferLineText!.length;
 
       if (deleteOffset >= _bufferLineRopeStart && deleteOffset < bufferEnd) {
+        _queueLspContentChange(deleteOffset, deleteOffset + 1, '');
         final localOffset = deleteOffset - _bufferLineRopeStart;
         deletedText = _bufferLineText![localOffset];
         _bufferLineText =
@@ -2634,6 +3706,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     final localOffset = deleteOffset - _bufferLineRopeStart;
     if (localOffset >= 0 && localOffset < _bufferLineText!.length) {
+      _queueLspContentChange(deleteOffset, deleteOffset + 1, '');
       deletedText = _bufferLineText![localOffset];
       _bufferLineText =
           _bufferLineText!.substring(0, localOffset) +
@@ -2650,32 +3723,6 @@ class CodeForgeController implements DeltaTextInputClient {
       _scheduleFlush();
       notifyListeners();
     }
-  }
-
-  void _rebuildFoldSortedCache() {
-    final starts = <int>[];
-    final ends = <int>[];
-    for (final fold in _foldings.values) {
-      if (fold != null && fold.isFolded) {
-        starts.add(fold.startIndex);
-        ends.add(fold.endIndex);
-      }
-    }
-
-    if (starts.length > 1) {
-      final indices = List.generate(starts.length, (i) => i);
-      indices.sort((a, b) => starts[a].compareTo(starts[b]));
-      _foldedStartsSorted = [for (final i in indices) starts[i]];
-      _foldedEndsSorted = [for (final i in indices) ends[i]];
-    } else {
-      _foldedStartsSorted = starts;
-      _foldedEndsSorted = ends;
-    }
-  }
-
-  bool _isFirstLineOfFoldedRange(int lineIndex) {
-    final fold = foldings[lineIndex];
-    return fold != null && fold.isFolded;
   }
 
   @protected
@@ -2764,6 +3811,8 @@ class CodeForgeController implements DeltaTextInputClient {
         ? _rope.substring(safeStart, safeEnd)
         : '';
 
+    _queueLspContentChange(safeStart, safeEnd, replacement);
+
     if (safeStart < safeEnd) {
       _rope.delete(safeStart, safeEnd);
     }
@@ -2792,6 +3841,8 @@ class CodeForgeController implements DeltaTextInputClient {
       );
     }
     _selection = newSelection;
+    _selections = [newSelection];
+    _multiCursorSearchText = null;
     dirtyLine = _rope.getLineAtOffset(safeStart);
     dirtyRegion = TextRange(
       start: safeStart,
@@ -3186,8 +4237,6 @@ class CodeForgeController implements DeltaTextInputClient {
   /// ```
   /// - When buffer is active, the method behaves the same but uses the buffer's
   ///   current line and column instead of `text`/`offset`.
-  /// Helper to check if a code unit is a valid identifier character
-  /// Includes ASCII alphanumerics, underscore, and RTL script ranges
   bool _isIdentChar(int code) {
     return (code >= 48 && code <= 57) || // 0-9
         (code >= 65 && code <= 90) || // A-Z
@@ -3262,6 +4311,14 @@ class CodeForgeController implements DeltaTextInputClient {
     _documentColorTimer?.cancel();
     _foldRangesTimer?.cancel();
     _documentHighlightTimer?.cancel();
+    _lspSyncTimer?.cancel();
+    _lspSyncMaxLatencyTimer?.cancel();
+    _completionTimer?.cancel();
+    _cclsRefreshTimer?.cancel();
+    _syncTimer?.cancel();
+    if (_lspReady && lspConfig != null && openedFile != null) {
+      unawaited(lspConfig!.closeDocument(openedFile!));
+    }
     _lspResponsesSubscription?.cancel();
     _listeners.clear();
     connection?.close();
@@ -3276,39 +4333,135 @@ class CodeForgeController implements DeltaTextInputClient {
   Future<void> applyWorkspaceEdit(dynamic action) async {
     if (openedFile == null) return;
     final fileUri = Uri.file(openedFile!).toString();
+    final prevSuppress = _suppressLspSync;
+    _suppressLspSync = true;
+    _pendingLspContentChanges.clear();
 
-    if (action is Map && action.containsKey('command')) {
-      final String command = action['command'];
-      final List args = action['arguments'] ?? [];
-      await lspConfig?.executeCommand(command, args);
-      return;
-    } else if (action is Map &&
-        action.containsKey('edit') &&
-        (action['edit'] as Map).containsKey('changes')) {
-      final Map changes = action['edit']['changes'] as Map;
-      if (changes.containsKey(fileUri)) {
-        final List edits = List.from(changes[fileUri] as List);
+    try {
+      if (action is Map && action.containsKey('command')) {
+        final String command = action['command'];
+        final List args = action['arguments'] ?? [];
+        await lspConfig?.executeCommand(command, args);
+        return;
+      } else if (action is Map &&
+          action.containsKey('edit') &&
+          (action['edit'] as Map).containsKey('changes')) {
+        final Map changes = action['edit']['changes'] as Map;
+        if (changes.containsKey(fileUri)) {
+          final List edits = List.from(changes[fileUri] as List);
+          final converted = <Map<String, dynamic>>[];
+          for (final e in edits) {
+            try {
+              final start = e['range']?['start'];
+              final end = e['range']?['end'];
+              if (start == null || end == null) continue;
+              final startOffset =
+                  getLineStartOffset(start['line'] as int) +
+                  (start['character'] as int);
+              final endOffset =
+                  getLineStartOffset(end['line'] as int) +
+                  (end['character'] as int);
+              final newText = e['newText'] as String? ?? '';
+              converted.add({
+                'start': startOffset,
+                'end': endOffset,
+                'newText': newText,
+              });
+            } catch (_) {
+              continue;
+            }
+          }
+          converted.sort(
+            (a, b) => (b['start'] as int).compareTo(a['start'] as int),
+          );
+          for (final ce in converted) {
+            replaceRange(
+              ce['start'] as int,
+              ce['end'] as int,
+              ce['newText'] as String,
+              preserveOldCursor: true,
+            );
+          }
+          if (lspConfig != null) {
+            await lspConfig!.updateDocument(openedFile!, text);
+          }
+        }
+        return;
+      } else if (action is Map &&
+          action.containsKey('documentChanges') &&
+          action['documentChanges'] is List) {
+        final List docChanges = List.from(action['documentChanges'] as List);
+        for (final dc in docChanges) {
+          if (dc is Map) {
+            final td = dc['textDocument'];
+            final uri = td != null ? td['uri'] as String? : null;
+            if (uri == fileUri && dc.containsKey('edits')) {
+              final List edits = List.from(dc['edits'] as List);
+              final converted = <Map<String, dynamic>>[];
+              for (final e in edits) {
+                try {
+                  final start = e['range']?['start'];
+                  final end = e['range']?['end'];
+                  if (start == null || end == null) continue;
+                  final int startOffset =
+                      getLineStartOffset(start['line'] as int) +
+                      (start['character'] as int);
+                  final int endOffset =
+                      getLineStartOffset(end['line'] as int) +
+                      (end['character'] as int);
+                  final String newText = e['newText'] as String? ?? '';
+                  converted.add({
+                    'start': startOffset,
+                    'end': endOffset,
+                    'newText': newText,
+                  });
+                } catch (_) {
+                  continue;
+                }
+              }
+              converted.sort(
+                (a, b) => (b['start'] as int).compareTo(a['start'] as int),
+              );
+              for (final ce in converted) {
+                replaceRange(
+                  ce['start'] as int,
+                  ce['end'] as int,
+                  ce['newText'] as String,
+                  preserveOldCursor: true,
+                );
+              }
+              if (lspConfig != null) {
+                await lspConfig!.updateDocument(openedFile!, text);
+              }
+            }
+          }
+        }
+        return;
+      } else if (action is List) {
         final converted = <Map<String, dynamic>>[];
-        for (final e in edits) {
-          try {
-            final start = e['range']?['start'];
-            final end = e['range']?['end'];
-            if (start == null || end == null) continue;
+        try {
+          for (Map<String, dynamic> item in action) {
+            if (!(item.containsKey('newText') && item.containsKey('range'))) {
+              return;
+            }
+            final start = item['range']?['start'];
+            final end = item['range']?['end'];
+            if (start == null || end == null) return;
             final startOffset =
                 getLineStartOffset(start['line'] as int) +
                 (start['character'] as int);
             final endOffset =
                 getLineStartOffset(end['line'] as int) +
                 (end['character'] as int);
-            final newText = e['newText'] as String? ?? '';
+            final newText = item['newText'] as String? ?? '';
             converted.add({
               'start': startOffset,
               'end': endOffset,
               'newText': newText,
             });
-          } catch (_) {
-            continue;
           }
+        } catch (_) {
+          return;
         }
         converted.sort(
           (a, b) => (b['start'] as int).compareTo(a['start'] as int),
@@ -3325,97 +4478,8 @@ class CodeForgeController implements DeltaTextInputClient {
           await lspConfig!.updateDocument(openedFile!, text);
         }
       }
-      return;
-    } else if (action is Map &&
-        action.containsKey('documentChanges') &&
-        action['documentChanges'] is List) {
-      final List docChanges = List.from(action['documentChanges'] as List);
-      for (final dc in docChanges) {
-        if (dc is Map) {
-          final td = dc['textDocument'];
-          final uri = td != null ? td['uri'] as String? : null;
-          if (uri == fileUri && dc.containsKey('edits')) {
-            final List edits = List.from(dc['edits'] as List);
-            final converted = <Map<String, dynamic>>[];
-            for (final e in edits) {
-              try {
-                final start = e['range']?['start'];
-                final end = e['range']?['end'];
-                if (start == null || end == null) continue;
-                final int startOffset =
-                    getLineStartOffset(start['line'] as int) +
-                    (start['character'] as int);
-                final int endOffset =
-                    getLineStartOffset(end['line'] as int) +
-                    (end['character'] as int);
-                final String newText = e['newText'] as String? ?? '';
-                converted.add({
-                  'start': startOffset,
-                  'end': endOffset,
-                  'newText': newText,
-                });
-              } catch (_) {
-                continue;
-              }
-            }
-            converted.sort(
-              (a, b) => (b['start'] as int).compareTo(a['start'] as int),
-            );
-            for (final ce in converted) {
-              replaceRange(
-                ce['start'] as int,
-                ce['end'] as int,
-                ce['newText'] as String,
-                preserveOldCursor: true,
-              );
-            }
-            if (lspConfig != null) {
-              await lspConfig!.updateDocument(openedFile!, text);
-            }
-          }
-        }
-      }
-      return;
-    } else if (action is List) {
-      final converted = <Map<String, dynamic>>[];
-      try {
-        for (Map<String, dynamic> item in action) {
-          if (!(item.containsKey('newText') && item.containsKey('range'))) {
-            return;
-          }
-          final start = item['range']?['start'];
-          final end = item['range']?['end'];
-          if (start == null || end == null) return;
-          final startOffset =
-              getLineStartOffset(start['line'] as int) +
-              (start['character'] as int);
-          final endOffset =
-              getLineStartOffset(end['line'] as int) +
-              (end['character'] as int);
-          final newText = item['newText'] as String? ?? '';
-          converted.add({
-            'start': startOffset,
-            'end': endOffset,
-            'newText': newText,
-          });
-        }
-      } catch (_) {
-        return;
-      }
-      converted.sort(
-        (a, b) => (b['start'] as int).compareTo(a['start'] as int),
-      );
-      for (final ce in converted) {
-        replaceRange(
-          ce['start'] as int,
-          ce['end'] as int,
-          ce['newText'] as String,
-          preserveOldCursor: true,
-        );
-      }
-      if (lspConfig != null) {
-        await lspConfig!.updateDocument(openedFile!, text);
-      }
+    } finally {
+      _suppressLspSync = prevSuppress;
     }
   }
 
@@ -3439,13 +4503,6 @@ class CodeForgeController implements DeltaTextInputClient {
     }
   }
 
-  int _multiCursorToOffset(({int line, int character}) cursor) {
-    final clampedLine = cursor.line.clamp(0, lineCount - 1);
-    final lineText = getLineText(clampedLine);
-    final clampedChar = cursor.character.clamp(0, lineText.length);
-    return getLineStartOffset(clampedLine) + clampedChar;
-  }
-
   bool _isAlpha(String s) {
     if (s.isEmpty) return false;
     final code = s.codeUnitAt(0);
@@ -3461,26 +4518,243 @@ class CodeForgeController implements DeltaTextInputClient {
     return s == '.' || s == ':' || s == '>' || s == '/' || s == '@';
   }
 
+  static Set<String> _extractWords(String text) {
+    final regExp = RegExp(r'[\w\u0600-\u06FF\u08A0-\u08FF\u0590-\u05FF]+');
+    return regExp.allMatches(text).map((m) => m.group(0)!).toSet();
+  }
+
+  void requestSemanticTokensForViewport({
+    required int startLine,
+    required int endLineExclusive,
+    bool immediate = false,
+  }) {
+    final safeStart = startLine.clamp(0, lineCount);
+    final safeEnd = endLineExclusive.clamp(safeStart, lineCount);
+    _lastVisibleSemanticRange = (
+      startLine: safeStart,
+      endLineExclusive: safeEnd,
+    );
+
+    if (lspConfig == null) return;
+    if (!_lspReady) return;
+    if (openedFile == null) return;
+    if (_usesCclsSemanticHighlight) return;
+
+    if (lspConfig!.serverSupportsSemanticTokensRange) {
+      _scheduleSemanticTokensRange(
+        startLine: safeStart,
+        endLineExclusive: safeEnd,
+        immediate: immediate,
+      );
+    } else {
+      if (immediate) {
+        unawaited(_fetchSemanticTokensFull());
+      } else {
+        _scheduleSemantictokenRefresh();
+      }
+    }
+  }
+
+  void _ensureSemanticCoverageForCurrentDocument() {
+    final filePath = openedFile;
+    if (_semanticCoverageDocVersion != _currentVersion ||
+        _semanticCoverageFilePath != filePath) {
+      _semanticCoverageDocVersion = _currentVersion;
+      _semanticCoverageFilePath = filePath;
+      _semanticCoveredRanges.clear();
+    }
+  }
+
+  bool _isSemanticRangeCovered(int startLine, int endLineExclusive) {
+    if (startLine >= endLineExclusive) return true;
+    for (final range in _semanticCoveredRanges) {
+      if (range.endLineExclusive <= startLine) continue;
+      if (range.startLine > startLine) return false;
+      return range.endLineExclusive >= endLineExclusive;
+    }
+    return false;
+  }
+
+  void _markSemanticRangeCovered(int startLine, int endLineExclusive) {
+    if (startLine >= endLineExclusive) return;
+    _ensureSemanticCoverageForCurrentDocument();
+
+    int insertIndex = 0;
+    while (insertIndex < _semanticCoveredRanges.length &&
+        _semanticCoveredRanges[insertIndex].endLineExclusive < startLine) {
+      insertIndex++;
+    }
+
+    int mergedStart = startLine;
+    int mergedEnd = endLineExclusive;
+    while (insertIndex < _semanticCoveredRanges.length &&
+        _semanticCoveredRanges[insertIndex].startLine <= mergedEnd) {
+      final existing = _semanticCoveredRanges.removeAt(insertIndex);
+      if (existing.startLine < mergedStart) mergedStart = existing.startLine;
+      if (existing.endLineExclusive > mergedEnd) {
+        mergedEnd = existing.endLineExclusive;
+      }
+    }
+
+    _semanticCoveredRanges.insert(insertIndex, (
+      startLine: mergedStart,
+      endLineExclusive: mergedEnd,
+    ));
+  }
+
+  void _scheduleSemanticTokensRange({
+    required int startLine,
+    required int endLineExclusive,
+    bool immediate = false,
+  }) {
+    if (lspConfig == null) return;
+    if (openedFile == null) return;
+    if (!_lspReady) return;
+    if (_usesCclsSemanticHighlight) return;
+    if (!lspConfig!.serverSupportsSemanticTokensRange) return;
+
+    final safeStart = startLine.clamp(0, lineCount);
+    final safeEnd = endLineExclusive.clamp(safeStart, lineCount);
+    if (safeStart >= safeEnd) return;
+
+    _ensureSemanticCoverageForCurrentDocument();
+    if (_isSemanticRangeCovered(safeStart, safeEnd)) return;
+
+    _pendingSemanticRangeRequest = (
+      startLine: safeStart,
+      endLineExclusive: safeEnd,
+    );
+    _pendingSemanticRangeDocVersion = _currentVersion;
+
+    _semanticTokenTimer?.cancel();
+    if (immediate) {
+      unawaited(_flushSemanticTokensRangeRequest());
+    } else {
+      _semanticTokenTimer = Timer(_semanticTokenDebounce, () {
+        unawaited(_flushSemanticTokensRangeRequest());
+      });
+    }
+  }
+
+  Future<void> _flushSemanticTokensRangeRequest() async {
+    if (lspConfig == null) return;
+    if (openedFile == null) return;
+    if (!_lspReady) return;
+    if (_usesCclsSemanticHighlight) return;
+    if (!lspConfig!.serverSupportsSemanticTokensRange) return;
+
+    final pending = _pendingSemanticRangeRequest;
+    if (pending == null) return;
+    _pendingSemanticRangeRequest = null;
+
+    final requestDocVersion = _pendingSemanticRangeDocVersion;
+    final requestSerial = ++_semanticRangeRequestSerial;
+    final filePath = openedFile!;
+
+    final startLine = pending.startLine;
+    final endLineExclusive = pending.endLineExclusive;
+    if (startLine >= endLineExclusive) return;
+
+    final int endLine;
+    final int endCharacter;
+    if (endLineExclusive < lineCount) {
+      endLine = endLineExclusive;
+      endCharacter = 0;
+    } else {
+      endLine = lineCount > 0 ? lineCount - 1 : 0;
+      endCharacter = getLineText(endLine).length;
+    }
+
+    try {
+      final tokens = await lspConfig!.getSemanticTokensRange(
+        filePath,
+        startLine: startLine,
+        startCharacter: 0,
+        endLine: endLine,
+        endCharacter: endCharacter,
+      );
+      if (_isDisposed) return;
+      if (requestSerial != _semanticRangeRequestSerial) return;
+      if (_currentVersion != requestDocVersion) return;
+      if (openedFile != filePath) return;
+
+      _markSemanticRangeCovered(startLine, endLineExclusive);
+      semanticTokens.value = SemanticTokensUpdate.range(
+        tokens: tokens,
+        version: _semanticTokensVersion++,
+        startLine: startLine,
+        endLineExclusive: endLineExclusive,
+      );
+    } catch (e) {
+      debugPrint('Error fetching semantic tokens range: $e');
+    }
+  }
+
   Future<void> _fetchSemanticTokensFull() async {
     if (lspConfig == null) return;
-    if (_usesCclsSemanticHighlight) {
-      return;
-    }
+    if (_usesCclsSemanticHighlight) return;
 
     try {
       final tokens = await lspConfig!.getSemanticTokensFull(openedFile!);
       if (!_isDisposed) {
-        semanticTokens.value = (tokens, _semanticTokensVersion++);
+        _ensureSemanticCoverageForCurrentDocument();
+        _semanticCoveredRanges
+          ..clear()
+          ..add((startLine: 0, endLineExclusive: lineCount));
+        semanticTokens.value = SemanticTokensUpdate.full(
+          tokens: tokens,
+          version: _semanticTokensVersion++,
+        );
       }
     } catch (e) {
       debugPrint('Error fetching semantic tokens: $e');
     }
   }
 
+  Future<void> _fetchSemanticTokensDelta() async {
+    // Delta requests are already handled inside `lspConfig.getSemanticTokensFull`
+    // when the server supports semanticTokens/full/delta and a cached resultId
+    // exists. Keep this method as an alias for call sites that want “fast” updates.
+    await _fetchSemanticTokensFull();
+  }
+
   void _scheduleSemantictokenRefresh() {
+    final config = lspConfig;
+    if (config == null) return;
+    if (_usesCclsSemanticHighlight) return;
+
+    if (config.serverSupportsSemanticTokensRange) {
+      final range = _lastVisibleSemanticRange;
+      if (range != null) {
+        _scheduleSemanticTokensRange(
+          startLine: range.startLine,
+          endLineExclusive: range.endLineExclusive,
+          immediate: false,
+        );
+        return;
+      }
+
+      // No viewport info yet (e.g., during init). Prime the first chunk so the
+      // initial view doesn't wait on a full-document request.
+      _scheduleSemanticTokensRange(
+        startLine: 0,
+        endLineExclusive: lineCount.clamp(0, 200),
+        immediate: false,
+      );
+      return;
+    }
+
     _semanticTokenTimer?.cancel();
-    _semanticTokenTimer = Timer(_semanticTokenDebounce, () async {
-      await _fetchSemanticTokensFull();
+
+    // Adaptive debounce: faster updates during active typing, slower when idle
+    // This provides instant feedback while typing while reducing server load
+    final debounce = _isTyping
+        ? Duration(milliseconds: 80) // Fast updates while typing
+        : Duration(milliseconds: 250); // Slower when idle
+
+    _semanticTokenTimer = Timer(debounce, () async {
+      // Use delta for updates (faster), full for initial load
+      await _fetchSemanticTokensDelta();
     });
   }
 
@@ -3678,9 +4952,14 @@ class CodeForgeController implements DeltaTextInputClient {
 
     switch (operation) {
       case InsertOperation(:final offset, :final text, :final selectionAfter):
+        if (text.isNotEmpty) {
+          _queueLspContentChange(offset, offset, text);
+        }
         _rope.insert(offset, text);
         _currentVersion++;
         _selection = selectionAfter;
+        _selections = [_selection];
+        _multiCursorSearchText = null;
         dirtyLine = _rope.getLineAtOffset(offset);
         if (text.contains('\n')) {
           lineStructureChanged = true;
@@ -3688,9 +4967,14 @@ class CodeForgeController implements DeltaTextInputClient {
         dirtyRegion = TextRange(start: offset, end: offset + text.length);
 
       case DeleteOperation(:final offset, :final text, :final selectionAfter):
+        if (text.isNotEmpty) {
+          _queueLspContentChange(offset, offset + text.length, '');
+        }
         _rope.delete(offset, offset + text.length);
         _currentVersion++;
         _selection = selectionAfter;
+        _selections = [_selection];
+        _multiCursorSearchText = null;
         dirtyLine = _rope.getLineAtOffset(offset);
         if (text.contains('\n')) {
           lineStructureChanged = true;
@@ -3703,6 +4987,13 @@ class CodeForgeController implements DeltaTextInputClient {
         :final insertedText,
         :final selectionAfter,
       ):
+        if (deletedText.isNotEmpty || insertedText.isNotEmpty) {
+          _queueLspContentChange(
+            offset,
+            offset + deletedText.length,
+            insertedText,
+          );
+        }
         if (deletedText.isNotEmpty) {
           _rope.delete(offset, offset + deletedText.length);
         }
@@ -3711,6 +5002,8 @@ class CodeForgeController implements DeltaTextInputClient {
         }
         _currentVersion++;
         _selection = selectionAfter;
+        _selections = [_selection];
+        _multiCursorSearchText = null;
         dirtyLine = _rope.getLineAtOffset(offset);
         if (deletedText.contains('\n') || insertedText.contains('\n')) {
           lineStructureChanged = true;
@@ -3796,6 +5089,21 @@ class CodeForgeController implements DeltaTextInputClient {
     });
   }
 
+  void _scheduleSyncToConnectionMicrotask() {
+    if (_syncToConnectionMicrotaskScheduled) return;
+    final conn = connection;
+    if (conn == null || !conn.attached) return;
+
+    _syncToConnectionMicrotaskScheduled = true;
+    scheduleMicrotask(() {
+      _syncToConnectionMicrotaskScheduled = false;
+      if (_isDisposed) return;
+      final conn = connection;
+      if (conn == null || !conn.attached) return;
+      _syncToConnection();
+    });
+  }
+
   void _scheduleFlush() {
     _flushTimer?.cancel();
     _flushTimer = Timer(_flushDelay, _flushBuffer);
@@ -3842,13 +5150,6 @@ class CodeForgeController implements DeltaTextInputClient {
   ) {
     if (_undoController?.isUndoRedoInProgress ?? false) return;
 
-    if (hasMultiCursors &&
-        insertedText.isNotEmpty &&
-        !insertedText.contains('\n')) {
-      insertAtAllCursors(insertedText);
-      return;
-    }
-
     final selectionBefore = _selection;
     final currentLength = text.length;
     if (offset < 0 || offset > currentLength) {
@@ -3857,6 +5158,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
     String actualInsertedText = insertedText;
     TextSelection actualSelection = newSelection;
+    bool shouldSyncToPlatform = false;
 
     if (insertedText.length == 1) {
       final char = insertedText[0];
@@ -3868,11 +5170,18 @@ class CodeForgeController implements DeltaTextInputClient {
         final closing = pairs[char]!;
         actualInsertedText = '$char$closing';
         actualSelection = TextSelection.collapsed(offset: offset + 1);
+        shouldSyncToPlatform = true;
       } else if (closers.contains(char)) {
         final currentText = text;
         if (offset < currentText.length && currentText[offset] == char) {
+          // "Skip over" the existing closing character instead of inserting a
+          // duplicate. This diverges from the platform delta, so we sync the
+          // authoritative state back to the platform after this update cycle.
           _selection = TextSelection.collapsed(offset: offset + 1);
-          notifyListeners();
+          _selections = [_selection];
+          selectionOnly = true;
+          shouldSyncToPlatform = true;
+          _scheduleSyncToConnectionMicrotask();
           return;
         }
       }
@@ -3923,6 +5232,15 @@ class CodeForgeController implements DeltaTextInputClient {
         );
       }
 
+      if (actualInsertedText != insertedText ||
+          actualSelection != newSelection) {
+        shouldSyncToPlatform = true;
+      }
+
+      if (actualInsertedText.isNotEmpty) {
+        _queueLspContentChange(offset, offset, actualInsertedText);
+      }
+
       bool insertedViaBuffer = false;
       if (_bufferLineIndex != null && _bufferDirty) {
         final bufferEnd = _bufferLineRopeStart + _bufferLineText!.length;
@@ -3936,6 +5254,7 @@ class CodeForgeController implements DeltaTextInputClient {
             _bufferDirty = true;
             _cachedBufferLines = null;
             _selection = actualSelection;
+            _selections = [_selection];
             _currentVersion++;
             dirtyLine = _bufferLineIndex;
 
@@ -3959,6 +5278,7 @@ class CodeForgeController implements DeltaTextInputClient {
           _bufferDirty = true;
           _cachedBufferLines = null;
           _selection = actualSelection;
+          _selections = [_selection];
           _currentVersion++;
           dirtyLine = lineIndex;
 
@@ -3980,12 +5300,8 @@ class CodeForgeController implements DeltaTextInputClient {
           actualSelection,
         );
 
-        if (connection != null && connection!.attached) {
-          _lastSentText = text;
-          _lastSentSelection = _selection;
-          connection!.setEditingState(
-            TextEditingValue(text: _lastSentText!, selection: _selection),
-          );
+        if (shouldSyncToPlatform) {
+          _scheduleSyncToConnectionMicrotask();
         }
 
         _scheduleFlush();
@@ -3997,6 +5313,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.insert(offset, actualInsertedText);
       _currentVersion++;
       _selection = actualSelection;
+      _selections = [_selection];
       dirtyLine = _rope.getLineAtOffset(offset);
       lineStructureChanged = true;
       dirtyRegion = TextRange(
@@ -4011,16 +5328,15 @@ class CodeForgeController implements DeltaTextInputClient {
         actualSelection,
       );
 
-      if (connection != null && connection!.attached) {
-        _lastSentText = text;
-        _lastSentSelection = _selection;
-        connection!.setEditingState(
-          TextEditingValue(text: _lastSentText!, selection: _selection),
-        );
+      if (shouldSyncToPlatform) {
+        _scheduleSyncToConnectionMicrotask();
       }
 
-      notifyListeners();
       return;
+    }
+
+    if (actualInsertedText.isNotEmpty) {
+      _queueLspContentChange(offset, offset, actualInsertedText);
     }
 
     if (actualInsertedText.length == 2 &&
@@ -4036,6 +5352,7 @@ class CodeForgeController implements DeltaTextInputClient {
                 actualInsertedText +
                 _bufferLineText!.substring(localOffset);
             _selection = actualSelection;
+            _selections = [_selection];
             _currentVersion++;
             dirtyLine = _bufferLineIndex;
 
@@ -4048,16 +5365,11 @@ class CodeForgeController implements DeltaTextInputClient {
               actualSelection,
             );
 
-            if (connection != null && connection!.attached) {
-              _lastSentText = text;
-              _lastSentSelection = _selection;
-              connection!.setEditingState(
-                TextEditingValue(text: _lastSentText!, selection: _selection),
-              );
+            if (shouldSyncToPlatform) {
+              _scheduleSyncToConnectionMicrotask();
             }
 
             _scheduleFlush();
-            notifyListeners();
             return;
           }
         }
@@ -4076,6 +5388,7 @@ class CodeForgeController implements DeltaTextInputClient {
         _bufferDirty = true;
         _cachedBufferLines = null;
         _selection = actualSelection;
+        _selections = [_selection];
         _currentVersion++;
         dirtyLine = lineIndex;
 
@@ -4088,16 +5401,11 @@ class CodeForgeController implements DeltaTextInputClient {
           actualSelection,
         );
 
-        if (connection != null && connection!.attached) {
-          _lastSentText = text;
-          _lastSentSelection = _selection;
-          connection!.setEditingState(
-            TextEditingValue(text: _lastSentText!, selection: _selection),
-          );
+        if (shouldSyncToPlatform) {
+          _scheduleSyncToConnectionMicrotask();
         }
 
         _scheduleFlush();
-        notifyListeners();
       }
       return;
     }
@@ -4113,6 +5421,7 @@ class CodeForgeController implements DeltaTextInputClient {
               actualInsertedText +
               _bufferLineText!.substring(localOffset);
           _selection = actualSelection;
+          _selections = [_selection];
           _currentVersion++;
 
           bufferNeedsRepaint = true;
@@ -4123,6 +5432,10 @@ class CodeForgeController implements DeltaTextInputClient {
             selectionBefore,
             actualSelection,
           );
+
+          if (shouldSyncToPlatform) {
+            _scheduleSyncToConnectionMicrotask();
+          }
 
           _scheduleFlush();
           return;
@@ -4143,6 +5456,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _bufferDirty = true;
       _cachedBufferLines = null;
       _selection = actualSelection;
+      _selections = [_selection];
       _currentVersion++;
       dirtyLine = lineIndex;
 
@@ -4155,19 +5469,16 @@ class CodeForgeController implements DeltaTextInputClient {
         actualSelection,
       );
 
+      if (shouldSyncToPlatform) {
+        _scheduleSyncToConnectionMicrotask();
+      }
+
       _scheduleFlush();
     }
   }
 
   void _handleDeletion(TextRange range, TextSelection newSelection) {
     if (_undoController?.isUndoRedoInProgress ?? false) return;
-
-    if (hasMultiCursors &&
-        range.end - range.start == 1 &&
-        range.end == _selection.extentOffset) {
-      backspaceAtAllCursors();
-      return;
-    }
 
     final selectionBefore = _selection;
     final currentLength = length;
@@ -4178,6 +5489,9 @@ class CodeForgeController implements DeltaTextInputClient {
     }
 
     final deleteLen = range.end - range.start;
+    if (deleteLen > 0) {
+      _queueLspContentChange(range.start, range.end, '');
+    }
 
     if (_bufferLineIndex != null && _bufferDirty) {
       final bufferEnd = _bufferLineRopeStart + _bufferLineText!.length;
@@ -4193,6 +5507,7 @@ class CodeForgeController implements DeltaTextInputClient {
             _rope.delete(range.start, range.end);
             _currentVersion++;
             _selection = newSelection;
+            _selections = [_selection];
             dirtyLine = _rope.getLineAtOffset(range.start);
             lineStructureChanged = true;
             dirtyRegion = TextRange(start: range.start, end: range.start);
@@ -4210,6 +5525,7 @@ class CodeForgeController implements DeltaTextInputClient {
               _bufferLineText!.substring(0, localStart) +
               _bufferLineText!.substring(localEnd);
           _selection = newSelection;
+          _selections = [_selection];
           _currentVersion++;
 
           bufferNeedsRepaint = true;
@@ -4249,6 +5565,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _rope.delete(range.start, range.end);
       _currentVersion++;
       _selection = newSelection;
+      _selections = [_selection];
       dirtyLine = _rope.getLineAtOffset(range.start);
       lineStructureChanged = true;
       dirtyRegion = TextRange(start: range.start, end: range.start);
@@ -4271,6 +5588,7 @@ class CodeForgeController implements DeltaTextInputClient {
       _bufferDirty = true;
       _cachedBufferLines = null;
       _selection = newSelection;
+      _selections = [_selection];
       _currentVersion++;
 
       bufferNeedsRepaint = true;
@@ -4291,19 +5609,31 @@ class CodeForgeController implements DeltaTextInputClient {
     final selectionBefore = _selection;
     _flushBuffer();
 
-    final deletedText = range.start < range.end
-        ? _rope.substring(range.start, range.end)
+    final safeStart = range.start.clamp(0, _rope.length);
+    final safeEnd = range.end.clamp(safeStart, _rope.length);
+
+    final deletedText = safeStart < safeEnd
+        ? _rope.substring(safeStart, safeEnd)
         : '';
 
-    _rope.delete(range.start, range.end);
-    _rope.insert(range.start, text);
+    if (deletedText.isNotEmpty || text.isNotEmpty) {
+      _queueLspContentChange(safeStart, safeEnd, text);
+    }
+
+    if (safeStart < safeEnd) {
+      _rope.delete(safeStart, safeEnd);
+    }
+    if (text.isNotEmpty) {
+      _rope.insert(safeStart, text);
+    }
     _currentVersion++;
     _selection = newSelection;
-    dirtyLine = _rope.getLineAtOffset(range.start);
-    dirtyRegion = TextRange(start: range.start, end: range.start + text.length);
+    _selections = [_selection];
+    dirtyLine = _rope.getLineAtOffset(safeStart);
+    dirtyRegion = TextRange(start: safeStart, end: safeStart + text.length);
 
     _recordReplacement(
-      range.start,
+      safeStart,
       deletedText,
       text,
       selectionBefore,
@@ -4319,60 +5649,72 @@ class CodeForgeController implements DeltaTextInputClient {
     _bufferDirty = false;
   }
 
-  bool _isLineInFoldedRegion(int lineIndex) {
-    final starts = _foldedStartsSorted;
-    final ends = _foldedEndsSorted;
-    if (starts.isEmpty) return false;
-
-    int lo = 0, hi = starts.length - 1;
-    while (lo <= hi) {
-      final mid = (lo + hi) >> 1;
-      if (starts[mid] < lineIndex) {
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
+  void _rebuildFoldSortedCache() {
+    final starts = <int>[];
+    final ends = <int>[];
+    for (final fold in _foldings.values) {
+      if (fold != null && fold.isFolded) {
+        starts.add(fold.startIndex);
+        ends.add(fold.endIndex);
       }
     }
 
-    for (int i = hi; i >= 0; i--) {
-      if (starts[i] >= lineIndex) continue;
-      if (ends[i] >= lineIndex) return true;
-      if (lineIndex - starts[i] > 100000) break;
+    if (starts.length > 1) {
+      final indices = List.generate(starts.length, (i) => i);
+      indices.sort((a, b) => starts[a].compareTo(starts[b]));
+      _foldedStartsSorted = [for (final i in indices) starts[i]];
+      _foldedEndsSorted = [for (final i in indices) ends[i]];
+    } else {
+      _foldedStartsSorted = starts;
+      _foldedEndsSorted = ends;
+    }
+  }
+
+  bool _isLineInFoldedRegion(int lineIndex) {
+    if (_foldedStartsSorted.isEmpty) return false;
+
+    int low = 0;
+    int high = _foldedStartsSorted.length - 1;
+
+    while (low <= high) {
+      final mid = (low + high) ~/ 2;
+      final start = _foldedStartsSorted[mid];
+      final end = _foldedEndsSorted[mid];
+
+      if (lineIndex > start && lineIndex <= end) {
+        return true;
+      } else if (lineIndex <= start) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
     }
     return false;
   }
 
   int? _getFoldStartForLine(int lineIndex) {
-    final starts = _foldedStartsSorted;
-    final ends = _foldedEndsSorted;
-    if (starts.isEmpty) return null;
-    int lo = 0, hi = starts.length - 1;
-    while (lo <= hi) {
-      final mid = (lo + hi) >> 1;
-      if (starts[mid] < lineIndex) {
-        lo = mid + 1;
+    if (_foldedStartsSorted.isEmpty) return null;
+
+    int low = 0;
+    int high = _foldedStartsSorted.length - 1;
+
+    while (low <= high) {
+      final mid = (low + high) ~/ 2;
+      final start = _foldedStartsSorted[mid];
+      final end = _foldedEndsSorted[mid];
+
+      if (lineIndex > start && lineIndex <= end) {
+        return start;
+      } else if (lineIndex <= start) {
+        high = mid - 1;
       } else {
-        hi = mid - 1;
+        low = mid + 1;
       }
-    }
-    for (int i = hi; i >= 0; i--) {
-      if (starts[i] >= lineIndex) continue;
-      if (ends[i] >= lineIndex) return starts[i];
-      if (lineIndex - starts[i] > 100000) break;
     }
     return null;
   }
 
   FoldRange? _getFoldRangeAtCurrentLine(int lineIndex) {
     return foldings[lineIndex];
-  }
-
-  static Set<String> _extractWords(String text) {
-    final regExp = RegExp(r'[\w\u0600-\u06FF\u08A0-\u08FF\u0590-\u05FF]+');
-    final set = <String>{};
-    for (final match in regExp.allMatches(text)) {
-      set.add(match.group(0)!);
-    }
-    return set;
   }
 }

@@ -84,14 +84,9 @@ class LspSocketConfig extends LspConfig {
   }
 
   @override
-  Future<Map<String, dynamic>> sendResponse(
-    int id,
-    List<dynamic> result,
-  ) async {
-    final request = {'jsonrpc': '2.0', 'id': id, "result": result};
-
-    _channel.sink.add(jsonEncode(request));
-    return request;
+  Future<void> sendResponse(int id, List<dynamic> result) async {
+    final response = {'jsonrpc': '2.0', 'id': id, 'result': result};
+    _channel.sink.add(jsonEncode(response));
   }
 
   @override

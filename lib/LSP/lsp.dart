@@ -43,11 +43,20 @@ sealed class LspConfig {
   final StreamController<Map<String, dynamic>> _responseController =
       StreamController.broadcast();
   int _nextId = 1;
+
+  /// Tracks the number of outstanding (in-flight) LSP requests.
+  final ValueNotifier<int> outstandingRequests = ValueNotifier(0);
   final _openDocuments = <String, int>{};
+  final _openDocumentRefCounts = <String, int>{};
   List<String>? _serverTokenTypes, _serverTokenModifiers;
+  bool _serverSupportsIncrementalSync = false;
+  bool _serverSupportsSemanticTokensDelta = false;
+  bool _serverSupportsSemanticTokensRange = false;
+  final Map<String, _SemanticTokensCacheEntry> _semanticTokensCache = {};
   final Map<String, dynamic> _initOptions = {};
 
   bool isInitialized = false;
+  Future<void>? _initializeFuture;
 
   /// Stream of responses from the LSP server.
   /// Use this to listen for notifications like diagnostics.
@@ -61,6 +70,18 @@ sealed class LspConfig {
   /// Returns null if not yet initialized.
   List<String>? get serverTokenModifiers => _serverTokenModifiers;
 
+  /// True when the server supports incremental document syncing
+  /// (TextDocumentSyncKind.Incremental).
+  bool get serverSupportsIncrementalSync => _serverSupportsIncrementalSync;
+
+  /// True when the server supports semanticTokens/full/delta.
+  bool get serverSupportsSemanticTokensDelta =>
+      _serverSupportsSemanticTokensDelta;
+
+  /// True when the server supports semanticTokens/range.
+  bool get serverSupportsSemanticTokensRange =>
+      _serverSupportsSemanticTokensRange;
+
   LspConfig({
     required this.workspacePath,
     required this.languageId,
@@ -70,6 +91,8 @@ sealed class LspConfig {
     this.disableWarning = false,
     this.disableError = false,
   }) {
+    // Merge defaults + user-provided options (fixes upstream bug where
+    // initializationOptions was stored but never merged into _initOptions).
     _initOptions.addAll({
       "highlight": {'enabled': true},
       ...initializationOptions,
@@ -106,47 +129,83 @@ sealed class LspConfig {
   });
 
   /// Sends a response to a request from the LSP server.
-  /// This is used to reply to server-initiated requests.
-  Future<Map<String, dynamic>> sendResponse(int id, List<dynamic> result);
+  /// This is used to reply to server-initiated requests (e.g., workspace/configuration).
+  /// Fire-and-forget: responses do not receive replies in JSON-RPC.
+  Future<void> sendResponse(int id, List<dynamic> result);
 
   /// This method is used to initialize the LSP server.
   ///
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   /// It may crash the LSP server if called multiple times.
-  Future<void> initialize() async {
+  Future<void> initialize() {
+    if (isInitialized) return Future.value();
+    return _initializeFuture ??= _initializeImpl();
+  }
+
+  Future<void> _initializeImpl() async {
     final workspaceUri = Uri.directory(workspacePath).toString();
-    final response = await sendRequest(
-      method: 'initialize',
-      params: {
-        'processId': pid,
-        'rootUri': workspaceUri,
-        'workspaceFolders': [
-          {'uri': workspaceUri, 'name': 'workspace'},
-        ],
-        'initializationOptions': _initOptions,
-        'capabilities': _buildCapabilities(),
-      },
-    );
+    try {
+      final response = await sendRequest(
+        method: 'initialize',
+        params: {
+          'processId': pid,
+          'rootUri': workspaceUri,
+          'workspaceFolders': [
+            {'uri': workspaceUri, 'name': 'workspace'},
+          ],
+          'initializationOptions': _initOptions,
+          'capabilities': _buildCapabilities(),
+        },
+      );
 
-    if (response['error'] != null) {
-      isInitialized = false;
-      throw Exception('Initialization failed: ${response['error']}');
-    }
-
-    final capabilities = response['result']?['capabilities'];
-    final semanticTokensProvider = capabilities?['semanticTokensProvider'];
-    if (semanticTokensProvider != null) {
-      final legend = semanticTokensProvider['legend'];
-      if (legend != null) {
-        _serverTokenTypes = List<String>.from(legend['tokenTypes'] ?? []);
-        _serverTokenModifiers = List<String>.from(
-          legend['tokenModifiers'] ?? [],
-        );
+      if (response['error'] != null) {
+        isInitialized = false;
+        throw Exception('Initialization failed: ${response['error']}');
       }
-    }
 
-    await sendNotification(method: 'initialized', params: {});
-    isInitialized = true;
+      final capabilities = response['result']?['capabilities'];
+
+      // Server document sync capabilities:
+      // - number: TextDocumentSyncKind (0 none, 1 full, 2 incremental)
+      // - object: TextDocumentSyncOptions with a `change` field
+      final textDocumentSync = capabilities?['textDocumentSync'];
+      if (textDocumentSync is int) {
+        _serverSupportsIncrementalSync = textDocumentSync == 2;
+      } else if (textDocumentSync is Map) {
+        final change = textDocumentSync['change'];
+        if (change is int) {
+          _serverSupportsIncrementalSync = change == 2;
+        }
+      }
+
+      final semanticTokensProvider = capabilities?['semanticTokensProvider'];
+      if (semanticTokensProvider != null) {
+        final legend = semanticTokensProvider['legend'];
+        if (legend != null) {
+          _serverTokenTypes = List<String>.from(legend['tokenTypes'] ?? []);
+          _serverTokenModifiers = List<String>.from(
+            legend['tokenModifiers'] ?? [],
+          );
+        }
+
+        final range = semanticTokensProvider['range'];
+        _serverSupportsSemanticTokensRange = range == true || range is Map;
+
+        // semanticTokensProvider.full can be:
+        // - true
+        // - { delta: true }
+        final full = semanticTokensProvider['full'];
+        if (full is Map) {
+          _serverSupportsSemanticTokensDelta = full['delta'] == true;
+        }
+      }
+
+      await sendNotification(method: 'initialized', params: {});
+      isInitialized = true;
+    } finally {
+      // Allow retry if init fails.
+      _initializeFuture = null;
+    }
   }
 
   Map<String, dynamic> _buildCapabilities() {
@@ -239,11 +298,20 @@ sealed class LspConfig {
   ///
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   ///
+  /// If [content] is provided, it will be used as the document content.
   /// Otherwise, the content will be read from [filePath].
-  Future<void> openDocument(String filePath) async {
-    final version = (_openDocuments[filePath] ?? 0) + 1;
+  Future<void> openDocument(String filePath, {String? content}) async {
+    final nextRefCount = (_openDocumentRefCounts[filePath] ?? 0) + 1;
+    _openDocumentRefCounts[filePath] = nextRefCount;
+
+    // Avoid sending didOpen multiple times for the same URI. If multiple
+    // editors are viewing the same file, keep a ref-count and only send
+    // didClose when the last view is disposed.
+    if (nextRefCount > 1) return;
+
+    final version = 1;
     _openDocuments[filePath] = version;
-    final String text = await File(filePath).readAsString();
+    final String text = content ?? await File(filePath).readAsString();
     await sendNotification(
       method: 'textDocument/didOpen',
       params: {
@@ -255,17 +323,28 @@ sealed class LspConfig {
         },
       },
     );
-    await Future.delayed(Duration(milliseconds: 300));
   }
 
-  /// Updates the document content in the LSP server.
-  ///
-  /// Sends a 'didChange' notification to the LSP server with the new [content].
-  /// If the document is not open, this method does nothing.
-  Future<void> updateDocument(String filePath, String content) async {
+  Future<void> updateDocumentChanges(
+    String filePath,
+    List<Map<String, dynamic>> contentChanges, {
+    String? fullTextFallback,
+  }) async {
     if (!_openDocuments.containsKey(filePath)) {
-      return; // Apply language-specific overrides
+      return;
     }
+
+    // If the server doesn't support incremental sync, fall back to full sync.
+    if (!_serverSupportsIncrementalSync && fullTextFallback == null) {
+      throw StateError(
+        'Server does not support incremental sync; fullTextFallback is required.',
+      );
+    }
+    final effectiveChanges = _serverSupportsIncrementalSync
+        ? contentChanges
+        : [
+            {'text': fullTextFallback ?? ''},
+          ];
 
     final version = _openDocuments[filePath]! + 1;
     _openDocuments[filePath] = version;
@@ -277,11 +356,19 @@ sealed class LspConfig {
           'uri': Uri.file(filePath).toString(),
           'version': version,
         },
-        'contentChanges': [
-          {'text': content},
-        ],
+        'contentChanges': effectiveChanges,
       },
     );
+  }
+
+  /// Updates the document content in the LSP server.
+  ///
+  /// Sends a 'didChange' notification to the LSP server with the new [content].
+  /// If the document is not open, this method does nothing.
+  Future<void> updateDocument(String filePath, String content) async {
+    await updateDocumentChanges(filePath, [
+      {'text': content},
+    ], fullTextFallback: content);
   }
 
   /// Saves the document in the LSP server.
@@ -301,7 +388,18 @@ sealed class LspConfig {
   /// ///
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   Future<void> closeDocument(String filePath) async {
-    if (!_openDocuments.containsKey(filePath)) return;
+    final refCount = _openDocumentRefCounts[filePath];
+    if (refCount == null) return;
+
+    if (refCount > 1) {
+      _openDocumentRefCounts[filePath] = refCount - 1;
+      return;
+    }
+
+    if (!_openDocuments.containsKey(filePath)) {
+      _openDocumentRefCounts.remove(filePath);
+      return;
+    }
 
     await sendNotification(
       method: 'textDocument/didClose',
@@ -309,7 +407,9 @@ sealed class LspConfig {
         'textDocument': {'uri': Uri.file(filePath).toString()},
       },
     );
+    _openDocumentRefCounts.remove(filePath);
     _openDocuments.remove(filePath);
+    _semanticTokensCache.remove(filePath);
   }
 
   /// Shuts down the LSP server gracefully.
@@ -659,12 +759,26 @@ sealed class LspConfig {
     int character,
   ) async {
     if (!capabilities.goToDefinition) return {};
+    final locations = await getDefinitions(filePath, line, character);
+    return locations.isNotEmpty ? locations.first : {};
+  }
+
+  /// Gets all definition locations for a symbol at the specified position.
+  ///
+  /// LSP can return either `Location`, `Location[]`, or `LocationLink[]`.
+  /// This method normalizes the result into a list of `Location`-shaped maps:
+  /// `{ uri, range }`.
+  Future<List<Map<String, dynamic>>> getDefinitions(
+    String filePath,
+    int line,
+    int character,
+  ) async {
+    if (!capabilities.goToDefinition) return [];
     final response = await sendRequest(
       method: 'textDocument/definition',
       params: _commonParams(filePath, line, character),
     );
-    if (response['result'] == null) return {};
-    return response['result']?[0] ?? '';
+    return _normalizeLocationResult(response['result']);
   }
 
   /// Gets the declaration for a symbol at the specified position.
@@ -679,8 +793,8 @@ sealed class LspConfig {
       method: 'textDocument/declaration',
       params: _commonParams(filePath, line, character),
     );
-    if (response['result'] == null) return {};
-    return response['result']?[0] ?? '';
+    final locations = _normalizeLocationResult(response['result']);
+    return locations.isNotEmpty ? locations.first : {};
   }
 
   /// Jumps to the location where the data type of a symbol is defined.
@@ -695,8 +809,8 @@ sealed class LspConfig {
       method: 'textDocument/typeDefinition',
       params: _commonParams(filePath, line, character),
     );
-    if (response['result'] == null) return {};
-    return response['result']?[0] ?? '';
+    final locations = _normalizeLocationResult(response['result']);
+    return locations.isNotEmpty ? locations.first : {};
   }
 
   /// Gets the implementation locations for a symbol at the specified position.
@@ -713,9 +827,44 @@ sealed class LspConfig {
       params: _commonParams(filePath, line, character),
     );
 
-    final result = response['result'];
-    if (result == null || result.isEmpty) return {};
-    return result[0];
+    final locations = _normalizeLocationResult(response['result']);
+    return locations.isNotEmpty ? locations.first : {};
+  }
+
+  List<Map<String, dynamic>> _normalizeLocationResult(dynamic result) {
+    if (result == null) return const [];
+
+    final out = <Map<String, dynamic>>[];
+
+    void addOne(dynamic item) {
+      if (item is! Map) return;
+
+      // Location: { uri, range }
+      final uri = item['uri'];
+      final range = item['range'];
+      if (uri is String && range is Map) {
+        out.add({'uri': uri, 'range': range});
+        return;
+      }
+
+      // LocationLink: { targetUri, targetRange, targetSelectionRange? }
+      final targetUri = item['targetUri'];
+      final targetRange = item['targetSelectionRange'] ?? item['targetRange'];
+      if (targetUri is String && targetRange is Map) {
+        out.add({'uri': targetUri, 'range': targetRange});
+        return;
+      }
+    }
+
+    if (result is List) {
+      for (final item in result) {
+        addOne(item);
+      }
+      return out;
+    }
+
+    addOne(result);
+    return out;
   }
 
   /// Retrieves all symbols defined in the current document.
@@ -996,19 +1145,168 @@ sealed class LspConfig {
   /// Returns a list of [LspSemanticToken] objects representing syntax tokens for highlighting.
   Future<List<LspSemanticToken>> getSemanticTokensFull(String filePath) async {
     if (!capabilities.semanticHighlighting) return [];
+    final uri = Uri.file(filePath).toString();
+
+    if (_serverSupportsSemanticTokensDelta) {
+      final cached = _semanticTokensCache[filePath];
+      final previousResultId = cached?.resultId;
+      if (cached != null && previousResultId != null) {
+        try {
+          final deltaResponse = await sendRequest(
+            method: 'textDocument/semanticTokens/full/delta',
+            params: {
+              'textDocument': {'uri': uri},
+              'previousResultId': previousResultId,
+            },
+          );
+
+          final result = deltaResponse['result'];
+          if (result is Map) {
+            final resultId = result['resultId'] as String?;
+
+            // Servers may fall back to returning a full response.
+            final fullData = result['data'];
+            if (fullData is List) {
+              final data = List<int>.from(fullData);
+              _semanticTokensCache[filePath] = _SemanticTokensCacheEntry(
+                data: data,
+                resultId: resultId,
+              );
+              return _decodeSemanticTokens(data);
+            }
+
+            final edits = result['edits'];
+            if (edits is List) {
+              final data = List<int>.from(cached.data);
+              for (final e in edits) {
+                if (e is! Map) continue;
+                final start = e['start'];
+                final deleteCount = e['deleteCount'];
+                if (start is! int || deleteCount is! int) continue;
+
+                final int safeStart = start.clamp(0, data.length);
+                final int safeEnd = (start + deleteCount).clamp(
+                  safeStart,
+                  data.length,
+                );
+                if (safeEnd > safeStart) {
+                  data.removeRange(safeStart, safeEnd);
+                }
+
+                final insert = e['data'];
+                if (insert is List && insert.isNotEmpty) {
+                  data.insertAll(safeStart, List<int>.from(insert));
+                }
+              }
+
+              _semanticTokensCache[filePath] = _SemanticTokensCacheEntry(
+                data: data,
+                resultId: resultId,
+              );
+              return _decodeSemanticTokens(data);
+            }
+          }
+        } catch (_) {
+          // Fall back to full tokens below.
+        }
+      }
+    }
     final response = await sendRequest(
       method: 'textDocument/semanticTokens/full',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': uri},
       },
     );
 
-    final tokens = response['result']?['data'];
+    final result = response['result'];
+    if (result is! Map) return [];
+    final tokens = result['data'];
     if (tokens is! List) return [];
-    return _decodeSemanticTokens(tokens);
+
+    final data = List<int>.from(tokens);
+    _semanticTokensCache[filePath] = _SemanticTokensCacheEntry(
+      data: data,
+      resultId: result['resultId'] as String?,
+    );
+    return _decodeSemanticTokens(data);
   }
 
-  List<LspSemanticToken> _decodeSemanticTokens(List<dynamic> data) {
+  /// Gets semantic tokens for a specific range.
+  ///
+  /// The range is defined in LSP positions (0-based line and character).
+  /// Many servers support `semanticTokens/range` for faster, viewport-first
+  /// highlighting. If the server doesn't support range tokens, callers should
+  /// fall back to [getSemanticTokensFull].
+  Future<List<LspSemanticToken>> getSemanticTokensRange(
+    String filePath, {
+    required int startLine,
+    required int startCharacter,
+    required int endLine,
+    required int endCharacter,
+  }) async {
+    final uri = Uri.file(filePath).toString();
+
+    final response = await sendRequest(
+      method: 'textDocument/semanticTokens/range',
+      params: {
+        'textDocument': {'uri': uri},
+        'range': {
+          'start': {'line': startLine, 'character': startCharacter},
+          'end': {'line': endLine, 'character': endCharacter},
+        },
+      },
+    );
+
+    final result = response['result'];
+    if (result is! Map) return [];
+    final tokens = result['data'];
+    if (tokens is! List) return [];
+
+    final decoded = _decodeSemanticTokens(List<int>.from(tokens));
+    if (decoded.isEmpty) return decoded;
+
+    // LSP servers typically encode `semanticTokens/range` positions relative to
+    // the document (line 0 is the document's first line). Some servers encode
+    // positions relative to the requested range start. Detect and normalize.
+    if (startLine > 0) {
+      int minLine = decoded.first.line;
+      int maxLine = decoded.first.line;
+      for (final t in decoded) {
+        if (t.line < minLine) minLine = t.line;
+        if (t.line > maxLine) maxLine = t.line;
+      }
+
+      final expectedMinLine = startLine;
+      final expectedMaxLine = (endCharacter == 0 && endLine > startLine)
+          ? endLine - 1
+          : endLine;
+
+      if (minLine < expectedMinLine) {
+        final adjustedMinLine = minLine + startLine;
+        final adjustedMaxLine = maxLine + startLine;
+
+        if (adjustedMinLine >= expectedMinLine &&
+            adjustedMaxLine <= expectedMaxLine) {
+          return decoded
+              .map(
+                (t) => LspSemanticToken(
+                  line: t.line + startLine,
+                  start: t.start,
+                  length: t.length,
+                  typeIndex: t.typeIndex,
+                  modifierBitmask: t.modifierBitmask,
+                  tokenTypeName: t.tokenTypeName,
+                ),
+              )
+              .toList();
+        }
+      }
+    }
+
+    return decoded;
+  }
+
+  List<LspSemanticToken> _decodeSemanticTokens(List<int> data) {
     final result = <LspSemanticToken>[];
     int line = 0, start = 0;
 
@@ -1019,7 +1317,7 @@ sealed class LspConfig {
       final tokenType = data[i + 3];
       final tokenModifiers = data[i + 4];
 
-      line += deltaLine as int;
+      line += deltaLine;
       start = deltaLine == 0 ? start + deltaStart : deltaStart;
 
       String? tokenTypeName;
@@ -1041,6 +1339,13 @@ sealed class LspConfig {
 
     return result;
   }
+}
+
+class _SemanticTokensCacheEntry {
+  _SemanticTokensCacheEntry({required this.data, this.resultId});
+
+  final List<int> data;
+  final String? resultId;
 }
 
 enum CompletionItemType {
@@ -1107,7 +1412,7 @@ Map<CompletionItemType, Icon> completionItemIcons = {
   CompletionItemType.value_: Icon(Icons.numbers, color: Colors.grey),
   CompletionItemType.enum_: Icon(Icons.notes, color: const Color(0xffee9d28)),
   CompletionItemType.keyword: Icon(Icons.wysiwyg_rounded, color: Colors.grey),
-  CompletionItemType.snippet: Icon(Icons.rounded_corner, color: Colors.grey),
+  CompletionItemType.snippet: Icon(CustomIcons.snippet, color: Colors.grey),
   CompletionItemType.color: Icon(Icons.color_lens, color: Colors.grey),
   CompletionItemType.file: Icon(Icons.insert_drive_file, color: Colors.grey),
   CompletionItemType.reference: Icon(CustomIcons.reference, color: Colors.grey),
@@ -1144,6 +1449,7 @@ class CustomIcons {
   static const IconData event = IconData(0x900, fontFamily: 'Event');
   static const IconData operator = IconData(0x900, fontFamily: 'Operator');
   static const IconData parameter = IconData(0x900, fontFamily: 'Parameter');
+  static const IconData snippet = IconData(0x900, fontFamily: 'Snippet');
   static const IconData interface = IconData(0x900, fontFamily: 'Interface');
   static const IconData field = IconData(0x900, fontFamily: 'Field');
 
@@ -1159,6 +1465,7 @@ class CustomIcons {
       'Event': 'assets/icons/event.ttf',
       'Operator': 'assets/icons/operator.ttf',
       'Parameter': 'assets/icons/parameter.ttf',
+      'Snippet': 'assets/icons/snippet.ttf',
       'Interface': 'assets/icons/interface.ttf',
       'Field': 'assets/icons/field.ttf',
     };
