@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:re_highlight/styles/lightfair.dart';
 
 import '../LSP/lsp.dart';
+import 'commands.dart';
 import 'controller.dart';
 import 'find_controller.dart';
 import 'scroll.dart';
@@ -318,6 +319,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final UndoRedoController _undoRedoController;
   late final String? _filePath;
   late final FindController _findController;
+  @visibleForTesting
+  late final CodeForgeCommands commands;
   late final VoidCallback _semanticTokensListener;
   late final VoidCallback _controllerListener;
   late final bool _deleteFoldRangeOnDeletingFirstLine;
@@ -377,6 +380,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         widget.deleteFoldRangeOnDeletingFirstLine;
     _linkModifierPressed = _computeLinkModifierPressed();
     _controller.setUndoController(_undoRedoController);
+    commands = CodeForgeCommands(
+      controller: _controller,
+      undoRedoController: _undoRedoController,
+      readOnly: _readOnly,
+      textDirection: widget.textDirection,
+      onPostCommand: _commonKeyFunctions,
+    );
     _controller.deleteFoldRangeOnDeletingFirstLine =
         _deleteFoldRangeOnDeletingFirstLine;
 
@@ -384,6 +394,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _controller.readOnly = true;
     } else if (_controller.readOnly && !widget.readOnly) {
       _readOnly = true;
+      commands.readOnly = true;
     }
 
     if (widget._tabSize != _controller.tabSize) {
@@ -577,6 +588,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       if (_readOnly != _controller.readOnly) {
         setState(() {
           _readOnly = _controller.readOnly;
+          commands.readOnly = _readOnly;
         });
       }
 
@@ -953,11 +965,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    if (widget.textDirection == TextDirection.rtl) {
-      _controller.pressLetfArrowKey(isShiftPressed: withShift);
-    } else {
-      _moveSelectionRight(withShift);
-    }
+    commands.moveCursorRight(select: withShift);
   }
 
   void _handleArrowLeft(bool withShift) {
@@ -965,35 +973,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    if (widget.textDirection == TextDirection.rtl) {
-      _moveSelectionRight(withShift);
-    } else {
-      _controller.pressLetfArrowKey(isShiftPressed: withShift);
-    }
-  }
-
-  void _moveSelectionRight(bool withShift) {
-    final sel = _controller.selection;
-    final textLength = _controller.length;
-
-    int newOffset;
-    if (!withShift && sel.start != sel.end) {
-      newOffset = sel.end;
-    } else if (sel.extentOffset < textLength) {
-      newOffset = sel.extentOffset + 1;
-    } else {
-      newOffset = textLength;
-    }
-
-    if (withShift) {
-      _controller.setSelectionSilently(
-        TextSelection(baseOffset: sel.baseOffset, extentOffset: newOffset),
-      );
-    } else {
-      _controller.setSelectionSilently(
-        TextSelection.collapsed(offset: newOffset),
-      );
-    }
+    commands.moveCursorLeft(select: withShift);
   }
 
   void _handleHomeKey(bool withShift) {
@@ -1001,7 +981,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    _controller.pressHomeKey(isShiftPressed: withShift);
+    commands.moveHome(select: withShift);
   }
 
   void _handleEndKey(bool withShift) {
@@ -1009,7 +989,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    _controller.pressEndKey(isShiftPressed: withShift);
+    commands.moveEnd(select: withShift);
   }
 
   Widget _buildContextMenu() {
@@ -1247,295 +1227,23 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _resetCursorBlink();
   }
 
-  void _deleteWordBackward() {
-    if (_readOnly) return;
-    final selection = _controller.selection;
-    final text = _controller.text;
+  void _deleteWordBackward() => commands.deleteWordBackward();
 
-    if (!selection.isCollapsed) {
-      _controller.replaceRange(selection.start, selection.end, '');
-      return;
-    }
+  void _deleteWordForward() => commands.deleteWordForward();
 
-    int caret = selection.extentOffset;
-    if (caret <= 0) return;
+  void _moveWordLeft(bool withShift) =>
+      commands.moveWordLeft(select: withShift);
 
-    final prevChar = text[caret - 1];
-    if (prevChar == '\n') {
-      _controller.replaceRange(caret - 1, caret, '');
-      return;
-    }
+  void _moveWordRight(bool withShift) =>
+      commands.moveWordRight(select: withShift);
 
-    final before = text.substring(0, caret);
-    final lineStart = text.lastIndexOf('\n', caret - 1) + 1;
-    final lineText = before.substring(lineStart);
+  void _moveLineUp() => commands.moveLineUp();
 
-    final match = RegExp(r'(\w+|[^\w\s]+)\s*$').firstMatch(lineText);
-    int deleteFrom = caret;
-    if (match != null) {
-      deleteFrom = lineStart + match.start;
-    } else {
-      deleteFrom = caret - 1;
-    }
+  void _moveLineDown() => commands.moveLineDown();
 
-    _controller.replaceRange(deleteFrom, caret, '');
-  }
+  void _copyLineUp() => commands.copyLineUp();
 
-  void _deleteWordForward() {
-    if (_readOnly) return;
-    final selection = _controller.selection;
-    final text = _controller.text;
-
-    if (!selection.isCollapsed) {
-      _controller.replaceRange(selection.start, selection.end, '');
-      return;
-    }
-
-    int caret = selection.extentOffset;
-    if (caret >= text.length) return;
-
-    final after = text.substring(caret);
-    final match = RegExp(r'^(\s*\w+|\s*[^\w\s]+)').firstMatch(after);
-    int deleteTo = caret;
-    if (match != null) {
-      deleteTo = caret + match.end;
-    } else {
-      deleteTo = caret + 1;
-    }
-
-    _controller.replaceRange(caret, deleteTo, '');
-  }
-
-  void _moveWordLeft(bool withShift) {
-    final selection = _controller.selection;
-    final text = _controller.text;
-    int caret = selection.extentOffset;
-
-    if (caret <= 0) return;
-
-    final prevNewline = text.lastIndexOf('\n', caret - 1);
-    final lineStart = prevNewline == -1 ? 0 : prevNewline + 1;
-    if (caret == lineStart && lineStart > 0) {
-      final newOffset = lineStart - 1;
-      _controller.setSelectionSilently(
-        withShift
-            ? TextSelection(
-                baseOffset: selection.baseOffset,
-                extentOffset: newOffset,
-              )
-            : TextSelection.collapsed(offset: newOffset),
-      );
-      return;
-    }
-
-    final lineText = text.substring(lineStart, caret);
-    final wordMatches = RegExp(
-      '$_wordCharPattern+|[^$_wordCharPattern\\s]+',
-    ).allMatches(lineText).toList();
-
-    int newOffset = lineStart;
-    for (final match in wordMatches) {
-      if (match.end >= lineText.length) break;
-      newOffset = lineStart + match.start;
-    }
-
-    _controller.setSelectionSilently(
-      withShift
-          ? TextSelection(
-              baseOffset: selection.baseOffset,
-              extentOffset: newOffset,
-            )
-          : TextSelection.collapsed(offset: newOffset),
-    );
-  }
-
-  void _moveWordRight(bool withShift) {
-    final selection = _controller.selection;
-    final text = _controller.text;
-    int caret = selection.extentOffset;
-
-    if (caret >= text.length) return;
-
-    if (caret < text.length && text[caret] == '\n') {
-      final newOffset = caret + 1;
-      _controller.setSelectionSilently(
-        withShift
-            ? TextSelection(
-                baseOffset: selection.baseOffset,
-                extentOffset: newOffset,
-              )
-            : TextSelection.collapsed(offset: newOffset),
-      );
-      return;
-    }
-
-    final regex = RegExp('$_wordCharPattern+|[^$_wordCharPattern\\s]+|\\s+');
-    final matches = regex.allMatches(text, caret);
-
-    int newOffset = caret;
-    for (final match in matches) {
-      if (match.start > caret) {
-        newOffset = match.start;
-        break;
-      }
-    }
-    if (newOffset == caret) newOffset = text.length;
-
-    _controller.setSelectionSilently(
-      withShift
-          ? TextSelection(
-              baseOffset: selection.baseOffset,
-              extentOffset: newOffset,
-            )
-          : TextSelection.collapsed(offset: newOffset),
-    );
-  }
-
-  void _moveLineUp() {
-    if (widget.readOnly) return;
-    final selection = _controller.selection;
-    final text = _controller.text;
-    final selStart = selection.start;
-    final selEnd = selection.end;
-    final lineStart = selStart > 0
-        ? text.lastIndexOf('\n', selStart - 1) + 1
-        : 0;
-    int effectiveEnd = selEnd;
-    if (!selection.isCollapsed &&
-        effectiveEnd > selStart &&
-        effectiveEnd > 0 &&
-        text[effectiveEnd - 1] == '\n') {
-      effectiveEnd -= 1;
-    }
-    int lineEnd = text.indexOf('\n', effectiveEnd);
-    if (lineEnd == -1) lineEnd = text.length;
-    if (lineStart == 0) return;
-
-    final prevLineEnd = lineStart - 1;
-    final prevLineStart = text.lastIndexOf('\n', prevLineEnd - 1) + 1;
-    final prevLine = text.substring(prevLineStart, prevLineEnd);
-    final currentLines = text.substring(lineStart, lineEnd);
-
-    _controller.replaceRange(
-      prevLineStart,
-      lineEnd,
-      '$currentLines\n$prevLine',
-    );
-
-    final prevLineLen = prevLineEnd - prevLineStart;
-    final offsetDelta = prevLineLen + 1;
-    final newSelection = TextSelection(
-      baseOffset: selection.baseOffset - offsetDelta,
-      extentOffset: selection.extentOffset - offsetDelta,
-    );
-    _controller.setSelectionSilently(newSelection);
-  }
-
-  void _moveLineDown() {
-    if (widget.readOnly) return;
-    final selection = _controller.selection;
-    final text = _controller.text;
-    final selStart = selection.start;
-    final selEnd = selection.end;
-    final lineStart = text.lastIndexOf('\n', selStart - 1) + 1;
-    int effectiveEnd = selEnd;
-    if (!selection.isCollapsed &&
-        effectiveEnd > selStart &&
-        effectiveEnd > 0 &&
-        text[effectiveEnd - 1] == '\n') {
-      effectiveEnd -= 1;
-    }
-    int lineEnd = text.indexOf('\n', effectiveEnd);
-    if (lineEnd == -1) lineEnd = text.length;
-    final nextLineStart = lineEnd + 1;
-    if (nextLineStart >= text.length) return;
-    int nextLineEnd = text.indexOf('\n', nextLineStart);
-    if (nextLineEnd == -1) nextLineEnd = text.length;
-
-    final currentLines = text.substring(lineStart, lineEnd);
-    final nextLine = text.substring(nextLineStart, nextLineEnd);
-
-    _controller.replaceRange(
-      lineStart,
-      nextLineEnd,
-      '$nextLine\n$currentLines',
-    );
-
-    final offsetDelta = nextLine.length + 1;
-    final newSelection = TextSelection(
-      baseOffset: selection.baseOffset + offsetDelta,
-      extentOffset: selection.extentOffset + offsetDelta,
-    );
-    _controller.setSelectionSilently(newSelection);
-  }
-
-  void _copyLineUp() {
-    if (widget.readOnly) return;
-    final text = _controller.text;
-    final selection = _controller.selection;
-    final selStart = selection.start;
-    final selEnd = selection.end;
-
-    final lineStart = selStart > 0
-        ? text.lastIndexOf('\n', selStart - 1) + 1
-        : 0;
-
-    int effectiveEnd = selEnd;
-    if (!selection.isCollapsed &&
-        effectiveEnd > selStart &&
-        effectiveEnd > 0 &&
-        text[effectiveEnd - 1] == '\n') {
-      effectiveEnd -= 1;
-    }
-
-    int lineEnd = text.indexOf('\n', effectiveEnd);
-    if (lineEnd == -1) lineEnd = text.length;
-
-    final blockText = text.substring(lineStart, lineEnd);
-    _controller.replaceRange(lineStart, lineStart, '$blockText\n');
-
-    // Keep the selection on the duplicated block (above).
-    _controller.setSelectionSilently(
-      TextSelection(
-        baseOffset: selection.baseOffset,
-        extentOffset: selection.extentOffset,
-      ),
-    );
-  }
-
-  void _copyLineDown() {
-    if (widget.readOnly) return;
-    final text = _controller.text;
-    final selection = _controller.selection;
-    final selStart = selection.start;
-    final selEnd = selection.end;
-
-    final lineStart = selStart > 0
-        ? text.lastIndexOf('\n', selStart - 1) + 1
-        : 0;
-
-    int effectiveEnd = selEnd;
-    if (!selection.isCollapsed &&
-        effectiveEnd > selStart &&
-        effectiveEnd > 0 &&
-        text[effectiveEnd - 1] == '\n') {
-      effectiveEnd -= 1;
-    }
-
-    int lineEnd = text.indexOf('\n', effectiveEnd);
-    if (lineEnd == -1) lineEnd = text.length;
-
-    final blockText = text.substring(lineStart, lineEnd);
-    _controller.replaceRange(lineEnd, lineEnd, '\n$blockText');
-
-    final offsetDelta = blockText.length + 1;
-    _controller.setSelectionSilently(
-      TextSelection(
-        baseOffset: selection.baseOffset + offsetDelta,
-        extentOffset: selection.extentOffset + offsetDelta,
-      ),
-    );
-  }
+  void _copyLineDown() => commands.copyLineDown();
 
   @override
   Widget build(BuildContext context) {
@@ -1865,8 +1573,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       _isSignatureInvoked =
                                                           true;
                                                     });
-                                                    (() async => await _controller
-                                                        .callSignatureHelp())();
+                                                    commands
+                                                        .callSignatureHelp();
                                                     return KeyEventResult
                                                         .handled;
                                                   }
@@ -1877,14 +1585,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     switch (event.logicalKey) {
                                                       case LogicalKeyboardKey
                                                           .arrowUp:
-                                                        _controller
+                                                        commands
                                                             .insertCursorAbove();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowDown:
-                                                        _controller
+                                                        commands
                                                             .insertCursorBelow();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
@@ -1900,8 +1608,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       event.logicalKey ==
                                                           LogicalKeyboardKey
                                                               .keyL) {
-                                                    _controller
-                                                        .selectAllOccurrencesOfSelectionOrWord();
+                                                    commands
+                                                        .selectAllOccurrences();
                                                     _commonKeyFunctions();
                                                     return KeyEventResult
                                                         .handled;
@@ -1957,85 +1665,51 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         break;
                                                       case LogicalKeyboardKey
                                                           .keyC:
-                                                        _controller.copy();
+                                                        commands.copy();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyX:
-                                                        if (_readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
-                                                        _controller.cut();
+                                                        commands.cut();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyV:
-                                                        if (_readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
-                                                        _controller.paste();
+                                                        commands.paste();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyA:
-                                                        _controller.selectAll();
+                                                        commands.selectAll();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyD:
-                                                        if (_readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
-                                                        _controller
+                                                        commands
                                                             .addSelectionToNextFindMatch();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyU:
-                                                        _controller
-                                                            .cursorUndo();
+                                                        commands.cursorUndo();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyZ:
-                                                        if (_readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
                                                         if (isShiftPressed) {
-                                                          if (_undoRedoController
-                                                              .canRedo) {
-                                                            _undoRedoController
-                                                                .redo();
-                                                            _commonKeyFunctions();
-                                                          }
+                                                          commands.redo();
                                                         } else {
-                                                          if (_undoRedoController
-                                                              .canUndo) {
-                                                            _undoRedoController
-                                                                .undo();
-                                                            _commonKeyFunctions();
-                                                          }
+                                                          commands.undo();
                                                         }
+                                                        _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .keyY:
-                                                        if (_readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
-                                                        if (_undoRedoController
-                                                            .canRedo) {
-                                                          _undoRedoController
-                                                              .redo();
-                                                          _commonKeyFunctions();
-                                                        }
+                                                        commands.redo();
+                                                        _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
@@ -2045,7 +1719,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                               .handled;
                                                         }
                                                         if (!isMac) {
-                                                          _deleteWordBackward();
+                                                          commands
+                                                              .deleteWordBackward();
                                                           _commonKeyFunctions();
                                                           return KeyEventResult
                                                               .handled;
@@ -2058,7 +1733,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                               .handled;
                                                         }
                                                         if (!isMac) {
-                                                          _deleteWordForward();
+                                                          commands
+                                                              .deleteWordForward();
                                                           _commonKeyFunctions();
                                                           return KeyEventResult
                                                               .handled;
@@ -2067,12 +1743,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       case LogicalKeyboardKey
                                                           .arrowLeft:
                                                         if (isMac) {
-                                                          _controller.pressHomeKey(
-                                                            isShiftPressed:
+                                                          commands.moveHome(
+                                                            select:
                                                                 isShiftPressed,
                                                           );
                                                         } else {
-                                                          _moveWordLeft(false);
+                                                          commands
+                                                              .moveWordLeft();
                                                         }
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
@@ -2080,12 +1757,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       case LogicalKeyboardKey
                                                           .arrowRight:
                                                         if (isMac) {
-                                                          _controller.pressEndKey(
-                                                            isShiftPressed:
+                                                          commands.moveEnd(
+                                                            select:
                                                                 isShiftPressed,
                                                           );
                                                         } else {
-                                                          _moveWordRight(false);
+                                                          commands
+                                                              .moveWordRight();
                                                         }
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
@@ -2093,9 +1771,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       case LogicalKeyboardKey
                                                           .arrowUp:
                                                         if (isMac) {
-                                                          _controller
-                                                              .pressDocumentHomeKey(
-                                                                isShiftPressed:
+                                                          commands
+                                                              .moveDocumentHome(
+                                                                select:
                                                                     isShiftPressed,
                                                               );
                                                           _commonKeyFunctions();
@@ -2106,11 +1784,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       case LogicalKeyboardKey
                                                           .arrowDown:
                                                         if (isMac) {
-                                                          _controller
-                                                              .pressDocumentEnd(
-                                                                isShiftPressed:
-                                                                    isShiftPressed,
-                                                              );
+                                                          commands.moveDocumentEnd(
+                                                            select:
+                                                                isShiftPressed,
+                                                          );
                                                           _commonKeyFunctions();
                                                           return KeyEventResult
                                                               .handled;
@@ -2138,11 +1815,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     switch (event.logicalKey) {
                                                       case LogicalKeyboardKey
                                                           .tab:
-                                                        if (widget.readOnly) {
-                                                          return KeyEventResult
-                                                              .handled;
-                                                        }
-                                                        _controller.unindent();
+                                                        commands.unindent();
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
@@ -2160,38 +1833,32 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowUp:
-                                                        _controller
-                                                            .pressUpArrowKey(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
+                                                        commands.moveCursorUp(
+                                                          select: true,
+                                                        );
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .arrowDown:
-                                                        _controller
-                                                            .pressDownArrowKey(
-                                                              isShiftPressed:
-                                                                  isShiftPressed,
-                                                            );
+                                                        commands.moveCursorDown(
+                                                          select: true,
+                                                        );
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .home:
-                                                        _controller.pressHomeKey(
-                                                          isShiftPressed:
-                                                              isShiftPressed,
+                                                        commands.moveHome(
+                                                          select: true,
                                                         );
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
                                                             .handled;
                                                       case LogicalKeyboardKey
                                                           .end:
-                                                        _controller.pressEndKey(
-                                                          isShiftPressed:
-                                                              isShiftPressed,
+                                                        commands.moveEnd(
+                                                          select: true,
                                                         );
                                                         _commonKeyFunctions();
                                                         return KeyEventResult
@@ -2275,7 +1942,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .handled;
                                                       }
 
-                                                      _controller.backspace();
+                                                      commands.backspace();
 
                                                       if (_suggestionNotifier
                                                               .value !=
@@ -2294,7 +1961,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         return KeyEventResult
                                                             .handled;
                                                       }
-                                                      _controller.delete();
+                                                      commands.delete();
                                                       if (_suggestionNotifier
                                                               .value !=
                                                           null) {
@@ -2308,11 +1975,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
                                                     case LogicalKeyboardKey
                                                         .arrowDown:
-                                                      _controller
-                                                          .pressDownArrowKey(
-                                                            isShiftPressed:
-                                                                isShiftPressed,
-                                                          );
+                                                      commands.moveCursorDown(
+                                                        select: isShiftPressed,
+                                                      );
 
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
@@ -2320,11 +1985,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
                                                     case LogicalKeyboardKey
                                                         .arrowUp:
-                                                      _controller
-                                                          .pressUpArrowKey(
-                                                            isShiftPressed:
-                                                                isShiftPressed,
-                                                          );
+                                                      commands.moveCursorUp(
+                                                        select: isShiftPressed,
+                                                      );
 
                                                       _commonKeyFunctions();
                                                       return KeyEventResult
@@ -2416,7 +2079,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       } else if (_suggestionNotifier
                                                               .value ==
                                                           null) {
-                                                        _controller.indent();
+                                                        commands.indent();
                                                         _commonKeyFunctions();
                                                       }
                                                       return KeyEventResult
