@@ -4085,9 +4085,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final Future<void> Function(int offset)? onGoToDefinition;
   bool _linkModifierPressed = false;
   // Definition link system
-  String? _goToDefinitionWord;
   TextSelection? _goToDefinitionPosition;
   Timer? _definitionLinkTimer;
+  int? _definitionLinkWordStartOffset;
+  int _definitionLinkCacheDocVersion = -1;
+  final Map<int, bool> _definitionLinkCache = {};
+  static const Duration _definitionLinkDebounce = Duration(milliseconds: 30);
   int? _lastHoverOffset;
   // TextMate integration fields
   int? _lastRequestedSemanticStartLine, _lastRequestedSemanticEndLineExclusive;
@@ -4235,83 +4238,255 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   // --- Definition link system ---
 
   void _clearDefinitionLink() {
-    if (_goToDefinitionWord != null || _goToDefinitionPosition != null) {
-      _goToDefinitionWord = null;
-      _goToDefinitionPosition = null;
-      _definitionLinkTimer?.cancel();
-      markNeedsPaint();
-    }
+    _definitionLinkTimer?.cancel();
+    _definitionLinkTimer = null;
+    _definitionLinkWordStartOffset = null;
+    if (_goToDefinitionPosition == null) return;
+    _goToDefinitionPosition = null;
+    if (!attached) return;
+    markNeedsPaint();
+    scheduleMicrotask(() {
+      if (!attached) return;
+      RendererBinding.instance.mouseTracker.updateAllDevices();
+    });
   }
 
-  void _maybeUpdateDefinitionLinkForHoverOffset(int offset) {
-    _lastHoverOffset = offset;
-    if (!_linkModifierPressed) {
+  bool _isDefinitionLinkModifierActive() => _linkModifierPressed;
+
+  void _maybeUpdateDefinitionLinkForHoverOffset(int textOffset) {
+    _lastHoverOffset = textOffset;
+    if (isMobile ||
+        !_isDefinitionLinkModifierActive() ||
+        onGoToDefinition == null) {
       _clearDefinitionLink();
       return;
     }
-    final range = _wordRangeAtOffset(offset);
+
+    final lsp = controller.lspConfig;
+    final path = controller.openedFile ?? filePath;
+    if (lsp == null || path == null || path.isEmpty) {
+      _clearDefinitionLink();
+      return;
+    }
+
+    if (!_isOffsetOverWord(textOffset)) {
+      _clearDefinitionLink();
+      return;
+    }
+
+    final range = _wordRangeAtOffset(textOffset);
     if (range == null) {
       _clearDefinitionLink();
       return;
     }
-    final word = controller.text.substring(range.start, range.end);
-    if (word == _goToDefinitionWord && _goToDefinitionPosition == range) return;
-    _goToDefinitionWord = word;
-    _goToDefinitionPosition = range;
+    final wordStart = range.start;
+    final wordEnd = range.end;
+    if (wordEnd <= wordStart) {
+      _clearDefinitionLink();
+      return;
+    }
+
+    final docVersion = _syntaxHighlighter.documentVersion;
+    if (_definitionLinkCacheDocVersion != docVersion) {
+      _definitionLinkCacheDocVersion = docVersion;
+      _definitionLinkCache.clear();
+    }
+
+    final previousWordStart = _definitionLinkWordStartOffset;
+    _definitionLinkWordStartOffset = wordStart;
+
+    final cached = _definitionLinkCache[wordStart];
+    if (cached != null) {
+      if (cached) {
+        if (_goToDefinitionPosition?.start != wordStart ||
+            _goToDefinitionPosition?.end != wordEnd) {
+          _goToDefinitionPosition = range;
+          markNeedsPaint();
+          RendererBinding.instance.mouseTracker.updateAllDevices();
+        }
+      } else {
+        _clearDefinitionLink();
+      }
+      return;
+    }
+
+    if (_goToDefinitionPosition != null &&
+        _goToDefinitionPosition!.start != wordStart) {
+      _goToDefinitionPosition = null;
+      markNeedsPaint();
+      RendererBinding.instance.mouseTracker.updateAllDevices();
+    }
+
+    if (previousWordStart == wordStart && _definitionLinkTimer != null) {
+      return;
+    }
+
     _definitionLinkTimer?.cancel();
-    markNeedsPaint();
+    _definitionLinkTimer = Timer(_definitionLinkDebounce, () {
+      _definitionLinkTimer = null;
+      unawaited(
+        _resolveDefinitionLink(
+          wordStart: wordStart,
+          wordRange: range,
+          filePath: path,
+          lsp: lsp,
+          docVersion: docVersion,
+        ),
+      );
+    });
   }
 
   TextSelection? _wordRangeAtOffset(int offset) {
     final text = controller.text;
-    if (offset < 0 || offset >= text.length) return null;
-    final pattern = RegExp(r'\w+');
-    for (final match in pattern.allMatches(text)) {
-      if (offset >= match.start && offset < match.end) {
-        return TextSelection(baseOffset: match.start, extentOffset: match.end);
-      }
+    if (text.isEmpty || offset < 0 || offset >= text.length) return null;
+    if (!_isOffsetOverWord(offset)) return null;
+
+    int start = offset;
+    int end = offset;
+    while (start > 0 && !_isWordBoundary(text[start - 1])) {
+      start--;
     }
-    return null;
+    while (end < text.length && !_isWordBoundary(text[end])) {
+      end++;
+    }
+
+    return TextSelection(baseOffset: start, extentOffset: end);
   }
 
-  void _drawDefinitionLinkUnderline(Canvas canvas) {
-    if (!_linkModifierPressed) return;
+  Future<void> _resolveDefinitionLink({
+    required int wordStart,
+    required TextSelection wordRange,
+    required String filePath,
+    required LspConfig lsp,
+    required int docVersion,
+  }) async {
+    bool hasDefinition = false;
+    try {
+      try {
+        await controller.waitForLspSync().timeout(
+          const Duration(milliseconds: 25),
+        );
+      } catch (_) {
+        // Best-effort: definition-link preview should not block on LSP sync.
+      }
+      final line = controller.getLineAtOffset(wordStart);
+      final character = wordStart - controller.getLineStartOffset(line);
+      final locations = await lsp.getDefinitions(filePath, line, character);
+      hasDefinition = locations.isNotEmpty;
+    } catch (_) {
+      hasDefinition = false;
+    }
+
+    if (!attached) return;
+    if (docVersion != _syntaxHighlighter.documentVersion) return;
+
+    _definitionLinkCache[wordStart] = hasDefinition;
+
+    if (!_isDefinitionLinkModifierActive()) return;
+    if (_definitionLinkWordStartOffset != wordStart) return;
+
+    if (!hasDefinition) {
+      _clearDefinitionLink();
+      return;
+    }
+
+    _goToDefinitionPosition = wordRange;
+    markNeedsPaint();
+    RendererBinding.instance.mouseTracker.updateAllDevices();
+  }
+
+  void _drawDefinitionLinkUnderline(
+    Canvas canvas,
+    Offset offset,
+    int firstVisibleLine,
+    int lastVisibleLine,
+    double firstVisibleLineY,
+    bool hasActiveFolds,
+    Color textColor,
+  ) {
+    if (isMobile || !_isDefinitionLinkModifierActive()) return;
     final pos = _goToDefinitionPosition;
     if (pos == null) return;
     final text = controller.text;
     if (pos.start < 0 || pos.end > text.length) return;
-    final startLine = controller.getLineAtOffset(pos.start);
-    final startLineStart = controller.getLineStartOffset(startLine);
-    final charInLine = pos.start - startLineStart;
-    final endCharInLine = pos.end - startLineStart;
-    final lineIndex = startLine;
+    final lineIndex = controller.getLineAtOffset(pos.start);
+    if (lineIndex < firstVisibleLine || lineIndex > lastVisibleLine) return;
+    if (hasActiveFolds && _isLineFolded(lineIndex)) return;
 
-    final voffset = vscrollController.hasClients
-        ? vscrollController.offset
-        : 0.0;
-    final hoffset = hscrollController.hasClients
-        ? hscrollController.offset
-        : 0.0;
+    final lineStartOffset = controller.getLineStartOffset(lineIndex);
+    final lineText =
+        _lineTextCache[lineIndex] ?? controller.getLineText(lineIndex);
+    final startCol = (pos.start - lineStartOffset).clamp(0, lineText.length);
+    final endCol = (pos.end - lineStartOffset).clamp(startCol, lineText.length);
+    if (endCol <= startCol) return;
 
-    final hasActiveFolds = _hasActiveFolds;
-    final lineY = _getLineYOffset(lineIndex, hasActiveFolds) - voffset;
+    final contentWidth =
+        size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+    final paragraphWidth = lineWrap
+        ? _wrapWidth
+        : (isRTL ? max(contentWidth * 3, 10000.0) : null);
 
-    final para = _paragraphCache[lineIndex];
-    if (para == null) return;
+    ui.Paragraph para;
+    if (_paragraphCache.containsKey(lineIndex) && !isRTL) {
+      para = _paragraphCache[lineIndex]!;
+    } else {
+      para = _buildHighlightedParagraph(
+        lineIndex,
+        lineText,
+        width: paragraphWidth,
+      );
+      if (!isRTL) {
+        _paragraphCache[lineIndex] = para;
+      }
+    }
 
-    final boxes = para.getBoxesForRange(charInLine, endCharInLine);
+    final boxes = para.getBoxesForRange(startCol, endCol);
     if (boxes.isEmpty) return;
 
     final paint = Paint()
-      ..color = _editorTheme['root']?.color?.withAlpha(200) ?? Colors.blue
+      ..color = selectionStyle.cursorColor ?? textColor.withAlpha(200)
       ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
+    final lineY = _getLineYOffset(lineIndex, hasActiveFolds);
+    final visualYOffset = _getTotalVirtualOffset(lineIndex);
+    final colorBoxOffset = _getColorBoxOffsetForLine(lineIndex, startCol);
+    final baseY =
+        offset.dy +
+        (innerPadding?.top ?? 0) +
+        lineY +
+        visualYOffset -
+        vscrollController.offset;
+
     for (final box in boxes) {
-      final left = _gutterWidth + box.left - hoffset;
-      final right = _gutterWidth + box.right - hoffset;
-      final bottom = lineY + box.bottom;
-      canvas.drawLine(Offset(left, bottom), Offset(right, bottom), paint);
+      final double left;
+      final double right;
+      if (isRTL) {
+        left =
+            offset.dx +
+            size.width -
+            _gutterWidth -
+            (innerPadding?.right ?? 0) -
+            box.right +
+            (lineWrap ? 0 : _effectiveHScroll);
+        right =
+            offset.dx +
+            size.width -
+            _gutterWidth -
+            (innerPadding?.right ?? 0) -
+            box.left +
+            (lineWrap ? 0 : _effectiveHScroll);
+      } else {
+        final baseX =
+            offset.dx +
+            _gutterWidth +
+            (innerPadding?.left ?? 0) -
+            (lineWrap ? 0 : _effectiveHScroll);
+        left = baseX + box.left + colorBoxOffset;
+        right = baseX + box.right + colorBoxOffset;
+      }
+      final y = baseY + box.bottom - 1;
+      canvas.drawLine(Offset(left, y), Offset(right, y), paint);
     }
   }
 
@@ -4610,12 +4785,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineOffsetCache.clear();
       _caretInfoCache.clear();
       _lineIndentCache.clear();
+      _definitionLinkCache.clear();
+      _definitionLinkCacheDocVersion = currentDocVersion;
+      _goToDefinitionPosition = null;
+      _definitionLinkWordStartOffset = null;
+      _definitionLinkTimer?.cancel();
+      _definitionLinkTimer = null;
       // Reset TextMate prefetch tracking so the next paint cycle re-requests
       _lastRequestedTextMateStartLine = null;
       _lastRequestedTextMateEndLineExclusive = null;
       _lastRequestedTextMatePriorityStartLine = null;
       _lastRequestedTextMatePriorityEndLineExclusive = null;
-      _clearDefinitionLink();
     }
   }
 
@@ -7067,8 +7247,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       hasActiveFolds,
     );
 
-    _drawDefinitionLinkUnderline(canvas);
-
     // TextMate viewport prefetch
     _maybeRequestViewportSemanticTokens(firstVisibleLine, lastVisibleLine);
     _maybePrefetchViewportTextMateTokens(firstVisibleLine, lastVisibleLine);
@@ -7309,6 +7487,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         textColor,
       );
     }
+
+    _drawDefinitionLinkUnderline(
+      canvas,
+      offset,
+      firstVisibleLine,
+      lastVisibleLine,
+      firstVisibleLineY,
+      hasActiveFolds,
+      textColor,
+    );
 
     if (focusNode.hasFocus && caretBlinkController.value > 0.5) {
       final caretInfo = _getCaretInfo();
@@ -10618,6 +10806,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     controller.removeListener(_onControllerChange);
     controller.setScrollCallback(null);
     _syntaxHighlighter.dispose();
+    _definitionLinkTimer?.cancel();
     super.dispose();
   }
 
@@ -10701,15 +10890,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
 
       // Definition link click (Cmd/Ctrl+Click)
-      if (_linkModifierPressed &&
-          _goToDefinitionWord != null &&
-          onGoToDefinition != null) {
-        final pos = _goToDefinitionPosition;
-        if (pos != null) {
-          _clearDefinitionLink();
-          onGoToDefinition!(pos.start);
-          return;
-        }
+      final definitionLinkPosition = _goToDefinitionPosition;
+      if (_isDefinitionLinkModifierActive() &&
+          definitionLinkPosition != null &&
+          onGoToDefinition != null &&
+          textOffset >= definitionLinkPosition.start &&
+          textOffset < definitionLinkPosition.end) {
+        _clearDefinitionLink();
+        onGoToDefinition!(definitionLinkPosition.start);
+        return;
       }
 
       if (lspActionNotifier.value != null && _actionBulbRects.isNotEmpty) {
@@ -11062,8 +11251,24 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
     }
 
-    if (_linkModifierPressed && _goToDefinitionWord != null) {
-      return SystemMouseCursors.click;
+    final definitionLinkPosition = _goToDefinitionPosition;
+    if (_isDefinitionLinkModifierActive() &&
+        definitionLinkPosition != null &&
+        _currentPosition.dx >= _gutterWidth) {
+      final contentPosition = Offset(
+        _currentPosition.dx -
+            _gutterWidth -
+            (innerPadding?.left ?? 0) +
+            (lineWrap ? 0 : hscrollController.offset),
+        _currentPosition.dy -
+            (innerPadding?.top ?? 0) +
+            vscrollController.offset,
+      );
+      final textOffset = _getTextOffsetFromPosition(contentPosition);
+      if (textOffset >= definitionLinkPosition.start &&
+          textOffset < definitionLinkPosition.end) {
+        return SystemMouseCursors.click;
+      }
     }
 
     return SystemMouseCursors.text;
