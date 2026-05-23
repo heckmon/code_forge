@@ -1,0 +1,1 @@
+/home/runner/work/code_forge/code_forge/rust/target/release/libcode_forge.a: /home/runner/work/code_forge/code_forge/rust/src/api/editor.rs /home/runner/work/code_forge/code_forge/rust/src/api/mod.rs /home/runner/work/code_forge/code_forge/rust/src/api/rope.rs /home/runner/work/code_forge/code_forge/rust/src/frb_generated.rs /home/runner/work/code_forge/code_forge/rust/src/lib.rs

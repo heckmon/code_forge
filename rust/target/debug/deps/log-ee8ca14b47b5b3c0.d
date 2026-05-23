@@ -1,0 +1,13 @@
+/home/runner/work/code_forge/code_forge/rust/target/debug/deps/log-ee8ca14b47b5b3c0.d: /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/lib.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/macros.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/serde.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/mod.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/error.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/key.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/source.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/value.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/__private_api.rs
+
+/home/runner/work/code_forge/code_forge/rust/target/debug/deps/liblog-ee8ca14b47b5b3c0.rmeta: /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/lib.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/macros.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/serde.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/mod.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/error.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/key.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/source.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/value.rs /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/__private_api.rs
+
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/lib.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/macros.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/serde.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/mod.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/error.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/key.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/source.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/kv/value.rs:
+/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.20/src/__private_api.rs:
