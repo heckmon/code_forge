@@ -1,3 +1,7 @@
+## Unreleased
+
+- FIX: Added Flutter 3.44 compatibility for `TextInputClient.onFocusReceived`.
+
 ## 1.0.0
 
 <details>

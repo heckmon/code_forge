@@ -2737,6 +2737,10 @@ class CodeForgeController implements DeltaTextInputClient {
 
   @protected
   @override
+  bool onFocusReceived() => false;
+
+  @protected
+  @override
   void showToolbar() {}
 
   @protected
