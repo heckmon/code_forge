@@ -2385,7 +2385,15 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
-                                                        if (_undoRedoController
+                                                        // Ctrl+Shift+Z to redo
+                                                        if (isShiftPressed) {
+                                                          if (_undoRedoController
+                                                              .canRedo) {
+                                                            _undoRedoController
+                                                                .redo();
+                                                            _commonKeyFunctions();
+                                                          }
+                                                        } else if (_undoRedoController
                                                             .canUndo) {
                                                           _undoRedoController
                                                               .undo();
