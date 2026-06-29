@@ -351,51 +351,37 @@ class SyntaxHighlighter {
     _flattenGrammarSpan(grammarSpan, grammarSegments, baseTextStyle);
 
     final children = <TextSpan>[];
-    int currentPos = 0;
+    int currentPos = 0; // UTF‑16 index
 
-    for (final semantic in semanticSpans) {
-      final semanticStart = semantic.startChar.clamp(0, lineText.length);
-      final semanticEnd = semantic.endChar.clamp(0, lineText.length);
+    final utf16SemanticRanges = semanticSpans.map((span) {
+      final start = _scalarToUtf16Index(lineText, span.startChar).clamp(0, lineText.length);
+      final end = _scalarToUtf16Index(lineText, span.endChar).clamp(0, lineText.length);
+      return (start: start, end: end, style: span.style);
+    }).toList();
 
-      if (semanticStart > currentPos) {
-        _addGrammarSegments(
-          children,
-          grammarSegments,
-          currentPos,
-          semanticStart,
-          lineText,
-        );
+    for (final range in utf16SemanticRanges) {
+      if (range.start > currentPos) {
+        _addGrammarSegments(children, grammarSegments, currentPos, range.start, lineText);
       }
 
-      if (semanticStart < semanticEnd) {
-        final actualText = lineText.substring(semanticStart, semanticEnd);
-
-        final grammarStyle = _getStyleAtPosition(
-          grammarSegments,
-          semanticStart,
-        );
+      if (range.start < range.end) {
+        final actualText = lineText.substring(range.start, range.end);
+        final grammarStyle = _getStyleAtPosition(grammarSegments, range.start);
         final preserveGrammar =
-            _isStringOrCommentStyle(grammarStyle) ||
-            _hasMeaningfulGrammarStyle(grammarStyle);
+            _isStringOrCommentStyle(grammarStyle) || _hasMeaningfulGrammarStyle(grammarStyle);
 
         if (preserveGrammar) {
           children.add(TextSpan(text: actualText, style: grammarStyle));
         } else {
-          children.add(TextSpan(text: actualText, style: semantic.style));
+          children.add(TextSpan(text: actualText, style: range.style));
         }
       }
 
-      currentPos = semanticEnd;
+      currentPos = range.end;
     }
 
     if (currentPos < lineText.length) {
-      _addGrammarSegments(
-        children,
-        grammarSegments,
-        currentPos,
-        lineText.length,
-        lineText,
-      );
+      _addGrammarSegments(children, grammarSegments, currentPos, lineText.length, lineText);
     }
 
     if (children.isEmpty) {
@@ -407,6 +393,18 @@ class SyntaxHighlighter {
     }
 
     return TextSpan(style: baseTextStyle, children: children);
+  }
+
+  int _scalarToUtf16Index(String text, int scalarOffset) {
+    if (scalarOffset <= 0) return 0;
+    int utf16 = 0;
+    int scalar = 0;
+    for (final rune in text.runes) {
+      if (scalar >= scalarOffset) break;
+      utf16 += rune > 0xFFFF ? 2 : 1;
+      scalar++;
+    }
+    return utf16;
   }
 
   void _flattenGrammarSpan(

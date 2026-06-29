@@ -373,11 +373,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   List<LspSemanticToken>? _semanticTokens;
   List<Map<String, dynamic>> _extraText = [];
   int _sugSelIndex = 0, _actionSelIndex = 0;
-  String? _selectedSuggestionMd;
-  Timer? _hoverTimer;
-  Timer? _semanticTokenTimer;
-  Timer? _hoverRequestTimer;
-  String? _activeHoverKey;
+  String? _selectedSuggestionMd, _activeHoverKey;
+  Timer? _hoverTimer, _semanticTokenTimer, _hoverRequestTimer;
   ({String key, Map<String, int> lineChar})? _queuedHoverRequest;
 
   @override
@@ -2385,7 +2382,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                           return KeyEventResult
                                                               .handled;
                                                         }
-                                                        // Ctrl+Shift+Z to redo
                                                         if (isShiftPressed) {
                                                           if (_undoRedoController
                                                               .canRedo) {
@@ -5459,23 +5455,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (controller.imeCompositionChanged) {
       controller.imeCompositionChanged = false;
-      // The composing caret/anchor may have moved, so its cached geometry is
-      // stale.
       _caretInfoCache.clear();
       if (!_isFoldToggleInProgress) {
         _ensureCaretVisible();
       }
       if (controller.contentVersion == _lastProcessedContentVersion) {
-        // Pure overlay change (e.g. more pinyin letters); the document did not
-        // change, so just repaint the overlay.
         markNeedsPaint();
         return;
       }
-      // The composition also changed the document (a commit, or a selection
-      // replacement at composition start). Clear the lightweight repaint flags
-      // so neither the selectionOnly nor the bufferNeedsRepaint branch below
-      // swallows this change, and fall through to the content path, which
-      // refreshes caches, layout and highlighting for the edited line.
       controller.selectionOnly = false;
       controller.bufferNeedsRepaint = false;
     }
@@ -6503,9 +6490,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    final clampedCol = columnIndex.clamp(0, lineText.length);
-    double caretX = 0.0;
-    double caretYInLine = 0.0;
+    final utf16Col = CodeForgeController.scalarToStringIndex(lineText, columnIndex);
+    final clampedCol = utf16Col.clamp(0, lineText.length);
+    double caretX = 0.0, caretYInLine = 0.0;
 
     if (isRTL) {
       final paragraphOffset = lineWrap
@@ -6523,21 +6510,20 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           caretX = contentWidth;
         }
       } else if (clampedCol >= lineText.length) {
-        final boxes = para.getBoxesForRange(
-          lineText.length - 1,
-          lineText.length,
-        );
+        final boxes = para.getBoxesForRange(0, lineText.length);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.left + paragraphOffset;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.left + paragraphOffset;
+          caretYInLine = _rowTopForBox(lastBox);
         } else {
           caretX = paragraphOffset;
         }
       } else {
-        final boxes = para.getBoxesForRange(clampedCol - 1, clampedCol);
+        final boxes = para.getBoxesForRange(0, clampedCol);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.left + paragraphOffset;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.left + paragraphOffset;
+          caretYInLine = _rowTopForBox(lastBox);
         } else {
           caretX = contentWidth;
         }
@@ -6546,10 +6532,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       if (lineText.isEmpty) {
         caretX = 0;
       } else if (clampedCol > 0) {
-        final boxes = para.getBoxesForRange(clampedCol - 1, clampedCol);
+        final boxes = para.getBoxesForRange(0, clampedCol);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.right;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.right;
+          caretYInLine = _rowTopForBox(lastBox);
+        } else {
+          final fallback = para.getBoxesForRange(0, 1);
+          if (fallback.isNotEmpty) {
+            caretX = fallback.first.right;
+            caretYInLine = _rowTopForBox(fallback.first);
+          }
         }
       }
     }
@@ -6610,7 +6603,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    final clampedCol = columnIndex.clamp(0, lineText.length);
+    final utf16Col = CodeForgeController.scalarToUtf16Offset(lineText, columnIndex);
+    final clampedCol = utf16Col.clamp(0, lineText.length);
     double caretX = 0.0;
     double caretYInLine = 0.0;
 
@@ -6629,21 +6623,20 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           caretX = contentWidth;
         }
       } else if (clampedCol >= lineText.length) {
-        final boxes = para.getBoxesForRange(
-          lineText.length - 1,
-          lineText.length,
-        );
+        final boxes = para.getBoxesForRange(0, lineText.length);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.left + paragraphOffset;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.left + paragraphOffset;
+          caretYInLine = _rowTopForBox(lastBox);
         } else {
           caretX = paragraphOffset;
         }
       } else {
-        final boxes = para.getBoxesForRange(clampedCol - 1, clampedCol);
+        final boxes = para.getBoxesForRange(0, clampedCol);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.left + paragraphOffset;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.left + paragraphOffset;
+          caretYInLine = _rowTopForBox(lastBox);
         } else {
           caretX = contentWidth;
         }
@@ -6652,10 +6645,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       if (lineText.isEmpty) {
         caretX = 0;
       } else if (clampedCol > 0) {
-        final boxes = para.getBoxesForRange(clampedCol - 1, clampedCol);
+        final boxes = para.getBoxesForRange(0, clampedCol);
         if (boxes.isNotEmpty) {
-          caretX = boxes.first.right;
-          caretYInLine = _rowTopForBox(boxes.first);
+          final lastBox = boxes.last;
+          caretX = lastBox.right;
+          caretYInLine = _rowTopForBox(lastBox);
+        } else {
+          final fallback = para.getBoxesForRange(0, 1);
+          if (fallback.isNotEmpty) {
+            caretX = fallback.first.right;
+            caretYInLine = _rowTopForBox(fallback.first);
+          }
         }
       }
     }
@@ -6785,10 +6785,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final textPosition = para.getPositionForOffset(
       Offset(localX, localY.clamp(0, para.height)),
     );
-    final columnIndex = textPosition.offset.clamp(0, lineText.length);
+    final utf16Column = textPosition.offset.clamp(0, lineText.length);
+    final scalarColumn = CodeForgeController.utf16ToScalarOffset(lineText, utf16Column);
 
     final lineStartOffset = controller.getLineStartOffset(tappedLineIndex);
-    final absoluteOffset = lineStartOffset + columnIndex;
+    final absoluteOffset = lineStartOffset + scalarColumn;
 
     return absoluteOffset.clamp(0, controller.length);
   }
@@ -6883,9 +6884,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     double anchorX = 0;
     double rowTop = 0;
     if (lineText.isNotEmpty && clampedCol > 0) {
+      final utf16AnchorCol = CodeForgeController.scalarToUtf16Offset(lineText, anchorCol);
       final boxes = linePara.getBoxesForRange(
         0,
-        clampedCol,
+        utf16AnchorCol,
         boxHeightStyle: ui.BoxHeightStyle.max,
       );
       if (boxes.isNotEmpty) {
@@ -6934,8 +6936,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       double.infinity,
     );
 
-    // Cover the area the composing text + shifted remainder will occupy, then
-    // paint the composing text and the shifted remainder over it.
     canvas.drawRect(
       Rect.fromLTWH(
         screenX,
@@ -7753,9 +7753,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    // Composition overlay (CJK pinyin/kana, etc.). Painted on top of the line
-    // text; while it is active the document caret is hidden and the overlay
-    // draws its own (composing) caret.
     _drawImeComposition(canvas, offset, hasActiveFolds);
 
     if (focusNode.hasFocus &&
@@ -8885,7 +8882,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _paragraphCache[lineIndex] = para;
     }
 
-    final boxes = para.getBoxesForRange(columnIndex, columnIndex + 1);
+    final utf16Col = CodeForgeController.scalarToUtf16Offset(lineText, columnIndex);
+    final boxes = para.getBoxesForRange(utf16Col, utf16Col + 1);
     if (boxes.isEmpty) return;
 
     final box = boxes.first;
@@ -9010,12 +9008,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         }
 
         final boxKey = '$lineIndex-$lineStartChar-$lineEndChar';
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineStartChar);
+        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineEndChar);
         final boxes = _diagnosticPathCache.containsKey(boxKey)
             ? _diagnosticPathCache[boxKey] as List<ui.TextBox>
-            : para.getBoxesForRange(
-                lineStartChar.clamp(0, lineText.length),
-                lineEndChar.clamp(0, lineText.length),
-              );
+            : para.getBoxesForRange(utf16Start, utf16End);
         if (!_diagnosticPathCache.containsKey(boxKey)) {
           _diagnosticPathCache[boxKey] = boxes;
         }
@@ -9168,12 +9165,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
         if (lineText.isNotEmpty) {
           final boxKey = '$lineIndex-$lineSelStart-$lineSelEnd';
-          final boxes = _searchHighlightCache.containsKey(boxKey)
-              ? _searchHighlightCache[boxKey] as List<ui.TextBox>
-              : para.getBoxesForRange(
-                  lineSelStart.clamp(0, lineText.length),
-                  lineSelEnd.clamp(0, lineText.length),
-                );
+          final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineSelStart);
+          final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineSelEnd);
+          final boxes = para.getBoxesForRange(utf16Start, utf16End);
           if (!_searchHighlightCache.containsKey(boxKey)) {
             _searchHighlightCache[boxKey] = boxes;
           }
@@ -9337,10 +9331,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           : _gutterWidth + (innerPadding?.left ?? 0) - scroll;
 
       if (lineSelStart < lineSelEnd && lineText.isNotEmpty) {
-        final boxes = para.getBoxesForRange(
-          lineSelStart.clamp(0, lineText.length),
-          lineSelEnd.clamp(0, lineText.length),
-        );
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineSelStart);
+        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineSelEnd);
+        final boxes = para.getBoxesForRange(utf16Start, utf16End);
 
         for (int i = 0; i < boxes.length; i++) {
           final box = boxes[i];
@@ -9464,7 +9457,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           lineIndex,
           lineHighStart,
         );
-        final boxes = para.getBoxesForRange(lineHighStart, lineHighEnd);
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineHighStart);
+        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineHighEnd);
+        final boxes = para.getBoxesForRange(utf16Start, utf16End);
 
         final scroll = lineWrap ? 0.0 : _effectiveHScroll;
         final textX = isRTL
@@ -9534,7 +9529,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             startLineText,
             width: paragraphWidth,
           );
-      final clampedCol = startCol.clamp(0, startLineText.length);
+      final utf16Col = CodeForgeController.scalarToUtf16Offset(startLineText, startCol);
+      final clampedCol = utf16Col.clamp(0, startLineText.length);
       if (isRTL) {
         final pOffset = lineWrap ? 0.0 : (contentWidth - (paragraphWidth ?? 0));
         if (clampedCol == 0) {
@@ -9556,7 +9552,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         }
       } else {
         if (clampedCol > 0) {
-          final boxes = para.getBoxesForRange(0, clampedCol);
+          final boxes = para.getBoxesForRange(0, utf16Col);
           if (boxes.isNotEmpty) {
             startX = boxes.last.right;
             startYInLine = boxes.last.top;
@@ -9706,10 +9702,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             lineText,
             width: lineWrap ? _wrapWidth : null,
           );
-      final boxes = para.getBoxesForRange(
-        0,
-        cursorCol.clamp(0, lineText.length),
-      );
+      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+      final boxes = para.getBoxesForRange(0, utf16CursorCol);
       if (boxes.isNotEmpty) {
         cursorX = boxes.last.right;
         cursorYInLine = boxes.last.top;
@@ -9739,7 +9733,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final aiLines = _aiResponse?.split('\n') ?? [];
     final isSingleLineGhost = aiLines.length == 1;
-    final clampedCol = cursorCol.clamp(0, lineText.length);
+    final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+    final clampedCol = utf16CursorCol.clamp(0, lineText.length);
 
     if (isSingleLineGhost && aiLines.isNotEmpty && aiLines[0].isNotEmpty) {
       final ghostBuilder =
@@ -10250,10 +10245,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             lineText,
             width: lineWrap ? _wrapWidth : null,
           );
-      final boxes = para.getBoxesForRange(
-        0,
-        cursorCol.clamp(0, lineText.length),
-      );
+      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+      final boxes = para.getBoxesForRange(0, utf16CursorCol);
       if (boxes.isNotEmpty) {
         cursorX = boxes.last.right;
         cursorYInLine = boxes.last.top;
@@ -10884,10 +10877,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final firstColor = lineColors.first;
       double firstColorX = 0;
       if (firstColor.startColumn > 0 && lineText.isNotEmpty) {
-        final boxes = para.getBoxesForRange(
-          0,
-          firstColor.startColumn.clamp(0, lineText.length),
-        );
+        final utf16Column = CodeForgeController.scalarToUtf16Offset(lineText, firstColor.startColumn);
+        final boxes = para.getBoxesForRange(0, utf16Column);
         if (boxes.isNotEmpty) {
           firstColorX = boxes.last.right;
         }

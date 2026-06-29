@@ -34,3 +34,6 @@ migrate_working_dir/
 /example/lib/big_code.dart
 example/build
 rust/target
+macos/Flutter/ephemeral/flutter_export_environment.sh
+linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux
+macos/Flutter/ephemeral/Flutter-Generated.xcconfig
