@@ -774,7 +774,7 @@ CodeForge supports a variety of keyboard shortcuts for efficient editing:
 
  - [ROXUM IDE](https://github.com/heckmon/roxum-ide) - A minimal and powerful IDE/Code editor for Android.
 
-  ##### *Want to show your app here? Create discussion in [this](https://github.com/heckmon/code_forge/discussions/categories/used-by) thread with your app details.*
+  ##### *Want to show your app here? Create a discussion in [this](https://github.com/heckmon/code_forge/discussions/categories/used-by) thread with your app details.*
 ---
 
 ## 📄 License
