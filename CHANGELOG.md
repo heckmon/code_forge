@@ -440,3 +440,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - FIX: [#82](https://github.com/heckmon/code_forge/issues/82)
   - FIX: Gutter mismatch.
   - FEATURE: Exposed vertical scroll physics.
+
+## 10.7.0
+  - FIX: Emoji crash
+  - FIX: LSP hover infinite waiting.

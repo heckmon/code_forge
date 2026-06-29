@@ -48,10 +48,9 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.6.0:
-  - FIX: [#82](https://github.com/heckmon/code_forge/issues/82)
-  - FIX: Gutter mismatch.
-  - FEATURE: Exposed vertical scroll physics.
+## What's new in 10.7.0:
+  - FIX: Emoji crash
+  - FIX: LSP hover infinite waiting.
 
 
 > [!NOTE]
@@ -134,7 +133,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.6.0
+  code_forge: ^10.7.0
 ```
 - 3 . Then run:
 
@@ -775,6 +774,7 @@ CodeForge supports a variety of keyboard shortcuts for efficient editing:
 
  - [ROXUM IDE](https://github.com/heckmon/roxum-ide) - A minimal and powerful IDE/Code editor for Android.
 
+  ##### *Want to show your app here? Create discussion in [this](https://github.com/heckmon/code_forge/discussions/categories/used-by) thread with your app details.*
 ---
 
 ## 📄 License

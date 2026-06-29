@@ -361,7 +361,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
-  final Map<String, Map<String, dynamic>> _hoverCache = {};
   final _isMac = Platform.isMacOS;
   final GlobalKey _codeFieldKey = GlobalKey();
   TextInputConnection? _connection;
@@ -373,7 +372,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   List<LspSemanticToken>? _semanticTokens;
   List<Map<String, dynamic>> _extraText = [];
   int _sugSelIndex = 0, _actionSelIndex = 0;
-  String? _selectedSuggestionMd, _activeHoverKey;
+  String? _selectedSuggestionMd;
   Timer? _hoverTimer, _semanticTokenTimer, _hoverRequestTimer;
   ({String key, Map<String, int> lineChar})? _queuedHoverRequest;
 
@@ -926,20 +925,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     final character = lineChar['character']!;
     final cacheKey = '$line:$character';
 
-    if (_activeHoverKey == cacheKey) {
-      return;
-    }
-
     if (_queuedHoverRequest != null && _queuedHoverRequest!.key == cacheKey) {
       return;
     }
 
-    if (_activeHoverKey != null) {
-      _queuedHoverRequest = (key: cacheKey, lineChar: lineChar);
-      return;
-    }
-
-    _activeHoverKey = cacheKey;
     _hoverRequestTimer?.cancel();
     _hoverRequestTimer = Timer(Duration.zero, () {
       unawaited(_fetchHoverContent(lineChar, cacheKey));
@@ -952,15 +941,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   ) async {
     final line = lineChar['line']!;
     final character = lineChar['character']!;
-
-    if (_hoverCache.containsKey(cacheKey)) {
-      if (_hoverNotifier.value != null &&
-          _hoverNotifier.value!.$2['line'] == line &&
-          _hoverNotifier.value!.$2['character'] == character) {
-        _hoverContentNotifier.value = _hoverCache[cacheKey];
-      }
-      return;
-    }
 
     try {
       String diagnosticMessage = '';
@@ -1001,13 +981,22 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         );
       }
 
+      if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
+        _hoverNotifier.value = null;
+        _hoverContentNotifier.value = null;
+        final pendingHover = _queuedHoverRequest;
+        _queuedHoverRequest = null;
+        if (pendingHover != null && mounted) {
+          _requestHoverContent(pendingHover.lineChar);
+        }
+        return;
+      }
+
       final result = {
         'diagnostic': diagnosticMessage,
         'severity': severity,
         'hover': hoverMessage,
       };
-
-      _hoverCache[cacheKey] = result;
 
       if (_hoverNotifier.value != null &&
           _hoverNotifier.value!.$2['line'] == line &&
@@ -1015,7 +1004,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         _hoverContentNotifier.value = result;
       }
 
-      _activeHoverKey = null;
       final pendingHover = _queuedHoverRequest;
       _queuedHoverRequest = null;
       if (pendingHover != null && mounted) {
@@ -1024,7 +1012,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     } catch (e) {
       debugPrint('Error fetching hover content: $e');
       _hoverContentNotifier.value = {};
-      _activeHoverKey = null;
       final pendingHover = _queuedHoverRequest;
       _queuedHoverRequest = null;
       if (pendingHover != null && mounted) {
@@ -6490,7 +6477,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    final utf16Col = CodeForgeController.scalarToStringIndex(lineText, columnIndex);
+    final utf16Col = CodeForgeController.scalarToStringIndex(
+      lineText,
+      columnIndex,
+    );
     final clampedCol = utf16Col.clamp(0, lineText.length);
     double caretX = 0.0, caretYInLine = 0.0;
 
@@ -6603,7 +6593,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    final utf16Col = CodeForgeController.scalarToUtf16Offset(lineText, columnIndex);
+    final utf16Col = CodeForgeController.scalarToUtf16Offset(
+      lineText,
+      columnIndex,
+    );
     final clampedCol = utf16Col.clamp(0, lineText.length);
     double caretX = 0.0;
     double caretYInLine = 0.0;
@@ -6786,7 +6779,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       Offset(localX, localY.clamp(0, para.height)),
     );
     final utf16Column = textPosition.offset.clamp(0, lineText.length);
-    final scalarColumn = CodeForgeController.utf16ToScalarOffset(lineText, utf16Column);
+    final scalarColumn = CodeForgeController.utf16ToScalarOffset(
+      lineText,
+      utf16Column,
+    );
 
     final lineStartOffset = controller.getLineStartOffset(tappedLineIndex);
     final absoluteOffset = lineStartOffset + scalarColumn;
@@ -6884,7 +6880,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     double anchorX = 0;
     double rowTop = 0;
     if (lineText.isNotEmpty && clampedCol > 0) {
-      final utf16AnchorCol = CodeForgeController.scalarToUtf16Offset(lineText, anchorCol);
+      final utf16AnchorCol = CodeForgeController.scalarToUtf16Offset(
+        lineText,
+        anchorCol,
+      );
       final boxes = linePara.getBoxesForRange(
         0,
         utf16AnchorCol,
@@ -8882,7 +8881,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _paragraphCache[lineIndex] = para;
     }
 
-    final utf16Col = CodeForgeController.scalarToUtf16Offset(lineText, columnIndex);
+    final utf16Col = CodeForgeController.scalarToUtf16Offset(
+      lineText,
+      columnIndex,
+    );
     final boxes = para.getBoxesForRange(utf16Col, utf16Col + 1);
     if (boxes.isEmpty) return;
 
@@ -9008,8 +9010,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         }
 
         final boxKey = '$lineIndex-$lineStartChar-$lineEndChar';
-        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineStartChar);
-        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineEndChar);
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineStartChar,
+        );
+        final utf16End = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineEndChar,
+        );
         final boxes = _diagnosticPathCache.containsKey(boxKey)
             ? _diagnosticPathCache[boxKey] as List<ui.TextBox>
             : para.getBoxesForRange(utf16Start, utf16End);
@@ -9165,8 +9173,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
         if (lineText.isNotEmpty) {
           final boxKey = '$lineIndex-$lineSelStart-$lineSelEnd';
-          final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineSelStart);
-          final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineSelEnd);
+          final utf16Start = CodeForgeController.scalarToUtf16Offset(
+            lineText,
+            lineSelStart,
+          );
+          final utf16End = CodeForgeController.scalarToUtf16Offset(
+            lineText,
+            lineSelEnd,
+          );
           final boxes = para.getBoxesForRange(utf16Start, utf16End);
           if (!_searchHighlightCache.containsKey(boxKey)) {
             _searchHighlightCache[boxKey] = boxes;
@@ -9331,8 +9345,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           : _gutterWidth + (innerPadding?.left ?? 0) - scroll;
 
       if (lineSelStart < lineSelEnd && lineText.isNotEmpty) {
-        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineSelStart);
-        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineSelEnd);
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineSelStart,
+        );
+        final utf16End = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineSelEnd,
+        );
         final boxes = para.getBoxesForRange(utf16Start, utf16End);
 
         for (int i = 0; i < boxes.length; i++) {
@@ -9457,8 +9477,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           lineIndex,
           lineHighStart,
         );
-        final utf16Start = CodeForgeController.scalarToUtf16Offset(lineText, lineHighStart);
-        final utf16End = CodeForgeController.scalarToUtf16Offset(lineText, lineHighEnd);
+        final utf16Start = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineHighStart,
+        );
+        final utf16End = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          lineHighEnd,
+        );
         final boxes = para.getBoxesForRange(utf16Start, utf16End);
 
         final scroll = lineWrap ? 0.0 : _effectiveHScroll;
@@ -9529,7 +9555,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             startLineText,
             width: paragraphWidth,
           );
-      final utf16Col = CodeForgeController.scalarToUtf16Offset(startLineText, startCol);
+      final utf16Col = CodeForgeController.scalarToUtf16Offset(
+        startLineText,
+        startCol,
+      );
       final clampedCol = utf16Col.clamp(0, startLineText.length);
       if (isRTL) {
         final pOffset = lineWrap ? 0.0 : (contentWidth - (paragraphWidth ?? 0));
@@ -9702,7 +9731,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             lineText,
             width: lineWrap ? _wrapWidth : null,
           );
-      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(
+        lineText,
+        cursorCol,
+      );
       final boxes = para.getBoxesForRange(0, utf16CursorCol);
       if (boxes.isNotEmpty) {
         cursorX = boxes.last.right;
@@ -9733,7 +9765,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final aiLines = _aiResponse?.split('\n') ?? [];
     final isSingleLineGhost = aiLines.length == 1;
-    final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+    final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(
+      lineText,
+      cursorCol,
+    );
     final clampedCol = utf16CursorCol.clamp(0, lineText.length);
 
     if (isSingleLineGhost && aiLines.isNotEmpty && aiLines[0].isNotEmpty) {
@@ -10245,7 +10280,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             lineText,
             width: lineWrap ? _wrapWidth : null,
           );
-      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(lineText, cursorCol);
+      final utf16CursorCol = CodeForgeController.scalarToUtf16Offset(
+        lineText,
+        cursorCol,
+      );
       final boxes = para.getBoxesForRange(0, utf16CursorCol);
       if (boxes.isNotEmpty) {
         cursorX = boxes.last.right;
@@ -10877,7 +10915,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final firstColor = lineColors.first;
       double firstColorX = 0;
       if (firstColor.startColumn > 0 && lineText.isNotEmpty) {
-        final utf16Column = CodeForgeController.scalarToUtf16Offset(lineText, firstColor.startColumn);
+        final utf16Column = CodeForgeController.scalarToUtf16Offset(
+          lineText,
+          firstColor.startColumn,
+        );
         final boxes = para.getBoxesForRange(0, utf16Column);
         if (boxes.isNotEmpty) {
           firstColorX = boxes.last.right;
@@ -11177,7 +11218,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       if ((hoverNotifier.value == null || !isHoveringPopup.value) &&
           _isOffsetOverWord(textOffset)) {
         _hoverTimer?.cancel();
-        _hoverTimer = Timer(Duration(milliseconds: 1500), () {
+        _hoverTimer = Timer(Duration(milliseconds: 600), () {
           final lineChar = _offsetToLineChar(textOffset);
           hoverNotifier.value = (event.localPosition, lineChar);
         });

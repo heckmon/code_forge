@@ -354,21 +354,34 @@ class SyntaxHighlighter {
     int currentPos = 0; // UTF‑16 index
 
     final utf16SemanticRanges = semanticSpans.map((span) {
-      final start = _scalarToUtf16Index(lineText, span.startChar).clamp(0, lineText.length);
-      final end = _scalarToUtf16Index(lineText, span.endChar).clamp(0, lineText.length);
+      final start = _scalarToUtf16Index(
+        lineText,
+        span.startChar,
+      ).clamp(0, lineText.length);
+      final end = _scalarToUtf16Index(
+        lineText,
+        span.endChar,
+      ).clamp(0, lineText.length);
       return (start: start, end: end, style: span.style);
     }).toList();
 
     for (final range in utf16SemanticRanges) {
       if (range.start > currentPos) {
-        _addGrammarSegments(children, grammarSegments, currentPos, range.start, lineText);
+        _addGrammarSegments(
+          children,
+          grammarSegments,
+          currentPos,
+          range.start,
+          lineText,
+        );
       }
 
       if (range.start < range.end) {
         final actualText = lineText.substring(range.start, range.end);
         final grammarStyle = _getStyleAtPosition(grammarSegments, range.start);
         final preserveGrammar =
-            _isStringOrCommentStyle(grammarStyle) || _hasMeaningfulGrammarStyle(grammarStyle);
+            _isStringOrCommentStyle(grammarStyle) ||
+            _hasMeaningfulGrammarStyle(grammarStyle);
 
         if (preserveGrammar) {
           children.add(TextSpan(text: actualText, style: grammarStyle));
@@ -381,7 +394,13 @@ class SyntaxHighlighter {
     }
 
     if (currentPos < lineText.length) {
-      _addGrammarSegments(children, grammarSegments, currentPos, lineText.length, lineText);
+      _addGrammarSegments(
+        children,
+        grammarSegments,
+        currentPos,
+        lineText.length,
+        lineText,
+      );
     }
 
     if (children.isEmpty) {
