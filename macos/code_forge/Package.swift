@@ -6,11 +6,11 @@ let package = Package(
     platforms: [
         .macOS("10.11")
     ],
-    dependencies: [
-        .package(name: "FlutterFramework", path: "../FlutterFramework")
-    ],
     products: [
         .library(name: "code-forge", targets: ["code_forge"]),
+    ],
+    dependencies: [
+        .package(name: "FlutterFramework", path: "../FlutterFramework")
     ],
     targets: [
         .target(

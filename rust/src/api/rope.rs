@@ -78,11 +78,6 @@ impl RopeBridge {
             rope_write.insert(safe_start, &replacement);
         }
 
-        // The selection is expressed in character offsets (the rope indexes by
-        // char), so advance by the replacement's character count, not its UTF-8
-        // byte length -- otherwise multi-byte text (e.g. CJK) over-advances the
-        // caret by (bytes - chars), which is what corrupts the cursor restored
-        // by redo after committing CJK input.
         let replacement_chars = replacement.chars().count();
         let new_selection = if preserve_old_cursor {
             let delta = replacement_chars as isize - (safe_end - safe_start) as isize;

@@ -444,3 +444,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 10.7.0
   - FIX: Emoji crash
   - FIX: LSP hover infinite waiting.
+
+## 10.7.1
+  - FIX: [#87](https://github.com/heckmon/code_forge/issues/87)
