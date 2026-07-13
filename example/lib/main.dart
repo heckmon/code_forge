@@ -116,7 +116,9 @@ class _MyAppState extends State<MyApp> {
                       language: langDart,
                       editorTheme: githubDarkTheme,
                       controller: codeController,
-                      textStyle: GoogleFonts.jetBrainsMono(),
+                      textStyle: GoogleFonts.jetBrainsMono(
+                        textStyle: const TextStyle(fontFamily: 'monospace'),
+                      ),
                       initialText: exampleText,
                       tabSize: 4,
                       matchHighlightStyle: const MatchHighlightStyle(
