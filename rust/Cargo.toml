@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-flutter_rust_bridge = "=2.12.0"
+flutter_rust_bridge = "=2.13.0-beta.5"
 ropey = "1.6.1"
 zed-sum-tree = "0.2.0"
 unicode-bidi = "0.3.18"
