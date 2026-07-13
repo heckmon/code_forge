@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "code_forge",
     platforms: [
-        .macOS("10.11")
+        .macOS("10.15")
     ],
     products: [
         .library(name: "code-forge", targets: ["code_forge"]),
@@ -18,7 +18,8 @@ let package = Package(
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework")
             ],
-            path: "Sources/code_forge"
+            path: "Sources/code_forge",
+            publicHeadersPath: "include"
         )
     ]
 )
