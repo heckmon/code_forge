@@ -49,6 +49,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.2"
+  code_assets:
+    dependency: transitive
+    description:
+      name: code_assets
+      sha256: bf394f466ba9205f1812a0433b392d6af280f155f56651eda7c18cc32ed493b8
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.1"
   code_forge:
     dependency: "direct main"
     description:
@@ -142,10 +150,18 @@ packages:
     dependency: transitive
     description:
       name: flutter_rust_bridge
-      sha256: e87d6b9ee934dcd24a128ccb2bd91905d2d5fe5c06245d6a8f5477d4907a437a
+      sha256: d9d819e3f39efe08a68309ff7cadc9d8bcfd65d86319e0c5735cd4f4fee16c4a
       url: "https://pub.dev"
     source: hosted
-    version: "2.12.0"
+    version: "2.13.0-beta.5"
+  flutter_rust_bridge_hooks:
+    dependency: transitive
+    description:
+      name: flutter_rust_bridge_hooks
+      sha256: "33f96e930af9016405f519696574f6fcb96ec37a515188d1da484fa81f9a90f7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.13.0-beta.5"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -177,6 +193,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.0"
+  hooks:
+    dependency: transitive
+    description:
+      name: hooks
+      sha256: "9a62a50b50b769a737bc0a8ff381f333529df3ab746b2f6b02e83760231455ba"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.2"
   http:
     dependency: transitive
     description:
@@ -230,6 +254,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
+  logging:
+    dependency: transitive
+    description:
+      name: logging
+      sha256: c8245ada5f1717ed44271ed1c26b8ce85ca3228fd2ffdb75468ab01979309d61
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.3.0"
   markdown:
     dependency: transitive
     description:
@@ -270,6 +302,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  native_toolchain_rust:
+    dependency: transitive
+    description:
+      name: native_toolchain_rust
+      sha256: faa57d2258a3b0fd2a634054f54e4496c9fcbd971977e7d2b7e6916d56892857
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.4+0"
   path:
     dependency: "direct main"
     description:
@@ -326,6 +366,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  petitparser:
+    dependency: transitive
+    description:
+      name: petitparser
+      sha256: "91bd59303e9f769f108f8df05e371341b15d59e995e6806aefab827b58336675"
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.0.2"
   platform:
     dependency: transitive
     description:
@@ -350,6 +398,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.0.5"
+  pub_semver:
+    dependency: transitive
+    description:
+      name: pub_semver
+      sha256: "5bfcf68ca79ef689f8990d1160781b4bad40a3bd5e5218ad4076ddb7f4081585"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
   re_highlight:
     dependency: "direct main"
     description:
@@ -358,6 +414,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.0.3"
+  record_use:
+    dependency: transitive
+    description:
+      name: record_use
+      sha256: "2551bd8eecfe95d14ae75f6021ad0248be5c27f138c2ec12fcb52b500b3ba1ed"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.0"
   scroll_to_index:
     dependency: transitive
     description:
@@ -427,6 +491,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
+  toml:
+    dependency: transitive
+    description:
+      name: toml
+      sha256: "35a35f782228656a2af31e8c73d1353cc4ef3d683fd68af1111b44631879c05e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.18.0"
   typed_data:
     dependency: transitive
     description:
@@ -563,6 +635,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
+  yaml:
+    dependency: transitive
+    description:
+      name: yaml
+      sha256: b9da305ac7c39faa3f030eccd175340f968459dae4af175130b3fc47e40d76ce
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.3"
 sdks:
   dart: ">=3.12.2 <4.0.0"
   flutter: ">=3.35.0"

@@ -15,7 +15,8 @@ dependencies:
   web_socket_channel: ^3.0.3
   flutter_colorpicker: ^1.1.0
   vector_math: ^2.2.0
-  flutter_rust_bridge: ^2.12.0
+  flutter_rust_bridge: 2.13.0-beta.5
+  flutter_rust_bridge_hooks: 2.13.0-beta.5
 
 dev_dependencies:
   flutter_test:
