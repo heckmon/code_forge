@@ -16,7 +16,6 @@ let package = Package(
     ],
     dependencies: [
         .package(name: "code_forge", path: "../.packages/code_forge"),
-        .package(name: "path_provider_foundation", path: "../.packages/path_provider_foundation-2.5.1"),
         .package(name: "url_launcher_macos", path: "../.packages/url_launcher_macos-3.2.5"),
         .package(name: "FlutterFramework", path: "../.packages/FlutterFramework")
     ],
@@ -25,7 +24,6 @@ let package = Package(
             name: "FlutterGeneratedPluginSwiftPackage",
             dependencies: [
                 .product(name: "code-forge", package: "code_forge"),
-                .product(name: "path-provider-foundation", package: "path_provider_foundation"),
                 .product(name: "url-launcher-macos", package: "url_launcher_macos"),
                 .product(name: "FlutterFramework", package: "FlutterFramework")
             ]
