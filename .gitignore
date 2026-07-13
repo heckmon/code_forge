@@ -37,3 +37,6 @@ rust/target
 macos/Flutter/ephemeral/flutter_export_environment.sh
 linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux
 macos/Flutter/ephemeral/Flutter-Generated.xcconfig
+
+# FVM Version Cache
+.fvm/
