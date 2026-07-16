@@ -62,10 +62,10 @@ class _MyAppState extends State<MyApp> {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              if (!snapshot.hasData) {
-                return const Center(child: Text("Failed to load LSP"));
+              if (snapshot.hasError) {
+                return Center(child: Text("Failed to load LSP: ${snapshot.error.toString()}"));
               }
-
+              
               final lspConfig = snapshot.data!;
               if (codeController == null ||
                   codeController!.lspConfig != lspConfig) {

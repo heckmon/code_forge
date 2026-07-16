@@ -28,7 +28,14 @@ migrate_working_dir/
 .dart_tool/
 .flutter-plugins-dependencies
 /build/
+.build/
 /coverage/
+
+# Ephemeral folders
+**/ios/Flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
 
 /example/lib/little_code.dart
 /example/lib/big_code.dart
@@ -37,3 +44,6 @@ rust/target
 macos/Flutter/ephemeral/flutter_export_environment.sh
 linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux
 macos/Flutter/ephemeral/Flutter-Generated.xcconfig
+
+# FVM Version Cache
+.fvm/
