@@ -48,9 +48,8 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.7.0:
-  - FIX: Emoji crash
-  - FIX: LSP hover infinite waiting.
+## What's new in 10.8.0:
+  - FIX: MacOS crash
 
 
 > [!NOTE]
@@ -133,7 +132,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.7.0
+  code_forge: ^10.8.0
 ```
 - 3 . Then run:
 

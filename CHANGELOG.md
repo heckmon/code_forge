@@ -1,13 +1,13 @@
 ## 1.0.0
 
 <details>
-<summary><h3>🎉 Initial Release</h3></summary>
+<summary><h3>Initial Release</h3></summary>
 
 **CodeForge** is a sophisticated, feature-rich code editor widget for Flutter applications, inspired by VS Code and Monaco Editor. This release introduces a comprehensive set of editing capabilities with modern developer experience features.
 
-### ✨ Core Features
+### Core Features
 
-#### 📝 Advanced Text Editing
+#### Advanced Text Editing
 - **Efficient Text Management**: Uses rope data structures for optimal performance with large files
 - **Multi-language Syntax Highlighting**: Support for numerous programming languages via `re_highlight`
 - **Code Folding**: Visual fold/unfold indicators with automatic range detection
@@ -16,7 +16,7 @@
 - **Line Operations**: Move lines up/down, duplicate lines, smart indentation
 - **Word Navigation**: Ctrl+arrow key navigation and word-level deletion
 
-#### 🎨 Customizable UI & Theming
+#### Customizable UI & Theming
 - **Flexible Styling**: Extensive customization options for all UI elements
 - **Theme Support**: Built-in VS2015 dark theme with full customization
 - **Gutter Customization**: Line numbers, fold icons, error/warning highlighting
@@ -24,7 +24,7 @@
 - **Overlay Styling**: Suggestion popups, hover documentation with themes
 - **Font Integration**: Custom icon fonts for completion items (auto-loaded)
 
-#### 🔧 Developer Experience
+#### Developer Experience
 - **Undo/Redo System**: Sophisticated operation merging with timestamp-based grouping
 - **Read-only Mode**: Optional read-only editing for display purposes
 - **Auto-focus**: Automatic focus on widget mount
@@ -32,7 +32,7 @@
 - **Indentation Guides**: Visual guides for code structure
 - **Search Highlighting**: Highlight search results and matches
 
-### 🚀 Language Server Protocol (LSP) Integration
+### Language Server Protocol (LSP) Integration
 
 - **Full LSP Support**: Complete Language Server Protocol implementation
 - **Semantic Highlighting**: Advanced token-based syntax coloring
@@ -43,7 +43,7 @@
 - **Document Synchronization**: Bidirectional sync with LSP servers
 - **Error Gutter**: Visual error/warning indicators in line numbers
 
-### 🤖 AI-Powered Code Completion
+### AI-Powered Code Completion
 
 - **Multi-Model Support**: Integration with Gemini and extensible to other AI models
 - **Completion Modes**: Auto, manual, and mixed completion triggering
@@ -52,7 +52,7 @@
 - **Custom Instructions**: Configurable AI prompts for different use cases
 - **Caching**: Response caching for improved performance
 
-### 🎯 Key Capabilities
+### Key Capabilities
 
 #### Performance & Efficiency
 - **Optimized Rendering**: Custom viewport with efficient repaint management
@@ -72,7 +72,7 @@
 - **Visual Feedback**: Loading states, error handling, and user feedback
 - **Mobile Support**: Touch-friendly interactions for mobile platforms
 
-### 📚 Documentation & Examples
+### Documentation & Examples
 
 - **Comprehensive API Docs**: Fully documented public APIs with examples
 - **Example Application**: Complete working example in `/example/`
@@ -87,7 +87,7 @@
 - **Test Coverage**: Comprehensive test suite for reliability
 - **Linting**: Follows Flutter best practices and linting rules
 
-### 🎨 Supported Languages & Features
+### Supported Languages & Features
 
 **Syntax Highlighting**: Dart, Python, JavaScript, TypeScript, Java, C++, C#, Go, Rust, PHP, Ruby, Swift, Kotlin, Scala, and many more via `re_highlight`
 
@@ -447,3 +447,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 10.7.1
   - FIX: [#87](https://github.com/heckmon/code_forge/issues/87)
+
+## 10.8.0
+  - FIX: MacOS crash

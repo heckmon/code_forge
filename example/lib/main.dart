@@ -27,7 +27,7 @@ class _MyAppState extends State<MyApp> {
   Future<LspConfig> getLsp() async {
     final absWorkspacePath = p.join(Directory.current.path, "lib");
     final data = await LspStdioConfig.start(
-      executable: "/home/athul/flutter/flutter/bin//dart",
+      executable: "dart",
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
@@ -63,9 +63,13 @@ class _MyAppState extends State<MyApp> {
               }
 
               if (snapshot.hasError) {
-                return Center(child: Text("Failed to load LSP: ${snapshot.error.toString()}"));
+                return Center(
+                  child: Text(
+                    "Failed to load LSP: ${snapshot.error.toString()}",
+                  ),
+                );
               }
-              
+
               final lspConfig = snapshot.data!;
               if (codeController == null ||
                   codeController!.lspConfig != lspConfig) {
