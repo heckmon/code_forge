@@ -450,3 +450,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 10.8.0
   - FIX: MacOS crash
+
+## 10.9.0
+  - FEARTURE: Added custom context menu item as requested in [#89](https://github.com/heckmon/code_forge/issues/89).
+  - FIX: Merged [#93](https://github.com/heckmon/code_forge/pull/93) to fix FRB crash on gradle 9.

@@ -254,6 +254,9 @@ class CodeForge extends StatefulWidget {
   /// If `null` or empty, no custom snippets are shown.
   final List<CustomCodeSnippet>? customCodeSnippets;
 
+  /// Include custom items in the context menu (The menu appearson right click).
+  final List<CustomContextMenu>? customContextMenuItems;
+
   /// If set to true, deleting the first line of a folded block will delete the entire folded region,
   /// else only the first line gets deleted and the rest of the block stays safe.
   /// Defauts to false.
@@ -289,6 +292,7 @@ class CodeForge extends StatefulWidget {
     this.innerPadding,
     this.keyboardShotcuts = const CodeForgeKeyboardShortcuts(),
     this.customCodeSnippets,
+    this.customContextMenuItems,
     this.readOnly = false,
     this.autoFocus = false,
     this.lineWrap = false,
@@ -1310,6 +1314,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       'Ctrl+A',
                       () => _controller.selectAll(),
                     ),
+                    ...widget.customContextMenuItems?.map(
+                          (item) => _buildDesktopContextMenuItem(
+                            item.label,
+                            item.description,
+                            item.onPress,
+                          ),
+                        ) ??
+                        [],
                   ],
                 ),
               ),

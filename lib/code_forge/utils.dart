@@ -421,3 +421,40 @@ class CodeForgeKeyboardShortcuts {
     ),
   });
 }
+
+/// Create a custom entry for the context menu (The menu that appears on right click).
+/// Pass it to the [CodeForge] class to add the custom entry to the context menu.
+/// eg:
+/// ```dart
+/// CodeForge(
+///   customContextMenuItems: [
+///     CustomContextMenu(
+///        label: "Goto defenition",
+///        desciption: "Ctrl + Shift + .",
+///        onPress: ()=> goToDefinition()
+///     ),
+///     CustomContextMenu(
+///        label: "Code actions",
+///        desciption: "Ctrl + .",
+///        onPress: ()=> getCodeActions()
+///     ),
+///   ]
+/// )
+/// ```
+class CustomContextMenu {
+  /// The label that shown in the context menu
+  final String label;
+
+  /// The description for the context item.
+  /// Shown at the right end of the menu.
+  final String description;
+
+  /// The action to be performed on pressing the context menu item.
+  final VoidCallback onPress;
+
+  const CustomContextMenu({
+    required this.label,
+    required this.description,
+    required this.onPress,
+  });
+}

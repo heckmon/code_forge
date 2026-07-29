@@ -48,8 +48,9 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.8.0:
-  - FIX: MacOS crash
+## What's new in 10.9.0:
+  - FEARTURE: Added custom context menu item as requested in [#89](https://github.com/heckmon/code_forge/issues/89).
+  - FIX: Merged [#93](https://github.com/heckmon/code_forge/pull/93) to fix FRB crash on gradle 9.
 
 
 > [!NOTE]
@@ -132,7 +133,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.8.0
+  code_forge: ^10.9.0
 ```
 - 3 . Then run:
 
@@ -510,9 +511,10 @@ CodeForge(
 | `enableGutterDivider` | `bool` | Show gutter divider |
 | `enableSuggestions` | `bool` | Enable autocomplete suggestions |
 | `enableKeyboardSuggestions` | `bool` | Show auto completions in OS virtual keyboard |
-| `extraLanguages` | `List<Mode>` | Useful for languages that embed other grammars (for example, TSX using XML/HTML sub-languages). |
+| `extraLanguages` | `List<Mode>` | Useful for languages that embed other grammars (for example, TSX using XML/HTML sub-languages) |
 | `keyboardType` | `TextInputType` | Type of virtual keyboard |
 | `customCodeSnippets` | `List<CustomCodeSnippet>?` | Custom code snippets shown in the suggestion popup |
+| `customContextMenuItems` | `List<CustomContextMenu>?` | Custom context items shown in the context menu (The menu shown on right click) |
 | `deleteFoldRangeOnDeletingFirstLine` | `bool` | When true, deleting the first line of a folded block removes the entire block |
 | `finderBuilder` | `PreferredSizeWidget Function(FindController findController)?` | Builder for custom Finder widget |
 
