@@ -452,5 +452,9 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - FIX: MacOS crash
 
 ## 10.9.0
-  - FEARTURE: Added custom context menu item as requested in [#89](https://github.com/heckmon/code_forge/issues/89).
+  - FEATURE: Added custom context menu item as requested in [#89](https://github.com/heckmon/code_forge/issues/89).
   - FIX: Merged [#93](https://github.com/heckmon/code_forge/pull/93) to fix FRB crash on gradle 9.
+
+## 10.10.0
+  - FEATURE: Exposed the diagnostics lint API as requested in [#95](https://github.com/heckmon/code_forge/issues/95).
+  - FIX: Implemented a possible fix for [#94](https://github.com/heckmon/code_forge/issues/94).

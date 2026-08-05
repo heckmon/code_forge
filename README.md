@@ -48,9 +48,9 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.9.0:
-  - FEARTURE: Added custom context menu item as requested in [#89](https://github.com/heckmon/code_forge/issues/89).
-  - FIX: Merged [#93](https://github.com/heckmon/code_forge/pull/93) to fix FRB crash on gradle 9.
+## What's new in 10.10.0:
+  - FEATURE: Exposed the diagnostics lint API as requested in [#95](https://github.com/heckmon/code_forge/issues/95).
+  - FIX: Implemented a possible fix for [#94](https://github.com/heckmon/code_forge/issues/94).
 
 
 > [!NOTE]
@@ -133,7 +133,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.9.0
+  code_forge: ^10.10.0
 ```
 - 3 . Then run:
 

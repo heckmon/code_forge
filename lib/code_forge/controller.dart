@@ -65,51 +65,19 @@ class CodeForgeController implements DeltaTextInputClient {
   TextRange _imeProjectionComposing = TextRange.empty;
   bool _suppressImeSync = false;
   CompoundOperationHandle? _imeCompositionUndoGroup;
-
-  // --- IME composition overlay state ---------------------------------------
-  // While a composition is active the composing text is NOT written to the
-  // document; it lives in [_imeComposition] and is painted as an overlay by the
-  // renderer (see [ImeComposition]). The fields below mirror the platform's
-  // editing value so each delta can be reduced to a single committed document
-  // edit on commit/cancel, leaving the document free of transient composing
-  // glyphs.
   ImeComposition? _imeComposition;
-  // Authoritative mirror of the platform's TextEditingValue (text including any
-  // composing range, in projection-local coordinates).
   String _imeMirrorText = '';
   TextSelection _imeMirrorSelection = const TextSelection.collapsed(offset: 0);
   TextRange _imeMirrorComposing = TextRange.empty;
-  // The committed projection-window content -- equals [_imeMirrorText] with the
-  // composing range excised, and is kept identical to the document's projected
-  // window. Diffed against the mirror's committed text to derive document edits.
   String _imeWindowCommitted = '';
   int _imeWindowStart = 0;
-  // Repaint signal consumed by the renderer when the composition overlay
-  // changes without a document edit (e.g. typing further pinyin letters).
   bool imeCompositionChanged = false;
-  // The selection captured at the start of a platform input event, used to
-  // replace it when a composition begins over it. Some platforms collapse the
-  // selection in a separate event immediately before composing, so the live
-  // selection cannot be relied on to still be non-collapsed at composition
-  // start. Cleared on real caret moves and once consumed.
   TextSelection? _pendingSelectionReplacement;
-  // When a composition replaces a selection that the platform keeps in its own
-  // value (insertion-semantics platforms), the selection is deleted from the
-  // document and the gap recorded here in mirror-local coordinates; the
-  // committed-text reconciliation then excises this region so the document does
-  // not re-grow it. Inactive when [_imeMirrorDeleteLen] is 0. [_imeMirrorDeletedText]
-  // is the exact text removed: the excision stays active only while the platform
-  // still holds that text at the recorded spot, and self-disables the moment the
-  // platform drops the selection on its own (so we never excise live text).
   int _imeMirrorDeleteStart = -1;
   int _imeMirrorDeleteLen = 0;
   String _imeMirrorDeletedText = '';
-  // Tracks the user's actual intended keystrokes and the previous composing text.
-  // Used to distinguish between IME-generated separators (like a'a'a'a)
-  // and explicit user-typed punctuation.
   String _rawTypedComposingText = '';
   String _lastComposingText = '';
-
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
   bool _imeProjectionDirty = true, _imeSelectionNeedsResync = false;
   bool deleteFoldRangeOnDeletingFirstLine = false;
@@ -546,7 +514,26 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Returns the index of the selected suggestion from the [suggestionsNotifier]
   final ValueNotifier<int?> selectedSuggestionNotifier = ValueNotifier(null);
 
-  /// A [ValueNotifier] that returns the error, warnings, info, etc from the LSP server.
+  /// A [ValueNotifier] that returns the error, warnings, info, etc from the LSP server or the custom defined [DiagnosticLine] class.
+  /// Usage with [DiagnosticLine] class:
+  /// ```dart
+  /// controller.diagnosticsNotifier.value = [
+  ///    DiagnosticLine(
+  ///      severity: 1, // severity 1 means error (red underlines).
+  ///      range: {
+  ///        "start": {
+  ///          "line": 1,
+  ///          "character": 10
+  ///        },
+  ///        "end": {
+  ///           "line": 2,
+  ///          "character": 15
+  ///        },
+  ///      },
+  ///      message: "An error is here."
+  ///    ),
+  /// ]
+  /// ```
   final ValueNotifier<List<LspErrors>> diagnosticsNotifier = ValueNotifier([]);
 
   /// A [ValueNotifier] that returns LSP code actions if available.
