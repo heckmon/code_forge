@@ -76,7 +76,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^10.10.2
+  code_forge: ^10.10.3
 ```
 
 3. 在 `main()` 中添加初始化:

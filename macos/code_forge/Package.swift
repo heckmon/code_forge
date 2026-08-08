@@ -7,8 +7,8 @@ let package = Package(
         .macOS("10.15")
     ],
     products: [
-        .library(type: .dynamic, name: "code_forge", targets: ["code_forge"]),
-        .library(type: .dynamic, name: "code-forge", targets: ["code_forge"]),
+        .library(name: "code_forge", type: .dynamic, targets: ["code_forge"]),
+        .library(name: "code-forge", type: .dynamic, targets: ["code_forge"]),
     ],
     dependencies: [
         .package(name: "FlutterFramework", path: "../FlutterFramework")
