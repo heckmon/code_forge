@@ -48,8 +48,7 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.10.0:
-  - FEATURE: Exposed the diagnostics lint API as requested in [#95](https://github.com/heckmon/code_forge/issues/95).
+## What's new in 10.10.1:
   - FIX: Implemented a possible fix for [#94](https://github.com/heckmon/code_forge/issues/94).
 
 
@@ -133,7 +132,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.10.0
+  code_forge: ^10.10.1
 ```
 - 3 . Then run:
 

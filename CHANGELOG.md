@@ -458,3 +458,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 10.10.0
   - FEATURE: Exposed the diagnostics lint API as requested in [#95](https://github.com/heckmon/code_forge/issues/95).
   - FIX: Implemented a possible fix for [#94](https://github.com/heckmon/code_forge/issues/94).
+
+## 10.10.1
+  - - FIX: Implemented a possible fix for [#94](https://github.com/heckmon/code_forge/issues/94).
