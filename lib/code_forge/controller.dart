@@ -1,12 +1,12 @@
-import '../src/rust/api/editor.dart';
 import 'dart:async';
 import 'dart:io';
 
-import '../code_forge.dart';
-import 'rope.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../code_forge.dart';
+import '../src/rust/api/editor.dart';
+import 'rope.dart';
 
 /// Controller for the [CodeForge] code editor widget.
 ///
@@ -4074,6 +4074,128 @@ class CodeForgeController implements DeltaTextInputClient {
 
     searchHighlightsChanged = true;
     notifyListeners();
+  }
+
+  void reindentDocument({required int oldTabSize, required int newTabSize}) {
+    if (oldTabSize <= 0 || newTabSize <= 0 || oldTabSize == newTabSize) {
+      return;
+    }
+
+    final originalText = text;
+    if (originalText.isEmpty) {
+      tabSize = newTabSize;
+      return;
+    }
+
+    final originalSelection = selection;
+    final originalLines = originalText.split("\n");
+    final newLines = <String>[];
+
+    for (final line in originalLines) {
+      final leadingWhitespace =
+          RegExp(r"^[ \t]+", multiLine: true).stringMatch(line) ?? "";
+      final content = line.substring(leadingWhitespace.length);
+      final indentLength = leadingWhitespace
+          .replaceAll("\t", " " * oldTabSize)
+          .length;
+      final indentLevels = indentLength ~/ oldTabSize;
+      final newIndentLength = indentLevels * newTabSize;
+      newLines.add("${" " * newIndentLength}$content");
+    }
+
+    final newText = newLines.join("\n");
+    if (newText == originalText) {
+      tabSize = newTabSize;
+      return;
+    }
+
+    final newLineStarts = _lineStarts(newText);
+    final originalLineStarts = _lineStarts(originalText);
+
+    final newSelection = TextSelection(
+      baseOffset: _mapOffsetForReindent(
+        originalOffset: originalSelection.start,
+        originalText: originalText,
+        newText: newText,
+        oldTabSize: oldTabSize,
+        newTabSize: newTabSize,
+        originalLineStarts: originalLineStarts,
+        newLineStarts: newLineStarts,
+      ),
+      extentOffset: _mapOffsetForReindent(
+        originalOffset: originalSelection.end,
+        originalText: originalText,
+        newText: newText,
+        oldTabSize: oldTabSize,
+        newTabSize: newTabSize,
+        originalLineStarts: originalLineStarts,
+        newLineStarts: newLineStarts,
+      ),
+    );
+
+    text = newText;
+    selection = newSelection;
+    tabSize = newTabSize;
+  }
+
+  int _mapOffsetForReindent({
+    required int originalOffset,
+    required String originalText,
+    required String newText,
+    required int oldTabSize,
+    required int newTabSize,
+    required List<int> originalLineStarts,
+    required List<int> newLineStarts,
+  }) {
+    if (originalOffset <= 0) return 0;
+
+    final lineIndex = _findLineIndex(originalLineStarts, originalOffset);
+    final lineStart = originalLineStarts[lineIndex];
+    final lineText = originalText.substring(
+      lineStart,
+      lineIndex + 1 < originalLineStarts.length
+          ? originalLineStarts[lineIndex + 1] - 1
+          : originalText.length,
+    );
+    final leadingWhitespace =
+        RegExp(r"^[ \t]+", multiLine: true).stringMatch(lineText) ?? "";
+    final oldIndentLength = leadingWhitespace
+        .replaceAll("\t", " " * oldTabSize)
+        .length;
+    final newIndentLength = (oldIndentLength ~/ oldTabSize) * newTabSize;
+    final column = originalOffset - lineStart;
+
+    if (newLineStarts.length <= lineIndex) {
+      return newText.length;
+    }
+
+    final newLineStart = newLineStarts[lineIndex];
+    final newColumn = column <= oldIndentLength
+        ? (oldIndentLength == 0
+              ? 0
+              : ((column * newIndentLength) / oldIndentLength).round())
+        : newIndentLength + (column - oldIndentLength);
+
+    return newLineStart + newColumn.clamp(0, newText.length - newLineStart);
+  }
+
+  List<int> _lineStarts(String value) {
+    final starts = <int>[0];
+    for (var index = 0; index < value.length; index++) {
+      if (value[index] == "\n") {
+        starts.add(index + 1);
+      }
+    }
+    return starts;
+  }
+
+  int _findLineIndex(List<int> lineStarts, int offset) {
+    var lineIndex = 0;
+    while (lineIndex + 1 < lineStarts.length &&
+        lineStarts[lineIndex + 1] <= offset) {
+      lineIndex++;
+    }
+    return lineIndex;
   }
 
   /// Indent the current selection or insert an indent at the caret.
