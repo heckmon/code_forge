@@ -77,7 +77,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^10.10.3
+  code_forge: ^10.11.0
 ```
 
 3. Agrega la inicializacion en `main()`:
