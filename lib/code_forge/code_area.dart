@@ -3,20 +3,20 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
-import '../code_forge.dart';
-import './syntax_highlighter.dart';
-import '../src/rust/api/editor.dart';
-
-import 'package:re_highlight/re_highlight.dart';
-import 'package:re_highlight/styles/lightfair.dart';
-import 'package:markdown_widget/markdown_widget.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:markdown_widget/markdown_widget.dart';
+import 'package:re_highlight/re_highlight.dart';
+import 'package:re_highlight/styles/lightfair.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
+
+import '../code_forge.dart';
+import '../src/rust/api/editor.dart';
+import './syntax_highlighter.dart';
 
 const int kSemanticTokenViewportPaddingLines = 1500;
 const int kExactWrappedHeightThreshold = 512;
@@ -1030,6 +1030,25 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _caretBlinkController
       ..stop()
       ..repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant CodeForge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final oldTabSize = oldWidget.tabSize ?? (oldWidget.useSpaceAsTab ? 2 : 1);
+    final newTabSize = widget.tabSize ?? (widget.useSpaceAsTab ? 2 : 1);
+    final newUseSpaceAsTab = widget.useSpaceAsTab;
+
+    if (oldWidget._tabSize != widget._tabSize ||
+        oldWidget.useSpaceAsTab != widget.useSpaceAsTab) {
+      _controller.tabSize = newTabSize;
+      _controller.useSpaceAsTab = newUseSpaceAsTab;
+      _controller.reindentDocument(
+        oldTabSize: oldTabSize,
+        newTabSize: newTabSize,
+      );
+    }
   }
 
   @override
