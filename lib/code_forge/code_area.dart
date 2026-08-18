@@ -1036,19 +1036,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   void didUpdateWidget(covariant CodeForge oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    final oldTabSize = oldWidget.tabSize ?? (oldWidget.useSpaceAsTab ? 2 : 1);
     final newTabSize = widget.tabSize ?? (widget.useSpaceAsTab ? 2 : 1);
-    final newUseSpaceAsTab = widget.useSpaceAsTab;
-
-    if (oldWidget._tabSize != widget._tabSize ||
-        oldWidget.useSpaceAsTab != widget.useSpaceAsTab) {
-      _controller.tabSize = newTabSize;
-      _controller.useSpaceAsTab = newUseSpaceAsTab;
-      _controller.reindentDocument(
-        oldTabSize: oldTabSize,
-        newTabSize: newTabSize,
-      );
-    }
+    _controller.useSpaceAsTab = widget.useSpaceAsTab;
+    _controller.tabSize = newTabSize;
   }
 
   @override
