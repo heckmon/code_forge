@@ -48,9 +48,8 @@
 >
 > code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
 
-## What's new in 10.11.0:
-  - FIX: Reverted back from SPM to Cocoapods to fix [#94](https://github.com/heckmon/code_forge/issues/94).
-  - FEATURE: Dynamic auto indentaion, by (iskepr)[https://github.com/iskepr] on [#96](https://github.com/heckmon/code_forge/issues/96)
+## What's new in 10.12.0:
+  - Merge [#99](https://github.com/heckmon/code_forge/issues/99).
 
 
 > [!NOTE]
@@ -133,7 +132,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^10.11.0
+  code_forge: ^10.12.0
 ```
 - 3 . Then run:
 

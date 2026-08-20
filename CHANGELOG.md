@@ -470,4 +470,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 10.11.0
   - FIX: Reverted back from SPM to Cocoapods to fix [#94](https://github.com/heckmon/code_forge/issues/94).
-  - FEATURE: Dynamic auto indentaion, by (iskepr)[https://github.com/iskepr] on [#96](https://github.com/heckmon/code_forge/issues/96)
+  - FEATURE: Dynamic auto indentaion, by [iskepr](https://github.com/iskepr) on [#96](https://github.com/heckmon/code_forge/issues/96)
+
+## 10.12.0
+  - Merge [#99](https://github.com/heckmon/code_forge/issues/99).
