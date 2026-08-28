@@ -334,6 +334,58 @@ class SyntaxHighlighter {
     return mergedSpan;
   }
 
+  /// Returns whether a highlighted span is already available without doing
+  /// syntax parsing.  Rendering must use this on a scroll frame: parsing a
+  /// newly visible group of lines in [paint] blocks the UI isolate.
+  bool hasCachedLineSpan(int lineIndex, String lineText) {
+    final mergedCache = _mergedCache[lineIndex];
+    if (mergedCache != null &&
+        mergedCache.version == _version &&
+        mergedCache.text == lineText) {
+      return true;
+    }
+
+    final grammarCache = _grammarCache[lineIndex];
+    final hasGrammar =
+        grammarCache != null &&
+        grammarCache.version == _version &&
+        grammarCache.text == lineText;
+    return hasGrammar;
+  }
+
+  /// Obtains a cached span only. Unlike [getLineSpan], this never invokes
+  /// `re_highlight`, so it is safe to call from a render object's paint pass.
+  TextSpan? getCachedLineSpan(int lineIndex, String lineText) {
+    final mergedCache = _mergedCache[lineIndex];
+    if (mergedCache != null &&
+        mergedCache.version == _version &&
+        mergedCache.text == lineText) {
+      return mergedCache.span;
+    }
+
+    final grammarCache = _grammarCache[lineIndex];
+    final hasGrammar =
+        grammarCache != null &&
+        grammarCache.version == _version &&
+        grammarCache.text == lineText;
+    final semanticSpans = _lineSemanticSpans[lineIndex];
+    if (hasGrammar) {
+      if (_isEditing || semanticSpans == null || semanticSpans.isEmpty) {
+        return grammarCache.span;
+      }
+      final mergedSpan = _mergeGrammarAndSemantic(
+        lineText,
+        grammarCache.span,
+        semanticSpans,
+      );
+      _lineSpanCache[lineText] = mergedSpan;
+      _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
+      return mergedSpan;
+    }
+
+    return null;
+  }
+
   TextSpan? _mergeGrammarAndSemantic(
     String lineText,
     TextSpan? grammarSpan,
@@ -700,8 +752,11 @@ class SyntaxHighlighter {
     double fontSize,
     String? fontFamily, {
     double? width,
+    bool allowSynchronousHighlight = true,
   }) {
-    final span = getLineSpan(lineIndex, lineText);
+    final span = allowSynchronousHighlight
+        ? getLineSpan(lineIndex, lineText)
+        : getCachedLineSpan(lineIndex, lineText);
     final builder = ui.ParagraphBuilder(paragraphStyle);
 
     if (span == null || lineText.isEmpty) {
@@ -829,16 +884,8 @@ class SyntaxHighlighter {
 
     if (linesToProcess.isEmpty) return;
 
-    if (linesToProcess.length < 50) {
-      if (requestVersion != _version) return;
-      for (final entry in linesToProcess.entries) {
-        if (requestVersion != _version) return;
-        final span = _highlightLine(entry.value);
-        _grammarCache[entry.key] = HighlightedLine(entry.value, span, _version);
-      }
-      return;
-    }
-
+    // Always use an isolate here. Even a small viewport can contain expensive
+    // grammar rules, and this method is scheduled from the render path.
     final results = await compute(
       _highlightLinesInBackground,
       _BackgroundHighlightData(
