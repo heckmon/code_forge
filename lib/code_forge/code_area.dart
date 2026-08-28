@@ -1547,9 +1547,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final screenHeight = mediaQuery.size.height;
     return LayoutBuilder(
       builder: (_, constraints) {
         final editorHeight = constraints.maxHeight;
@@ -2826,6 +2823,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             return SizedBox.shrink();
                           }
                           final sigScrollCtrl = ScrollController();
+                          final mediaQuery = MediaQuery.of(context);
+                          final screenWidth = mediaQuery.size.width;
 
                           final desiredWidth = screenWidth < 700
                               ? screenWidth * 0.63
@@ -3086,6 +3085,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             return SizedBox.shrink();
                           }
                           final completionScrlCtrl = ScrollController();
+                          final mediaQuery = MediaQuery.of(context);
+                          final screenWidth = mediaQuery.size.width;
+                          final screenHeight = mediaQuery.size.height;
                           final desiredWidth = screenWidth < 700
                               ? screenWidth * 0.63
                               : screenWidth * 0.3;
@@ -3625,6 +3627,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                         return SizedBox.shrink();
                       }
                       final Offset position = hov.$1;
+                      final mediaQuery = MediaQuery.of(context);
+                      final screenWidth = mediaQuery.size.width;
+                      final screenHeight = mediaQuery.size.height;
                       final width = _isMobile
                           ? screenWidth * 0.63
                           : screenWidth * 0.3;
@@ -3941,6 +3946,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                           _controller.lspConfig == null) {
                         return SizedBox.shrink();
                       }
+
+                      final mediaQuery = MediaQuery.of(context);
+                      final screenWidth = mediaQuery.size.width;
 
                       return Positioned(
                         width: screenWidth < 700
@@ -4328,6 +4336,7 @@ class _CodeField extends LeafRenderObjectWidget {
     }
     renderObject
       ..updateDiagnostics(diagnostics)
+      ..updateScreenWidth()
       ..editorTheme = editorTheme
       ..language = language
       ..extraLanguages = extraLanguages
@@ -4416,8 +4425,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Rect? _lastImeCaretRect;
   Rect? _lastImeComposingRect;
   Size? _lastImeEditableSize;
-  double _imeComposingCaretDx = 0.0;
-  double _imeComposingWidth = 0.0;
+  double _imeComposingCaretDx = 0.0, _imeComposingWidth = 0.0;
+  double _screenWidth = 0.0;
   int? _dragStartOffset;
   Timer? _selectionTimer, _hoverTimer;
   Offset? _pointerDownPosition;
@@ -4430,8 +4439,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool _hasActiveFoldsCache = false;
   bool _foldedLineCacheDirty = true;
   bool _asyncFoldComputationPending = false;
-  Timer? _foldComputeTimer;
-  Timer? _semanticTokenTimer;
+  Timer? _foldComputeTimer, _semanticTokenTimer;
   bool _selectionActive = false, _isDragging = false;
   bool _draggingStartHandle = false, _draggingEndHandle = false;
   bool _showBubble = false, _draggingCHandle = false, _readOnly;
@@ -4780,6 +4788,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         _textStyle?.color ?? _editorTheme['root']?.color ?? Colors.black;
     final lineHeightMultiplier = _textStyle?.height ?? 1.2;
 
+    _screenWidth = MediaQuery.sizeOf(context).width;
     _lineHeight = fontSize * lineHeightMultiplier;
 
     _syntaxHighlighter = SyntaxHighlighter(
@@ -5015,9 +5024,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _editorTheme = theme;
     try {
       _syntaxHighlighter.dispose();
-    } catch (e) {
-      //
-    }
+    } catch (_) {}
+
     _syntaxHighlighter = SyntaxHighlighter(
       language: language,
       extraLanguages: _extraLanguages,
@@ -5158,6 +5166,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _readOnly = value;
     markNeedsPaint();
   }
+
+  void updateScreenWidth() => _screenWidth = MediaQuery.sizeOf(context).width;
 
   set lineWrap(bool value) {
     if (_lineWrap == value) return;
@@ -11213,6 +11223,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         (isRTL ? 0 : _gutterWidth) -
         (innerPadding?.left ?? 0) +
         (lineWrap ? 0 : _effectiveHScroll);
+
     final contentPosition = Offset(
       contentX,
       localPosition.dy - (innerPadding?.top ?? 0) + vscrollController.offset,
@@ -11513,9 +11524,18 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           markNeedsPaint();
         }
       } else {
+        int extentOffset = textOffset;
+        final contentWidth =
+            size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
+
+        if (localPosition.dx >= _screenWidth - 5 &&
+            (contentX + _gutterWidth).clamp(0, contentWidth) != contentWidth) {
+          extentOffset += 8;
+        }
+
         controller.selection = TextSelection(
           baseOffset: _dragStartOffset!,
-          extentOffset: textOffset,
+          extentOffset: extentOffset,
         );
       }
     }

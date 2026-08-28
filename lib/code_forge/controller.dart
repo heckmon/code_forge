@@ -2271,13 +2271,6 @@ class CodeForgeController implements DeltaTextInputClient {
     if (_selection == newSelection) return;
 
     if (isComposingActive) {
-      // An external caret move (e.g. a click) during composition force-commits
-      // the composition into the document at its anchor as a single edit, moves
-      // the caret to the requested location, and hard-resets the platform input
-      // connection so the OS closes its candidate window and abandons the
-      // session. (Pushing an empty composing range via setEditingState does not
-      // close the candidate window on desktop; a connection reset is the only
-      // reliable cross-platform mechanism.)
       _selection = _commitCompositionAndRemapSelection(newSelection);
       selectionOnly = true;
       _isTyping = false;
@@ -2289,19 +2282,12 @@ class CodeForgeController implements DeltaTextInputClient {
 
     _flushBuffer();
 
-    // A real caret move abandons any selection pending IME replacement.
     _pendingSelectionReplacement = null;
     _selection = newSelection;
     selectionOnly = true;
     _isTyping = false;
     _imeProjectionDirty = true;
 
-    // Push the new projection to the platform synchronously instead of on a
-    // 50ms debounce. The debounce left a window where the platform still held
-    // the old projection (or the full document) while the user started typing,
-    // so the next keystroke was diffed against a stale base and landed at the
-    // wrong offset. _syncToConnection is internally guarded against active
-    // compositions and suppressed regions, so this stays safe.
     _syncToConnection();
 
     notifyListeners();
