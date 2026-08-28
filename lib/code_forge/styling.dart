@@ -1717,9 +1717,8 @@ class CustomLanguageGrammar {
       for (var part in parts) {
         part = part.trim();
         part = part.replaceAll(RegExp(r'\\s\+'), ' ');
-        if (RegExp(
-          r'^[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_]+)*$',
-        ).hasMatch(part)) {
+        if (RegExp(r'^[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_]+)*$')
+            .hasMatch(part)) {
           words.add(part);
         }
       }

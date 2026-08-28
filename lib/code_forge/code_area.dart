@@ -1483,9 +1483,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
 
     final lineText = text.substring(lineStart, caret);
-    final wordMatches = RegExp(
-      '$_wordCharPattern+|[^$_wordCharPattern\\s]+',
-    ).allMatches(lineText).toList();
+    final wordMatches = RegExp('$_wordCharPattern+|[^$_wordCharPattern\\s]+')
+        .allMatches(lineText)
+        .toList();
 
     int newOffset = lineStart;
     for (final match in wordMatches) {
@@ -3456,23 +3456,19 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                         Expanded(
                                                           child: Text(
                                                             item.label,
-                                                            style:
-                                                                (_suggestionStyle
-                                                                            .labelTextStyle ??
-                                                                        _suggestionStyle
-                                                                            .textStyle)
-                                                                    .copyWith(
-                                                                      color:
-                                                                          ((!_isMobile &&
-                                                                                  (indx ==
-                                                                                      _sugSelIndex)) ||
-                                                                              _controller.currentlySelectedSuggestion ==
-                                                                                  indx)
-                                                                          ? Colors.white
-                                                                          : (_suggestionStyle.labelTextStyle ??
-                                                                                    _suggestionStyle.textStyle)
-                                                                                .color,
-                                                                    ),
+                                                            style: (_suggestionStyle.labelTextStyle ?? _suggestionStyle.textStyle).copyWith(
+                                                              color:
+                                                                  ((!_isMobile &&
+                                                                          (indx ==
+                                                                              _sugSelIndex)) ||
+                                                                      _controller
+                                                                              .currentlySelectedSuggestion ==
+                                                                          indx)
+                                                                  ? Colors.white
+                                                                  : (_suggestionStyle.labelTextStyle ??
+                                                                            _suggestionStyle.textStyle)
+                                                                        .color,
+                                                            ),
                                                             overflow:
                                                                 TextOverflow
                                                                     .ellipsis,
@@ -6268,9 +6264,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
   String? _extractOpeningTagName(String lineText) {
     final trimmed = lineText.trimRight();
-    final openTagMatch = RegExp(
-      r'<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>$',
-    ).firstMatch(trimmed);
+    final openTagMatch = RegExp(r'<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>$')
+        .firstMatch(trimmed);
     if (openTagMatch != null) {
       final tagName = openTagMatch.group(1);
       if (!trimmed.endsWith('/>') && !trimmed.endsWith('-->')) {
@@ -7014,9 +7009,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       return 1;
     }
 
-    final lineIndex = _findVisibleLineByYPosition(
-      scrollOffset,
-    ).clamp(0, controller.lineCount - 1);
+    final lineIndex = _findVisibleLineByYPosition(scrollOffset)
+        .clamp(0, controller.lineCount - 1);
     return lineIndex + 1;
   }
 
@@ -7389,12 +7383,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (!lineWrap && !hasActiveFolds) {
       if (_virtualRemovedTotalLineCount > 0) {
-        firstVisibleLine = _findVisibleLineByYPosition(
-          viewTop,
-        ).clamp(0, lineCount - 1);
-        lastVisibleLine = _findVisibleLineByYPosition(
-          viewBottom,
-        ).clamp(0, lineCount - 1);
+        firstVisibleLine = _findVisibleLineByYPosition(viewTop)
+            .clamp(0, lineCount - 1);
+        lastVisibleLine = _findVisibleLineByYPosition(viewBottom)
+            .clamp(0, lineCount - 1);
         firstVisibleLineY = firstVisibleLine * _lineHeight;
       } else {
         final frame = _layoutMap.buildViewportFrame(
@@ -8248,9 +8240,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final errorColor = gutterStyle.errorLineNumberColor;
     final warningColor = gutterStyle.warningLineNumberColor;
 
-    final firstVisibleLine = _findVisibleLineByYPosition(
-      viewTop,
-    ).clamp(0, lineCount - 1);
+    final firstVisibleLine = _findVisibleLineByYPosition(viewTop)
+        .clamp(0, lineCount - 1);
     final firstVisibleLineY = _getLineYOffset(
       firstVisibleLine,
       _hasActiveFolds,
