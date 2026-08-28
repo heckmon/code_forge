@@ -5692,6 +5692,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       _lineTextCache.clear();
       _lineWidthCache.clear();
+      // The longest line may change when lines are inserted/removed (for
+      // example, replacing a multi-line document with one long line). Force
+      // the next layout to recompute the horizontal content extent.
+      _longLineWidth = 0.0;
       _paragraphCache.clear();
       _lineHeightCache.clear();
       _invalidateWrappedHeightIndex();
@@ -7609,7 +7613,20 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               controller.getLineText,
             )
             .then((_) {
-              // Rebuild the plain-text paragraphs after background highlighting.
+              // Paragraphs built while highlighting was pending contain plain
+              // text. Drop them so the next paint rebuilds with the newly
+              // available highlighted spans; otherwise the cache would keep
+              // returning the unstyled paragraphs forever.
+              _paragraphCache.removeWhere(
+                (line, _) => line >= firstVisibleLine && line <= lastVisibleLine,
+              );
+              if (lineWrap) {
+                _lineHeightCache.removeWhere(
+                  (line, _) => line >= firstVisibleLine && line <= lastVisibleLine,
+                );
+                _invalidateWrappedHeightIndex();
+                if (attached) markNeedsLayout();
+              }
               if (attached) markNeedsPaint();
             }),
       );

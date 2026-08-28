@@ -884,8 +884,21 @@ class SyntaxHighlighter {
 
     if (linesToProcess.isEmpty) return;
 
-    // Always use an isolate here. Even a small viewport can contain expensive
-    // grammar rules, and this method is scheduled from the render path.
+    // Highlight small viewports synchronously. Besides avoiding isolate
+    // startup overhead, this keeps short documents responsive and guarantees
+    // that a single visible line is highlighted immediately. Large ranges
+    // still run off the UI isolate to preserve scroll performance.
+    final totalChars = linesToProcess.values.fold<int>(0, (sum, line) => sum + line.length);
+    if (totalChars < 2000) {
+      if (requestVersion != _version) return;
+      for (final entry in linesToProcess.entries) {
+        if (requestVersion != _version) return;
+        final span = _highlightLine(entry.value);
+        _grammarCache[entry.key] = HighlightedLine(entry.value, span, _version);
+      }
+      return;
+    }
+
     final results = await compute(
       _highlightLinesInBackground,
       _BackgroundHighlightData(
@@ -1015,10 +1028,9 @@ Map<int, _SpanData?> _highlightLinesInBackground(
 
     try {
       final result = highlight.highlight(code: lineText, language: data.langId);
-      final renderer = TextSpanRenderer(data.baseStyle, data.theme);
+      final renderer = _ScopeSpanRenderer();
       result.render(renderer);
-      final span = renderer.span;
-      results[lineIndex] = span != null ? _textSpanToSpanData(span) : null;
+      results[lineIndex] = renderer.span;
     } catch (e) {
       results[lineIndex] = _SpanData(lineText, null);
     }
@@ -1045,18 +1057,43 @@ void _registerLanguageWithAliases(Highlight highlight, Mode language) {
   }
 }
 
-_SpanData _textSpanToSpanData(TextSpan span) {
-  final children = <_SpanData>[];
+class _ScopeSpanRenderer implements HighlightRenderer {
+  final List<_SpanData> _stack = [];
+  final List<_SpanData> _results = [];
 
-  if (span.children != null) {
-    for (final child in span.children!) {
-      if (child is TextSpan) {
-        children.add(_textSpanToSpanData(child));
-      }
+  @override
+  void openNode(DataNode node) => _stack.add(_SpanData('', node.scope));
+
+  @override
+  void addText(String text) {
+    final span = _SpanData(text, _stack.isEmpty ? null : _stack.last.scope);
+    if (_stack.isEmpty) {
+      _results.add(span);
+      return;
     }
+    final parent = _stack.removeLast();
+    _stack.add(
+      _SpanData(parent.text, parent.scope, [...parent.children, span]),
+    );
   }
 
-  String? scope;
+  @override
+  void closeNode(DataNode node) {
+    final span = _stack.removeLast();
+    if (_stack.isEmpty) {
+      _results.add(span);
+      return;
+    }
+    final parent = _stack.removeLast();
+    _stack.add(
+      _SpanData(parent.text, parent.scope, [...parent.children, span]),
+    );
+  }
 
-  return _SpanData(span.text ?? '', scope, children);
+  _SpanData? get span {
+    if (_results.isEmpty) return null;
+    if (_results.length == 1) return _results.first;
+    return _SpanData('', null, _results);
+  }
+
 }
