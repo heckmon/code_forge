@@ -753,10 +753,13 @@ class SyntaxHighlighter {
     String? fontFamily, {
     double? width,
     bool allowSynchronousHighlight = true,
+    bool forcePlainText = false,
   }) {
-    final span = allowSynchronousHighlight
-        ? getLineSpan(lineIndex, lineText)
-        : getCachedLineSpan(lineIndex, lineText);
+    final span = forcePlainText
+        ? null
+        : (allowSynchronousHighlight
+              ? getLineSpan(lineIndex, lineText)
+              : getCachedLineSpan(lineIndex, lineText));
     final builder = ui.ParagraphBuilder(paragraphStyle);
 
     if (span == null || lineText.isEmpty) {
@@ -888,7 +891,10 @@ class SyntaxHighlighter {
     // startup overhead, this keeps short documents responsive and guarantees
     // that a single visible line is highlighted immediately. Large ranges
     // still run off the UI isolate to preserve scroll performance.
-    final totalChars = linesToProcess.values.fold<int>(0, (sum, line) => sum + line.length);
+    final totalChars = linesToProcess.values.fold<int>(
+      0,
+      (sum, line) => sum + line.length,
+    );
     if (totalChars < 2000) {
       if (requestVersion != _version) return;
       for (final entry in linesToProcess.entries) {
@@ -1095,5 +1101,4 @@ class _ScopeSpanRenderer implements HighlightRenderer {
     if (_results.length == 1) return _results.first;
     return _SpanData('', null, _results);
   }
-
 }

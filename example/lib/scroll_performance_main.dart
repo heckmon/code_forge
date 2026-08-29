@@ -268,27 +268,27 @@ func main() {
                 enableKeyboardSuggestions: false,
               ),
             ),
-            // const VerticalDivider(width: 1),
-            // Expanded( // test re_highlight
-            //   child: DecoratedBox(
-            //     decoration: BoxDecoration(
-            //       color: githubDarkTheme['root']?.backgroundColor,
-            //     ),
-            //     child: ListView.builder(
-            //       controller: _referenceVScroll,
-            //       padding: const EdgeInsets.all(8),
-            //       itemCount: _editor.lineCount,
-            //       itemBuilder: (context, index) => SelectableText.rich(
-            //         _buildReferenceLine(_editor.getLineText(index)),
-            //         style: const TextStyle(
-            //           fontFamily: 'Consolas',
-            //           fontSize: 13,
-            //           height: 1.2,
-            //         ),
-            //       ),
-            //     ),
-            //   ),
-            // ),
+            const VerticalDivider(width: 1),
+            Expanded( // test re_highlight
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: githubDarkTheme['root']?.backgroundColor,
+                ),
+                child: ListView.builder(
+                  controller: _referenceVScroll,
+                  padding: const EdgeInsets.all(8),
+                  itemCount: _editor.lineCount,
+                  itemBuilder: (context, index) => SelectableText.rich(
+                    _buildReferenceLine(_editor.getLineText(index)),
+                    style: const TextStyle(
+                      fontFamily: 'Consolas',
+                      fontSize: 13,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
