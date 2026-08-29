@@ -782,9 +782,12 @@ class SyntaxHighlighter {
     ui.ParagraphBuilder builder,
     TextSpan span,
     double fontSize,
-    String? fontFamily,
-  ) {
-    final style = _textStyleToUiStyle(span.style, fontSize, fontFamily);
+    String? fontFamily, {
+    TextStyle? inheritedStyle,
+  }) {
+    final effectiveStyle = (inheritedStyle ?? baseTextStyle ?? editorTheme['root'] ?? const TextStyle())
+        .merge(span.style);
+    final style = _textStyleToUiStyle(effectiveStyle, fontSize, fontFamily);
     builder.pushStyle(style);
 
     if (span.text != null) {
@@ -794,7 +797,13 @@ class SyntaxHighlighter {
     if (span.children != null) {
       for (final child in span.children!) {
         if (child is TextSpan) {
-          _addTextSpanToBuilder(builder, child, fontSize, fontFamily);
+          _addTextSpanToBuilder(
+            builder,
+            child,
+            fontSize,
+            fontFamily,
+            inheritedStyle: effectiveStyle,
+          );
         }
       }
     }
@@ -807,14 +816,12 @@ class SyntaxHighlighter {
     double fontSize,
     String? fontFamily,
   ) {
-    final baseStyle = style ?? baseTextStyle ?? editorTheme['root'];
-
     return ui.TextStyle(
-      color: baseStyle?.color ?? editorTheme['root']?.color ?? Colors.black,
+      color: style?.color ?? editorTheme['root']?.color ?? Colors.black,
       fontSize: fontSize,
       fontFamily: fontFamily,
-      fontWeight: baseStyle?.fontWeight,
-      fontStyle: baseStyle?.fontStyle,
+      fontWeight: style?.fontWeight,
+      fontStyle: style?.fontStyle,
     );
   }
 
@@ -955,12 +962,15 @@ class SyntaxHighlighter {
     }
   }
 
-  TextSpan? _spanDataToTextSpan(_SpanData? data) {
+  TextSpan? _spanDataToTextSpan(
+    _SpanData? data, {
+    TextStyle? inheritedStyle,
+  }) {
     if (data == null) return null;
 
     final style = data.scope != null
-        ? _resolvedTheme[data.scope]
-        : baseTextStyle;
+        ? (_resolvedTheme[data.scope] ?? inheritedStyle ?? baseTextStyle)
+        : (inheritedStyle ?? baseTextStyle);
 
     if (data.children.isEmpty) {
       return TextSpan(text: data.text, style: style);
@@ -969,7 +979,14 @@ class SyntaxHighlighter {
     return TextSpan(
       text: data.text.isEmpty ? null : data.text,
       style: style,
-      children: data.children.map((c) => _spanDataToTextSpan(c)!).toList(),
+      children: data.children
+          .map(
+            (c) => _spanDataToTextSpan(
+              c,
+              inheritedStyle: style,
+            )!,
+          )
+          .toList(),
     );
   }
 

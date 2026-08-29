@@ -2,9 +2,6 @@ import 'package:code_forge/code_forge.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:re_highlight/languages/all.dart';
-import 'package:re_highlight/languages/dart.dart';
-import 'package:re_highlight/languages/json.dart';
-import 'package:re_highlight/languages/xml.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/github-dark.dart';
 
@@ -35,6 +32,7 @@ class ScrollPerformancePage extends StatefulWidget {
 
 class _ScrollPerformancePageState extends State<ScrollPerformancePage> {
   final _editor = CodeForgeController();
+  final _editorTick = ValueNotifier<int>(0);
   final _codeVScroll = ScrollController();
   final _referenceVScroll = ScrollController();
   bool _syncingReferenceScroll = false;
@@ -51,12 +49,12 @@ class _ScrollPerformancePageState extends State<ScrollPerformancePage> {
     super.initState();
     _editor.addListener(_onEditorChanged);
     _codeVScroll.addListener(_syncReferenceScroll);
-    _languageName = 'go';
-    _replaceText(_buildGoSample());
+    _languageName = 'json';
+    _replaceText(_buildProvidedJson());
   }
 
   void _onEditorChanged() {
-    if (mounted) setState(() {});
+    _editorTick.value++;
   }
 
   void _syncReferenceScroll() {
@@ -73,6 +71,7 @@ class _ScrollPerformancePageState extends State<ScrollPerformancePage> {
   @override
   void dispose() {
     _editor.removeListener(_onEditorChanged);
+    _editorTick.dispose();
     _editor.dispose();
     _codeVScroll
       ..removeListener(_syncReferenceScroll)
@@ -84,12 +83,41 @@ class _ScrollPerformancePageState extends State<ScrollPerformancePage> {
   String _buildJsonSample(int lineCount) {
     return List<String>.generate(
       lineCount,
-      (index) =>
-          '{"line": $index, "name": "scroll-performance", '
+          (index) =>
+      '{"line": $index, "name": "scroll-performance", '
           '"message": "Paste your long JSON, XML, SQL, or source content here", '
           '"payload": "abcdefghijklmnopqrstuvwxyz0123456789"}',
     ).join('\n');
   }
+
+  String _buildProvidedJson() => '''
+{
+  "number": 123,
+  "array": [
+    1,
+    2,
+    3,
+    8143661439548533000,
+    "8143661439548533232"
+  ],
+  "safe integer": 9007199254740991,
+  "unsafe integer": 9007199254111741000,
+  "text line": "You can delete this sample JSON from the options page",
+  "text block": "Line 1\\nLine 2\\n  Line 2.1\\n  Line 2.2\\nLine 3",
+  "number string": "8143661439548533232",
+  "boolean": true,
+  "color": "gold",
+  "null": null,
+  "object": {
+    "complex": [
+      40.66,
+      -73.23,
+      -73.9899789999999
+    ],
+    "type": "Point"
+  }
+}
+''';
 
   String _buildGoSample() =>
       '''// Addr2line is a minimal simulation of the GNU addr2line tool.
@@ -129,7 +157,6 @@ func main() {
 
   void _replaceText(String text) {
     _editor.text = text;
-    if (mounted) setState(() {});
   }
 
   TextSpan _buildReferenceLine(String text) {
@@ -144,6 +171,64 @@ func main() {
     } catch (_) {
       return TextSpan(text: text);
     }
+  }
+
+  TextSpan? _buildCodeForgeLine(String text) {
+    final language = resolveLanguageMode(_languageName);
+    if (language == null) return TextSpan(text: text);
+    final highlighter = SyntaxHighlighter(
+      language: language,
+      editorTheme: githubDarkTheme,
+      languageId: _languageName,
+    );
+    return highlighter.getLineSpan(0, text);
+  }
+
+  void _dumpSpanTree(String label, TextSpan? span) {
+    void walk(TextSpan node, String indent) {
+      final text = node.text;
+      if (text != null && text.isNotEmpty) {
+        debugPrint(
+          '$indent${text.replaceAll("\n", r"\\n")} '
+              'color=${node.style?.color} '
+              'weight=${node.style?.fontWeight} '
+              'style=${node.style?.fontStyle}',
+        );
+      }
+      final children = node.children;
+      if (children == null) return;
+      for (final child in children) {
+        if (child is TextSpan) {
+          walk(child, '$indent  ');
+        }
+      }
+    }
+
+    debugPrint('--- $label ---');
+    if (span == null) {
+      debugPrint('<null>');
+      return;
+    }
+    walk(span, '');
+  }
+
+  void _dumpRenderComparison() {
+    final language = resolveLanguageMode(_languageName);
+    if (language == null) {
+      debugPrint('language=null');
+      return;
+    }
+
+    final line = _editor.text
+        .split('\n')
+        .firstWhere((l) => l.contains('false'), orElse: () => _editor.text);
+
+    debugPrint('theme.literal=${githubDarkTheme['literal']?.color}');
+    debugPrint('theme.keyword=${githubDarkTheme['keyword']?.color}');
+    debugPrint('line=$line');
+
+    _dumpSpanTree('reference', _buildReferenceLine(line));
+    _dumpSpanTree('codeforge', _buildCodeForgeLine(line));
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -191,12 +276,20 @@ func main() {
 
   @override
   Widget build(BuildContext context) {
-    final stats = '${_editor.lineCount} lines · ${_editor.length} chars';
     return Scaffold(
       appBar: AppBar(
         title: const Text('CodeForge scroll performance'),
         actions: [
-          Center(child: Text(stats)),
+          Center(
+            child: ValueListenableBuilder<int>(
+              valueListenable: _editorTick,
+              builder: (context, _, __) {
+                final stats =
+                    '${_editor.lineCount} lines · ${_editor.length} chars';
+                return Text(stats);
+              },
+            ),
+          ),
           const SizedBox(width: 16),
           DropdownButton<String>(
             value: _languageName,
@@ -239,10 +332,21 @@ func main() {
             child: const Text('Java sample'),
           ),
           TextButton(
+            onPressed: () {
+              _languageName = 'json';
+              _replaceText(_buildProvidedJson());
+            },
+            child: const Text('JSON sample'),
+          ),
+          TextButton(
             onPressed: _pasteFromClipboard,
             child: const Text('Clipboard'),
           ),
           TextButton(onPressed: _openPasteDialog, child: const Text('Paste')),
+          TextButton(
+            onPressed: _dumpRenderComparison,
+            child: const Text('Dump'),
+          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -269,26 +373,29 @@ func main() {
               ),
             ),
             const VerticalDivider(width: 1),
-            Expanded( // test re_highlight
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: githubDarkTheme['root']?.backgroundColor,
-                ),
-                child: ListView.builder(
-                  controller: _referenceVScroll,
-                  padding: const EdgeInsets.all(8),
-                  itemCount: _editor.lineCount,
-                  itemBuilder: (context, index) => SelectableText.rich(
-                    _buildReferenceLine(_editor.getLineText(index)),
-                    style: const TextStyle(
-                      fontFamily: 'Consolas',
-                      fontSize: 13,
-                      height: 1.2,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            // Expanded(
+            //   child: ValueListenableBuilder<int>(
+            //     valueListenable: _editorTick,
+            //     builder: (context, _, __) => DecoratedBox(
+            //       decoration: BoxDecoration(
+            //         color: githubDarkTheme['root']?.backgroundColor,
+            //       ),
+            //       child: ListView.builder(
+            //         controller: _referenceVScroll,
+            //         padding: const EdgeInsets.all(8),
+            //         itemCount: _editor.lineCount,
+            //         itemBuilder: (context, index) => SelectableText.rich(
+            //           _buildReferenceLine(_editor.getLineText(index)),
+            //           style: const TextStyle(
+            //             fontFamily: 'Consolas',
+            //             fontSize: 13,
+            //             height: 1.2,
+            //           ),
+            //         ),
+            //       ),
+            //     ),
+            //   ),
+            // ),
           ],
         ),
       ),

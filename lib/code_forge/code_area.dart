@@ -16,7 +16,6 @@ import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import '../code_forge.dart';
 import '../src/rust/api/editor.dart';
-import './syntax_highlighter.dart';
 
 const int kSemanticTokenViewportPaddingLines = 1500;
 const int kExactWrappedHeightThreshold = 512;
@@ -330,8 +329,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final FocusNode _focusNode;
   late final AnimationController _caretBlinkController;
   late final AnimationController _lineHighlightController;
-  late final Map<String, TextStyle> _editorTheme;
-  late final Mode _language;
+  late Map<String, TextStyle> _editorTheme;
+  late Mode _language;
   late final CodeSelectionStyle _selectionStyle;
   late final GutterStyle _gutterStyle;
   late final SuggestionStyle _suggestionStyle;
@@ -1039,6 +1038,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     final newTabSize = widget.tabSize ?? (widget.useSpaceAsTab ? 2 : 1);
     _controller.useSpaceAsTab = widget.useSpaceAsTab;
     _controller.tabSize = newTabSize;
+
+    if (widget.language != oldWidget.language) {
+      _language = widget.language ?? Mode();
+    }
+    if (widget.editorTheme != oldWidget.editorTheme) {
+      _editorTheme = widget.editorTheme ?? lightfairTheme;
+    }
+    if (widget.readOnly != oldWidget.readOnly) {
+      _readOnly = widget.readOnly;
+    }
   }
 
   @override
