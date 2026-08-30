@@ -11441,7 +11441,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           controller.addMultiCursor(line, character);
         } else {
           controller.clearMultiCursors();
-          controller.selection = TextSelection.collapsed(offset: textOffset);
+
+          if (HardwareKeyboard.instance.isShiftPressed) {
+            controller.selection = TextSelection(
+              baseOffset: controller.selection.baseOffset,
+              extentOffset: textOffset,
+            );
+          } else {
+            controller.selection = TextSelection.collapsed(offset: textOffset);
+          }
         }
       }
     }
