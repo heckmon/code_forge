@@ -55,59 +55,32 @@ class _MyAppState extends State<MyApp> {
           },
         ),
         body: SafeArea(
-          child: FutureBuilder<LspConfig>(
-            future: getLsp(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    "Failed to load LSP: ${snapshot.error.toString()}",
-                  ),
-                );
-              }
-
-              final lspConfig = snapshot.data!;
-              if (codeController == null ||
-                  codeController!.lspConfig != lspConfig) {
-                codeController = CodeForgeController(lspConfig: lspConfig);
-              }
-
-              return CodeForge(
-                undoController: undoController,
-                language: langDart,
-                editorTheme: githubDarkTheme,
-                controller: codeController,
-                textStyle: GoogleFonts.jetBrainsMono(),
-                filePath: absFilePath,
-                tabSize: 4,
-                matchHighlightStyle: const MatchHighlightStyle(
-                  currentMatchStyle: TextStyle(
-                    backgroundColor: Color(0xFFFFA726),
-                  ),
-                  otherMatchStyle: TextStyle(
-                    backgroundColor: Color(0x55FFFF00),
-                  ),
-                ),
-                finderBuilder: (c, controller) =>
-                    FindPanelView(controller: controller),
-                customCodeSnippets: [
-                  CustomCodeSnippet(
-                    label: 'if',
-                    value: 'if (condition) {\n  \n}',
-                    cursorLocations: {4},
-                  ),
-                  CustomCodeSnippet(
-                    label: 'if-else',
-                    value: 'if (condition) {\n  \n} else {\n  \n}',
-                    cursorLocations: {18, 31},
-                  ),
-                ],
-              );
-            },
+          child: CodeForge(
+            undoController: undoController,
+            language: langDart,
+            editorTheme: githubDarkTheme,
+            controller: codeController,
+            textStyle: GoogleFonts.jetBrainsMono(),
+            filePath: absFilePath,
+            tabSize: 4,
+            matchHighlightStyle: const MatchHighlightStyle(
+              currentMatchStyle: TextStyle(backgroundColor: Color(0xFFFFA726)),
+              otherMatchStyle: TextStyle(backgroundColor: Color(0x55FFFF00)),
+            ),
+            finderBuilder: (c, controller) =>
+                FindPanelView(controller: controller),
+            customCodeSnippets: [
+              CustomCodeSnippet(
+                label: 'if',
+                value: 'if (condition) {\n  \n}',
+                cursorLocations: {4},
+              ),
+              CustomCodeSnippet(
+                label: 'if-else',
+                value: 'if (condition) {\n  \n} else {\n  \n}',
+                cursorLocations: {18, 31},
+              ),
+            ],
           ),
         ),
       ),
