@@ -5675,7 +5675,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _searchHighlightCache.clear();
       _caretInfoCache.clear();
       _lineIndentCache.removeWhere((line, _) => line >= editLine);
-
     }
 
     final newLineCount = controller.lineCount;
