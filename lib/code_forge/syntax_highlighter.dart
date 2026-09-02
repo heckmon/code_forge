@@ -334,6 +334,58 @@ class SyntaxHighlighter {
     return mergedSpan;
   }
 
+  /// Returns whether a highlighted span is already available without doing
+  /// syntax parsing.  Rendering must use this on a scroll frame: parsing a
+  /// newly visible group of lines in [paint] blocks the UI isolate.
+  bool hasCachedLineSpan(int lineIndex, String lineText) {
+    final mergedCache = _mergedCache[lineIndex];
+    if (mergedCache != null &&
+        mergedCache.version == _version &&
+        mergedCache.text == lineText) {
+      return true;
+    }
+
+    final grammarCache = _grammarCache[lineIndex];
+    final hasGrammar =
+        grammarCache != null &&
+        grammarCache.version == _version &&
+        grammarCache.text == lineText;
+    return hasGrammar;
+  }
+
+  /// Obtains a cached span only. Unlike [getLineSpan], this never invokes
+  /// `re_highlight`, so it is safe to call from a render object's paint pass.
+  TextSpan? getCachedLineSpan(int lineIndex, String lineText) {
+    final mergedCache = _mergedCache[lineIndex];
+    if (mergedCache != null &&
+        mergedCache.version == _version &&
+        mergedCache.text == lineText) {
+      return mergedCache.span;
+    }
+
+    final grammarCache = _grammarCache[lineIndex];
+    final hasGrammar =
+        grammarCache != null &&
+        grammarCache.version == _version &&
+        grammarCache.text == lineText;
+    final semanticSpans = _lineSemanticSpans[lineIndex];
+    if (hasGrammar) {
+      if (_isEditing || semanticSpans == null || semanticSpans.isEmpty) {
+        return grammarCache.span;
+      }
+      final mergedSpan = _mergeGrammarAndSemantic(
+        lineText,
+        grammarCache.span,
+        semanticSpans,
+      );
+      _lineSpanCache[lineText] = mergedSpan;
+      _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
+      return mergedSpan;
+    }
+
+    return null;
+  }
+
   TextSpan? _mergeGrammarAndSemantic(
     String lineText,
     TextSpan? grammarSpan,
@@ -700,8 +752,14 @@ class SyntaxHighlighter {
     double fontSize,
     String? fontFamily, {
     double? width,
+    bool allowSynchronousHighlight = true,
+    bool forcePlainText = false,
   }) {
-    final span = getLineSpan(lineIndex, lineText);
+    final span = forcePlainText
+        ? null
+        : (allowSynchronousHighlight
+              ? getLineSpan(lineIndex, lineText)
+              : getCachedLineSpan(lineIndex, lineText));
     final builder = ui.ParagraphBuilder(paragraphStyle);
 
     if (span == null || lineText.isEmpty) {
@@ -724,9 +782,16 @@ class SyntaxHighlighter {
     ui.ParagraphBuilder builder,
     TextSpan span,
     double fontSize,
-    String? fontFamily,
-  ) {
-    final style = _textStyleToUiStyle(span.style, fontSize, fontFamily);
+    String? fontFamily, {
+    TextStyle? inheritedStyle,
+  }) {
+    final effectiveStyle =
+        (inheritedStyle ??
+                baseTextStyle ??
+                editorTheme['root'] ??
+                const TextStyle())
+            .merge(span.style);
+    final style = _textStyleToUiStyle(effectiveStyle, fontSize, fontFamily);
     builder.pushStyle(style);
 
     if (span.text != null) {
@@ -736,7 +801,13 @@ class SyntaxHighlighter {
     if (span.children != null) {
       for (final child in span.children!) {
         if (child is TextSpan) {
-          _addTextSpanToBuilder(builder, child, fontSize, fontFamily);
+          _addTextSpanToBuilder(
+            builder,
+            child,
+            fontSize,
+            fontFamily,
+            inheritedStyle: effectiveStyle,
+          );
         }
       }
     }
@@ -749,14 +820,12 @@ class SyntaxHighlighter {
     double fontSize,
     String? fontFamily,
   ) {
-    final baseStyle = style ?? baseTextStyle ?? editorTheme['root'];
-
     return ui.TextStyle(
-      color: baseStyle?.color ?? editorTheme['root']?.color ?? Colors.black,
+      color: style?.color ?? editorTheme['root']?.color ?? Colors.black,
       fontSize: fontSize,
       fontFamily: fontFamily,
-      fontWeight: baseStyle?.fontWeight,
-      fontStyle: baseStyle?.fontStyle,
+      fontWeight: style?.fontWeight,
+      fontStyle: style?.fontStyle,
     );
   }
 
@@ -829,7 +898,11 @@ class SyntaxHighlighter {
 
     if (linesToProcess.isEmpty) return;
 
-    if (linesToProcess.length < 50) {
+    final totalChars = linesToProcess.values.fold<int>(
+      0,
+      (sum, line) => sum + line.length,
+    );
+    if (totalChars < 2000) {
       if (requestVersion != _version) return;
       for (final entry in linesToProcess.entries) {
         if (requestVersion != _version) return;
@@ -889,12 +962,12 @@ class SyntaxHighlighter {
     }
   }
 
-  TextSpan? _spanDataToTextSpan(_SpanData? data) {
+  TextSpan? _spanDataToTextSpan(_SpanData? data, {TextStyle? inheritedStyle}) {
     if (data == null) return null;
 
     final style = data.scope != null
-        ? _resolvedTheme[data.scope]
-        : baseTextStyle;
+        ? (_resolvedTheme[data.scope] ?? inheritedStyle ?? baseTextStyle)
+        : (inheritedStyle ?? baseTextStyle);
 
     if (data.children.isEmpty) {
       return TextSpan(text: data.text, style: style);
@@ -903,7 +976,9 @@ class SyntaxHighlighter {
     return TextSpan(
       text: data.text.isEmpty ? null : data.text,
       style: style,
-      children: data.children.map((c) => _spanDataToTextSpan(c)!).toList(),
+      children: data.children
+          .map((c) => _spanDataToTextSpan(c, inheritedStyle: style)!)
+          .toList(),
     );
   }
 
@@ -968,10 +1043,9 @@ Map<int, _SpanData?> _highlightLinesInBackground(
 
     try {
       final result = highlight.highlight(code: lineText, language: data.langId);
-      final renderer = TextSpanRenderer(data.baseStyle, data.theme);
+      final renderer = _ScopeSpanRenderer();
       result.render(renderer);
-      final span = renderer.span;
-      results[lineIndex] = span != null ? _textSpanToSpanData(span) : null;
+      results[lineIndex] = renderer.span;
     } catch (e) {
       results[lineIndex] = _SpanData(lineText, null);
     }
@@ -998,18 +1072,42 @@ void _registerLanguageWithAliases(Highlight highlight, Mode language) {
   }
 }
 
-_SpanData _textSpanToSpanData(TextSpan span) {
-  final children = <_SpanData>[];
+class _ScopeSpanRenderer implements HighlightRenderer {
+  final List<_SpanData> _stack = [];
+  final List<_SpanData> _results = [];
 
-  if (span.children != null) {
-    for (final child in span.children!) {
-      if (child is TextSpan) {
-        children.add(_textSpanToSpanData(child));
-      }
+  @override
+  void openNode(DataNode node) => _stack.add(_SpanData('', node.scope));
+
+  @override
+  void addText(String text) {
+    final span = _SpanData(text, _stack.isEmpty ? null : _stack.last.scope);
+    if (_stack.isEmpty) {
+      _results.add(span);
+      return;
     }
+    final parent = _stack.removeLast();
+    _stack.add(
+      _SpanData(parent.text, parent.scope, [...parent.children, span]),
+    );
   }
 
-  String? scope;
+  @override
+  void closeNode(DataNode node) {
+    final span = _stack.removeLast();
+    if (_stack.isEmpty) {
+      _results.add(span);
+      return;
+    }
+    final parent = _stack.removeLast();
+    _stack.add(
+      _SpanData(parent.text, parent.scope, [...parent.children, span]),
+    );
+  }
 
-  return _SpanData(span.text ?? '', scope, children);
+  _SpanData? get span {
+    if (_results.isEmpty) return null;
+    if (_results.length == 1) return _results.first;
+    return _SpanData('', null, _results);
+  }
 }

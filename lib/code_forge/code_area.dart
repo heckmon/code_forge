@@ -16,7 +16,6 @@ import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import '../code_forge.dart';
 import '../src/rust/api/editor.dart';
-import './syntax_highlighter.dart';
 
 const int kSemanticTokenViewportPaddingLines = 1500;
 const int kExactWrappedHeightThreshold = 512;
@@ -330,8 +329,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final FocusNode _focusNode;
   late final AnimationController _caretBlinkController;
   late final AnimationController _lineHighlightController;
-  late final Map<String, TextStyle> _editorTheme;
-  late final Mode _language;
+  late Map<String, TextStyle> _editorTheme;
+  late Mode _language;
   late final CodeSelectionStyle _selectionStyle;
   late final GutterStyle _gutterStyle;
   late final SuggestionStyle _suggestionStyle;
@@ -1039,6 +1038,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     final newTabSize = widget.tabSize ?? (widget.useSpaceAsTab ? 2 : 1);
     _controller.useSpaceAsTab = widget.useSpaceAsTab;
     _controller.tabSize = newTabSize;
+
+    if (widget.language != oldWidget.language) {
+      _language = widget.language ?? Mode();
+    }
+    if (widget.editorTheme != oldWidget.editorTheme) {
+      _editorTheme = widget.editorTheme ?? lightfairTheme;
+    }
+    if (widget.readOnly != oldWidget.readOnly) {
+      _readOnly = widget.readOnly;
+    }
   }
 
   @override
@@ -4451,6 +4460,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Map<int, FoldRange>? _lastLspFoldRanges;
   Rect? _startHandleRect, _endHandleRect, _normalHandle;
   double _longLineWidth = 0.0, _wrapWidth = double.infinity;
+  List<double> _wrappedHeightDeltas = const [];
+  int _wrappedHeightIndexLineCount = -1;
+  double _wrappedHeightEstimate = 0.0;
+  bool _wrappedHeightEstimateFromSamples = false;
   double _cachedRtlContentWidth = 0.0;
   Timer? _resizeTimer, _layoutDebounceTimer;
   Timer? _bracketHighlightResumeTimer;
@@ -4626,6 +4639,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineTextCache.clear();
       _lineWidthCache.clear();
       _lineHeightCache.clear();
+      _invalidateWrappedHeightIndex();
       _bracketCache.clear();
       _indentGuideCache.clear();
       _indentEndLineCache.clear();
@@ -4721,6 +4735,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     int lineIndex,
     String text, {
     double? width,
+    bool allowSynchronousHighlight = false,
+    bool forcePlainText = false,
   }) {
     final fontSize = textStyle?.fontSize ?? 14.0;
     final fontFamily = textStyle?.fontFamily;
@@ -4731,7 +4747,100 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       fontSize,
       fontFamily,
       width: width,
+      allowSynchronousHighlight: allowSynchronousHighlight,
+      forcePlainText: forcePlainText,
     );
+  }
+
+  void _invalidateWrappedHeightIndex() {
+    _wrappedHeightDeltas = const [];
+    _wrappedHeightIndexLineCount = -1;
+    _wrappedHeightEstimate = 0.0;
+    _wrappedHeightEstimateFromSamples = false;
+  }
+
+  void _removeWrappedLineHeight(int lineIndex) {
+    final previous = _lineHeightCache.remove(lineIndex);
+    if (previous == null) return;
+    _ensureWrappedHeightIndex();
+    final baseline = _wrappedHeightEstimate > 0
+        ? _wrappedHeightEstimate
+        : _lineHeight;
+    _addWrappedHeightDelta(lineIndex, baseline - previous);
+  }
+
+  void _ensureWrappedHeightIndex({double? estimate}) {
+    final lineCount = controller.lineCount;
+    final nextEstimate =
+        estimate ??
+        (_wrappedHeightEstimate > 0 ? _wrappedHeightEstimate : _lineHeight);
+    if (_wrappedHeightIndexLineCount == lineCount &&
+        _wrappedHeightDeltas.length == lineCount + 1 &&
+        (_wrappedHeightEstimate - nextEstimate).abs() < 0.01) {
+      return;
+    }
+
+    _wrappedHeightIndexLineCount = lineCount;
+    _wrappedHeightEstimate = nextEstimate;
+    _wrappedHeightDeltas = List<double>.filled(lineCount + 1, 0.0);
+    for (final entry in _lineHeightCache.entries) {
+      if (entry.key >= 0 && entry.key < lineCount) {
+        _addWrappedHeightDelta(entry.key, entry.value - nextEstimate);
+      }
+    }
+  }
+
+  void _addWrappedHeightDelta(int lineIndex, double delta) {
+    for (
+      var index = lineIndex + 1;
+      index < _wrappedHeightDeltas.length;
+      index += index & -index
+    ) {
+      _wrappedHeightDeltas[index] += delta;
+    }
+  }
+
+  double _wrappedHeightDeltaBefore(int exclusiveLineIndex) {
+    var total = 0.0;
+    for (var index = exclusiveLineIndex; index > 0; index -= index & -index) {
+      total += _wrappedHeightDeltas[index];
+    }
+    return total;
+  }
+
+  double _wrappedLineYOffset(int lineIndex) {
+    _ensureWrappedHeightIndex();
+    final clamped = lineIndex.clamp(0, controller.lineCount);
+    return clamped * _wrappedHeightEstimate +
+        _wrappedHeightDeltaBefore(clamped);
+  }
+
+  double _wrappedContentHeight() => _wrappedLineYOffset(controller.lineCount);
+
+  int _findWrappedLineByYPosition(double yPosition) {
+    _ensureWrappedHeightIndex();
+    final lineCount = controller.lineCount;
+    if (lineCount <= 1) return 0;
+
+    var low = 0;
+    var high = lineCount - 1;
+    while (low < high) {
+      final middle = (low + high + 1) >> 1;
+      if (_wrappedLineYOffset(middle) <= yPosition) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return low;
+  }
+
+  void _cacheWrappedLineHeight(int lineIndex, double height) {
+    final previous = _lineHeightCache[lineIndex];
+    _ensureWrappedHeightIndex();
+    final oldHeight = previous ?? _wrappedHeightEstimate;
+    _lineHeightCache[lineIndex] = height;
+    _addWrappedHeightDelta(lineIndex, height - oldHeight);
   }
 
   _CodeFieldRenderer({
@@ -5115,6 +5224,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _lineWidthCache.clear();
     _lineTextCache.clear();
     _lineHeightCache.clear();
+    _invalidateWrappedHeightIndex();
     _bracketCache.clear();
     _indentGuideCache.clear();
     _indentEndLineCache.clear();
@@ -5174,6 +5284,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _lineWrap = value;
     _paragraphCache.clear();
     _lineHeightCache.clear();
+    _invalidateWrappedHeightIndex();
     _bracketCache.clear();
     _indentGuideCache.clear();
     _indentEndLineCache.clear();
@@ -5529,7 +5640,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final newText = controller.text;
     final previousText = _lastProcessedText ?? newText;
     final textChanged = newText != previousText;
-
     if (textChanged) {
       _caretInfoCache.clear();
       _cachedCaretOffset = -1;
@@ -5555,16 +5665,23 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         newText,
       );
 
-      final invalidateFromLine = max(0, editLine);
-      _paragraphCache.removeWhere((line, _) => line >= invalidateFromLine);
       _bracketCache.removeWhere((pos, _) => pos >= dirtyRange.start);
-      _lineTextCache.removeWhere((line, _) => line >= invalidateFromLine);
-      _indentGuideCache.removeWhere((line, _) => line >= invalidateFromLine);
+      _paragraphCache.removeWhere((line, _) => line >= editLine);
+      _lineTextCache.removeWhere((line, _) => line >= editLine);
+      _lineWidthCache.removeWhere((line, _) => line >= editLine);
+      _indentGuideCache.removeWhere((line, _) => line >= editLine);
       _indentEndLineCache.clear();
       _diagnosticPathCache.clear();
       _searchHighlightCache.clear();
       _caretInfoCache.clear();
-      _lineIndentCache.removeWhere((line, _) => line >= invalidateFromLine);
+      _lineIndentCache.removeWhere((line, _) => line >= editLine);
+
+      if (kDebugMode) {
+        debugPrint(
+          '[CodeForge] edit invalidate from line $editLine '
+          '(dirtyStart=${dirtyRange.start}, textChanged=$textChanged)',
+        );
+      }
     }
 
     final newLineCount = controller.lineCount;
@@ -5575,7 +5692,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineWidthCache.remove(affectedLine);
       _lineTextCache.remove(affectedLine);
       _paragraphCache.remove(affectedLine);
-      _lineHeightCache.remove(affectedLine);
+      if (lineWrap) {
+        _removeWrappedLineHeight(affectedLine);
+      } else {
+        _lineHeightCache.remove(affectedLine);
+      }
       _syntaxHighlighter.invalidateLines({affectedLine});
     }
     controller.clearDirtyRegion();
@@ -5597,8 +5718,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       _lineTextCache.clear();
       _lineWidthCache.clear();
+      _longLineWidth = 0.0;
       _paragraphCache.clear();
       _lineHeightCache.clear();
+      _invalidateWrappedHeightIndex();
       _indentGuideCache.clear();
       _indentEndLineCache.clear();
       _diagnosticPathCache.clear();
@@ -6383,6 +6506,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       return (y / _lineHeight).floor().clamp(0, lineCount - 1);
     }
 
+    if (lineWrap && !hasActiveFolds && !hasVirtualBlocks) {
+      return _findWrappedLineByYPosition(y);
+    }
+
     if (!lineWrap && !hasActiveFolds && hasVirtualBlocks) {
       final blocks = controller.virtualRemovedBlocks;
       double currentY = 0;
@@ -7160,6 +7287,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           _wrapWidth = clampedWrapWidth;
           _paragraphCache.clear();
           _lineHeightCache.clear();
+          _invalidateWrappedHeightIndex();
           _bracketCache.clear();
           _indentGuideCache.clear();
           _diagnosticPathCache.clear();
@@ -7287,10 +7415,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       lineIndex,
       lineText,
       width: _wrapWidth,
+      allowSynchronousHighlight: true,
     );
     final height = para.height;
 
-    _lineHeightCache[lineIndex] = height;
+    _cacheWrappedLineHeight(lineIndex, height);
     _paragraphCache[lineIndex] = para;
     _lineTextCache[lineIndex] = lineText;
 
@@ -7330,7 +7459,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
 
     final averageHeight = sampledHeight / measured;
-    return averageHeight * visibleLineCount;
+    if (!_wrappedHeightEstimateFromSamples ||
+        _wrappedHeightIndexLineCount != controller.lineCount) {
+      _ensureWrappedHeightIndex(estimate: averageHeight);
+      _wrappedHeightEstimateFromSamples = true;
+    }
+    return _wrappedContentHeight();
   }
 
   double _rowTopForBox(ui.TextBox box) {
@@ -7352,6 +7486,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _ensureFoldedLineCacheValid();
       final foldedBefore = _countFoldedLinesBefore(targetLine);
       y = (targetLine - foldedBefore) * _lineHeight;
+    } else if (!hasActiveFolds) {
+      y = _wrappedLineYOffset(targetLine);
     } else {
       y = 0;
       for (int i = 0; i < targetLine; i++) {
@@ -7444,23 +7580,27 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
       lastVisibleLine = lo.clamp(0, lineCount - 1);
     } else {
-      double currentY = 0;
-      firstVisibleLine = 0;
-      lastVisibleLine = lineCount - 1;
-      firstVisibleLineY = 0;
-
-      for (int i = 0; i < lineCount; i++) {
-        if (hasActiveFolds && _isLineFolded(i)) continue;
-        final lineHeight = _getWrappedLineHeight(i);
-        if (currentY + lineHeight > viewTop) {
-          firstVisibleLine = i;
-          firstVisibleLineY = currentY;
-          break;
+      if (hasActiveFolds) {
+        double currentY = 0;
+        firstVisibleLine = 0;
+        firstVisibleLineY = 0;
+        for (int i = 0; i < lineCount; i++) {
+          if (_isLineFolded(i)) continue;
+          final lineHeight = _getWrappedLineHeight(i);
+          if (currentY + lineHeight > viewTop) {
+            firstVisibleLine = i;
+            firstVisibleLineY = currentY;
+            break;
+          }
+          currentY += lineHeight;
         }
-        currentY += lineHeight;
+      } else {
+        firstVisibleLine = _findWrappedLineByYPosition(viewTop);
+        firstVisibleLineY = _wrappedLineYOffset(firstVisibleLine);
       }
 
-      currentY = firstVisibleLineY;
+      lastVisibleLine = lineCount - 1;
+      var currentY = firstVisibleLineY;
       for (int i = firstVisibleLine; i < lineCount; i++) {
         if (hasActiveFolds && _isLineFolded(i)) continue;
         final lineHeight = _getWrappedLineHeight(i);
@@ -7474,13 +7614,40 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     _pruneViewportCaches(firstVisibleLine, lastVisibleLine);
     _scheduleVisibleSemanticTokens(firstVisibleLine, lastVisibleLine);
-    unawaited(
-      _syntaxHighlighter.preHighlightLines(
-        firstVisibleLine,
-        lastVisibleLine,
-        controller.getLineText,
-      ),
-    );
+    var needsSyntaxHighlight = false;
+    for (int i = firstVisibleLine; i <= lastVisibleLine; i++) {
+      if (hasActiveFolds && _isLineFolded(i)) continue;
+      final lineText = _lineTextCache[i] ?? controller.getLineText(i);
+      if (!_syntaxHighlighter.hasCachedLineSpan(i, lineText)) {
+        needsSyntaxHighlight = true;
+        break;
+      }
+    }
+    if (needsSyntaxHighlight) {
+      unawaited(
+        _syntaxHighlighter
+            .preHighlightLines(
+              firstVisibleLine,
+              lastVisibleLine,
+              controller.getLineText,
+            )
+            .then((_) {
+              _paragraphCache.removeWhere(
+                (line, _) =>
+                    line >= firstVisibleLine && line <= lastVisibleLine,
+              );
+              if (lineWrap) {
+                _lineHeightCache.removeWhere(
+                  (line, _) =>
+                      line >= firstVisibleLine && line <= lastVisibleLine,
+                );
+                _invalidateWrappedHeightIndex();
+                if (attached) markNeedsLayout();
+              }
+              if (attached) markNeedsPaint();
+            }),
+      );
+    }
 
     _drawSearchHighlights(
       canvas,
@@ -7573,9 +7740,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           i,
           bufferLineText,
           width: paragraphWidth,
+          allowSynchronousHighlight: true,
         );
-        if (isRTL && lineWrap) {
+        if (lineWrap) {
           lineHeight = paragraph.height;
+          _lineHeightCache[i] = paragraph.height;
         }
       } else {
         if (_lineTextCache.containsKey(i)) {
@@ -7592,6 +7761,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             i,
             lineText,
             width: paragraphWidth,
+            allowSynchronousHighlight: lineWrap,
           );
           if (!isRTL) {
             _paragraphCache[i] = paragraph;
@@ -7599,6 +7769,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
           if (lineWrap) {
             _lineHeightCache[i] = paragraph.height;
+            lineHeight = paragraph.height;
             if (isRTL) {
               lineHeight = paragraph.height;
             }
