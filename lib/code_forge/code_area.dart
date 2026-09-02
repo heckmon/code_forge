@@ -5676,12 +5676,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _caretInfoCache.clear();
       _lineIndentCache.removeWhere((line, _) => line >= editLine);
 
-      if (kDebugMode) {
-        debugPrint(
-          '[CodeForge] edit invalidate from line $editLine '
-          '(dirtyStart=${dirtyRange.start}, textChanged=$textChanged)',
-        );
-      }
     }
 
     final newLineCount = controller.lineCount;
@@ -11612,7 +11606,15 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           controller.addMultiCursor(line, character);
         } else {
           controller.clearMultiCursors();
-          controller.selection = TextSelection.collapsed(offset: textOffset);
+
+          if (HardwareKeyboard.instance.isShiftPressed) {
+            controller.selection = TextSelection(
+              baseOffset: controller.selection.baseOffset,
+              extentOffset: textOffset,
+            );
+          } else {
+            controller.selection = TextSelection.collapsed(offset: textOffset);
+          }
         }
       }
     }
