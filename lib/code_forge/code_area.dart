@@ -5676,12 +5676,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _caretInfoCache.clear();
       _lineIndentCache.removeWhere((line, _) => line >= editLine);
 
-      if (kDebugMode) {
-        debugPrint(
-          '[CodeForge] edit invalidate from line $editLine '
-          '(dirtyStart=${dirtyRange.start}, textChanged=$textChanged)',
-        );
-      }
     }
 
     final newLineCount = controller.lineCount;
