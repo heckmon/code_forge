@@ -785,8 +785,12 @@ class SyntaxHighlighter {
     String? fontFamily, {
     TextStyle? inheritedStyle,
   }) {
-    final effectiveStyle = (inheritedStyle ?? baseTextStyle ?? editorTheme['root'] ?? const TextStyle())
-        .merge(span.style);
+    final effectiveStyle =
+        (inheritedStyle ??
+                baseTextStyle ??
+                editorTheme['root'] ??
+                const TextStyle())
+            .merge(span.style);
     final style = _textStyleToUiStyle(effectiveStyle, fontSize, fontFamily);
     builder.pushStyle(style);
 
@@ -894,10 +898,6 @@ class SyntaxHighlighter {
 
     if (linesToProcess.isEmpty) return;
 
-    // Highlight small viewports synchronously. Besides avoiding isolate
-    // startup overhead, this keeps short documents responsive and guarantees
-    // that a single visible line is highlighted immediately. Large ranges
-    // still run off the UI isolate to preserve scroll performance.
     final totalChars = linesToProcess.values.fold<int>(
       0,
       (sum, line) => sum + line.length,
@@ -962,10 +962,7 @@ class SyntaxHighlighter {
     }
   }
 
-  TextSpan? _spanDataToTextSpan(
-    _SpanData? data, {
-    TextStyle? inheritedStyle,
-  }) {
+  TextSpan? _spanDataToTextSpan(_SpanData? data, {TextStyle? inheritedStyle}) {
     if (data == null) return null;
 
     final style = data.scope != null
@@ -980,12 +977,7 @@ class SyntaxHighlighter {
       text: data.text.isEmpty ? null : data.text,
       style: style,
       children: data.children
-          .map(
-            (c) => _spanDataToTextSpan(
-              c,
-              inheritedStyle: style,
-            )!,
-          )
+          .map((c) => _spanDataToTextSpan(c, inheritedStyle: style)!)
           .toList(),
     );
   }

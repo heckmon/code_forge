@@ -4460,10 +4460,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Map<int, FoldRange>? _lastLspFoldRanges;
   Rect? _startHandleRect, _endHandleRect, _normalHandle;
   double _longLineWidth = 0.0, _wrapWidth = double.infinity;
-  // A sparse Fenwick tree for wrapped-line heights. Unknown lines use the
-  // sampled average height; measured lines contribute only their delta.
-  // This makes locating a wrapped viewport O(log n), rather than walking from
-  // line zero on every scroll frame.
   List<double> _wrappedHeightDeltas = const [];
   int _wrappedHeightIndexLineCount = -1;
   double _wrappedHeightEstimate = 0.0;
@@ -4767,7 +4763,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final previous = _lineHeightCache.remove(lineIndex);
     if (previous == null) return;
     _ensureWrappedHeightIndex();
-    final baseline = _wrappedHeightEstimate > 0 ? _wrappedHeightEstimate : _lineHeight;
+    final baseline = _wrappedHeightEstimate > 0
+        ? _wrappedHeightEstimate
+        : _lineHeight;
     _addWrappedHeightDelta(lineIndex, baseline - previous);
   }
 
@@ -5720,9 +5718,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
       _lineTextCache.clear();
       _lineWidthCache.clear();
-      // The longest line may change when lines are inserted/removed (for
-      // example, replacing a multi-line document with one long line). Force
-      // the next layout to recompute the horizontal content extent.
       _longLineWidth = 0.0;
       _paragraphCache.clear();
       _lineHeightCache.clear();
@@ -7492,7 +7487,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final foldedBefore = _countFoldedLinesBefore(targetLine);
       y = (targetLine - foldedBefore) * _lineHeight;
     } else if (!hasActiveFolds) {
-      // The wrapped-height index keeps this lookup logarithmic while scrolling.
       y = _wrappedLineYOffset(targetLine);
     } else {
       y = 0;
@@ -7601,7 +7595,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           currentY += lineHeight;
         }
       } else {
-        // Avoid measuring every preceding wrapped line when jumping far down.
         firstVisibleLine = _findWrappedLineByYPosition(viewTop);
         firstVisibleLineY = _wrappedLineYOffset(firstVisibleLine);
       }
@@ -7631,8 +7624,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
     }
     if (needsSyntaxHighlight) {
-      // Do not invoke the highlighter during paint; a cache miss must not
-      // block the UI isolate while the user is scrolling.
       unawaited(
         _syntaxHighlighter
             .preHighlightLines(
@@ -7641,16 +7632,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
               controller.getLineText,
             )
             .then((_) {
-              // Paragraphs built while highlighting was pending contain plain
-              // text. Drop them so the next paint rebuilds with the newly
-              // available highlighted spans; otherwise the cache would keep
-              // returning the unstyled paragraphs forever.
               _paragraphCache.removeWhere(
-                (line, _) => line >= firstVisibleLine && line <= lastVisibleLine,
+                (line, _) =>
+                    line >= firstVisibleLine && line <= lastVisibleLine,
               );
               if (lineWrap) {
                 _lineHeightCache.removeWhere(
-                  (line, _) => line >= firstVisibleLine && line <= lastVisibleLine,
+                  (line, _) =>
+                      line >= firstVisibleLine && line <= lastVisibleLine,
                 );
                 _invalidateWrappedHeightIndex();
                 if (attached) markNeedsLayout();

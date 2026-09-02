@@ -83,8 +83,8 @@ class _ScrollPerformancePageState extends State<ScrollPerformancePage> {
   String _buildJsonSample(int lineCount) {
     return List<String>.generate(
       lineCount,
-          (index) =>
-      '{"line": $index, "name": "scroll-performance", '
+      (index) =>
+          '{"line": $index, "name": "scroll-performance", '
           '"message": "Paste your long JSON, XML, SQL, or source content here", '
           '"payload": "abcdefghijklmnopqrstuvwxyz0123456789"}',
     ).join('\n');
@@ -190,9 +190,9 @@ func main() {
       if (text != null && text.isNotEmpty) {
         debugPrint(
           '$indent${text.replaceAll("\n", r"\\n")} '
-              'color=${node.style?.color} '
-              'weight=${node.style?.fontWeight} '
-              'style=${node.style?.fontStyle}',
+          'color=${node.style?.color} '
+          'weight=${node.style?.fontWeight} '
+          'style=${node.style?.fontStyle}',
         );
       }
       final children = node.children;
