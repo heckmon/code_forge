@@ -131,7 +131,7 @@ sealed class LspConfig {
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   /// It may crash the LSP server if called multiple times.
   Future<void> initialize() async {
-    final workspaceUri = Uri.directory(workspacePath).toString();
+    final workspaceUri = toFileUri(workspacePath, directory: true);
     final response = await sendRequest(
       method: 'initialize',
       params: {
@@ -257,9 +257,20 @@ sealed class LspConfig {
 
   Map<String, dynamic> _commonParams(String filePath, int line, int character) {
     return {
-      'textDocument': {'uri': Uri.file(filePath).toString()},
+      'textDocument': {'uri': toFileUri(filePath)},
       'position': {'line': line, 'character': character},
     };
+  }
+
+  /// Converts a local path or an already-normalized virtual file URI to an
+  /// LSP file URI. Virtual file URIs are used by browser clients without a
+  /// local filesystem.
+  String toFileUri(String filePath, {bool directory = false}) {
+    final parsed = Uri.tryParse(filePath);
+    if (parsed != null && parsed.scheme == 'file') {
+      return parsed.toString();
+    }
+    return (directory ? Uri.directory(filePath) : Uri.file(filePath)).toString();
   }
 
   /// Opens the document in the LSP server.
@@ -267,15 +278,15 @@ sealed class LspConfig {
   /// This method is used internally by the [CodeForge] widget and calling it directly is not recommended.
   ///
   /// Otherwise, the content will be read from [filePath].
-  Future<void> openDocument(String filePath) async {
+  Future<void> openDocument(String filePath, {String? initialContent}) async {
     final version = (_openDocuments[filePath] ?? 0) + 1;
     _openDocuments[filePath] = version;
-    final String text = await File(filePath).readAsString();
+    final text = initialContent ?? await File(filePath).readAsString();
     await sendNotification(
       method: 'textDocument/didOpen',
       params: {
         'textDocument': {
-          'uri': Uri.file(filePath).toString(),
+          'uri': toFileUri(filePath),
           'languageId': languageId,
           'version': version,
           'text': text,
@@ -316,7 +327,7 @@ sealed class LspConfig {
       method: 'textDocument/didChange',
       params: {
         'textDocument': {
-          'uri': Uri.file(filePath).toString(),
+          'uri': toFileUri(filePath),
           'version': version,
         },
         'contentChanges': changes,
@@ -331,7 +342,7 @@ sealed class LspConfig {
     await sendNotification(
       method: 'textDocument/didSave',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'text': content,
       },
     );
@@ -346,7 +357,7 @@ sealed class LspConfig {
     await sendNotification(
       method: 'textDocument/didClose',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
     _openDocuments.remove(filePath);
@@ -618,7 +629,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: "textDocument/colorPresentation",
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'color': {'red': red, 'blue': blue, 'green': green, 'alpha': alpha},
         'range': range,
       },
@@ -638,7 +649,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: "textDocument/documentColor",
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
     return response;
@@ -655,7 +666,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: "textDocument/foldingRange",
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
     return response;
@@ -680,7 +691,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: "textDocument/inlayHint",
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'range': {
           'start': {'line': startLine, 'character': startCharacter},
           'end': {'line': endLine, 'character': endCharacter},
@@ -766,7 +777,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/documentSymbol',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
 
@@ -796,7 +807,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/formatting',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'options': {'tabSize': 2, 'insertSpaces': true},
       },
     );
@@ -819,7 +830,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/rangeFormatting',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'range': {
           'start': {'line': startLine, 'character': startCharacter},
           'end': {'line': endLine, 'character': endCharacter},
@@ -883,7 +894,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/codeAction',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'range': {
           'start': {'line': startLine, 'character': startCharacter},
           'end': {'line': endLine, 'character': endCharacter},
@@ -922,7 +933,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/documentLink',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
 
@@ -1039,7 +1050,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/semanticTokens/full',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
       },
     );
 
@@ -1066,7 +1077,7 @@ sealed class LspConfig {
     final response = await sendRequest(
       method: 'textDocument/semanticTokens/range',
       params: {
-        'textDocument': {'uri': Uri.file(filePath).toString()},
+        'textDocument': {'uri': toFileUri(filePath)},
         'range': {
           'start': {'line': startLine, 'character': startCharacter},
           'end': {'line': endLine, 'character': endCharacter},

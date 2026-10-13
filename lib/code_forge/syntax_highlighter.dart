@@ -151,7 +151,9 @@ class SyntaxHighlighter {
       final shiftedSemanticSpans = <int, List<SemanticWordSpan>>{};
       for (final entry in _lineSemanticSpans.entries) {
         final lineIndex = entry.key;
-        if (lineIndex > editLine) {
+        if (lineIndex == editLine) {
+          continue;
+        } else if (lineIndex > editLine) {
           shiftedSemanticSpans[lineIndex + lineBreakDelta] = entry.value;
         } else {
           shiftedSemanticSpans[lineIndex] = entry.value;

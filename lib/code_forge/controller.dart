@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -40,7 +41,9 @@ class CodeForgeController implements DeltaTextInputClient {
   static const _imeProjectionLineRadius = 2, _imeProjectionMaxChars = 4096;
   static const Duration _lspTypingDebounce = Duration(milliseconds: 300);
   static const Duration _lspDocumentSyncDebounce = Duration(milliseconds: 200);
-  final _isMobile = Platform.isAndroid || Platform.isIOS;
+  final _isMobile = 
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS;
   final List<VoidCallback> _listeners = [];
   final List<LineDecoration> _lineDecorations = [];
   final List<GutterDecoration> _gutterDecorations = [];
@@ -66,18 +69,16 @@ class CodeForgeController implements DeltaTextInputClient {
   bool _suppressImeSync = false;
   CompoundOperationHandle? _imeCompositionUndoGroup;
   ImeComposition? _imeComposition;
-  String _imeMirrorText = '';
   TextSelection _imeMirrorSelection = const TextSelection.collapsed(offset: 0);
   TextRange _imeMirrorComposing = TextRange.empty;
   String _imeWindowCommitted = '';
   int _imeWindowStart = 0;
   bool imeCompositionChanged = false;
   TextSelection? _pendingSelectionReplacement;
-  int _imeMirrorDeleteStart = -1;
-  int _imeMirrorDeleteLen = 0;
-  String _imeMirrorDeletedText = '';
-  String _rawTypedComposingText = '';
-  String _lastComposingText = '';
+  int _imeMirrorDeleteStart = -1, _imeMirrorDeleteLen = 0;
+  String _imeMirrorDeletedText = '', _rawTypedComposingText = '';
+  String _lastComposingText = '', _imeMirrorText = '';
+  String? fileUri, fileUrl;
   bool _bufferDirty = false, bufferNeedsRepaint = false, selectionOnly = false;
   bool _imeProjectionDirty = true, _imeSelectionNeedsResync = false;
   bool deleteFoldRangeOnDeletingFirstLine = false;
@@ -115,7 +116,16 @@ class CodeForgeController implements DeltaTextInputClient {
           if (!lspConfig!.isInitialized) {
             await lspConfig!.initialize();
           }
-          if (openedFile != null) {
+
+          String? filePath = openedFile;
+          if (filePath == null) {
+            for (int i = 0; i < 20 && openedFile == null; i++) {
+              await Future.delayed(const Duration(milliseconds: 100));
+            }
+            filePath = openedFile;
+          }
+
+          if (filePath != null) {
             await _openDocumentInLsp();
           }
         } catch (e) {
@@ -310,7 +320,12 @@ class CodeForgeController implements DeltaTextInputClient {
       if (previousFile != null && previousFile != openedFile) {
         await lspConfig!.closeDocument(previousFile);
       }
-      await lspConfig!.openDocument(openedFile!);
+
+      await lspConfig!.openDocument(
+        openedFile!,
+        initialContent: fileUrl != null ? text : null
+      );
+
       _lspReady = true;
       _cclsForcedRefreshAttempted = false;
 
@@ -557,12 +572,14 @@ class CodeForgeController implements DeltaTextInputClient {
   /// and semantic highlighting.
   LspConfig? lspConfig;
 
-  /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge]
-  set openedFile(String? file) {
+  /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge].<br>
+  set openFile(String? file) {
     final previousFile = _openedFile;
     _openedFile = file;
     if (openedFile != null) {
-      text = File(_openedFile!).readAsStringSync();
+      if(!(kIsWeb || kIsWasm) && fileUrl == null) {
+        text = File(_openedFile!).readAsStringSync();
+      }   
     }
 
     if (previousFile != openedFile &&
@@ -1125,8 +1142,7 @@ class CodeForgeController implements DeltaTextInputClient {
     final suggestions = suggestionsNotifier.value;
     if (suggestions == null || suggestions.isEmpty) return;
 
-    final isMobile = Platform.isAndroid || Platform.isIOS;
-    final safeSelectedIndex = isMobile
+    final safeSelectedIndex = _isMobile
         ? (currentlySelectedSuggestion ?? 0).clamp(0, suggestions.length - 1)
         : selectedIndex.clamp(0, suggestions.length - 1);
     final selected = suggestions[safeSelectedIndex];
@@ -1755,6 +1771,13 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Save the current content, [controller.text] to the opened file.
   void saveFile() {
+    if(kIsWasm || kIsWeb) {
+      throw PlatformException(
+        code: 'unsupported',
+        message: 'This method is not supported on the web.',
+      );
+    }
+
     if (openedFile == null) {
       throw FlutterError(
         "No file found.\nPlease open a file by providing a valid filePath to the CodeForge widget",
@@ -4541,6 +4564,13 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Refetch the current file to delflect text changes
   /// Only works if a valid file is provided via `filePath`.
   void refetchFile() {
+    if(kIsWasm || kIsWeb) {
+      throw PlatformException(
+        code: 'unsupported',
+        message: 'This method is not supported on the web.',
+      );
+    }
+
     if (_openedFile != null) {
       text = File(_openedFile!).readAsStringSync();
     }
@@ -4571,7 +4601,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// document afterwards.
   Future<void> applyWorkspaceEdit(dynamic action) async {
     if (openedFile == null) return;
-    final fileUri = Uri.file(openedFile!).toString();
+    final fileUri = lspConfig?.toFileUri(openedFile!) ?? openedFile!;
 
     if (action is Map && action.containsKey('command')) {
       final String command = action['command'];

@@ -16,6 +16,7 @@ dependencies:
   flutter_colorpicker: ^1.1.0
   vector_math: ^2.2.0
   flutter_rust_bridge: ^2.13.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +38,7 @@ flutter:
         ffiPlugin: true
       windows:
         ffiPlugin: true
+      
   fonts:
     - family: Method
       fonts:

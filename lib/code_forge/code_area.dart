@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -9,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:http/http.dart' as http;
 import 'package:markdown_widget/markdown_widget.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/lightfair.dart';
@@ -172,6 +172,23 @@ class CodeForge extends StatefulWidget {
   /// Required when using LSP integration to identify the document.
   final String? filePath;
 
+  /// Especially for web.<br><br>
+  /// The file URI for LSP features (e.g., 'file:///workspace/main.dart').
+  ///
+  /// When provided with an LSP-configured controller, automatically initializes
+  /// LSP features including completions, semantic highlighting, and diagnostics.
+  /// For web compatibility, use 'file://' URIs with virtual paths.
+  final String? fileUri;
+
+  /// A raw file URL to load content from (e.g., GitHub raw URL).
+  ///
+  /// When provided, the widget will automatically fetch content from this URL
+  /// and display it in the editor. This is useful for loading remote files.
+  /// Cannot be used together with [initialText].
+  /// 
+  /// Use [LspSocketConfig] for Lsp support.
+  final String? fileUrl;
+
   /// Initial text content for the editor.
   ///
   /// Used only during initialization; subsequent changes should use
@@ -282,7 +299,9 @@ class CodeForge extends StatefulWidget {
     this.editorTheme,
     this.language,
     this.filePath,
+    this.fileUrl,
     this.initialText,
+    this.fileUri,
     this.focusNode,
     this.verticalScrollController,
     this.horizontalScrollController,
@@ -347,7 +366,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final ValueNotifier<bool> _selectionActiveNotifier, _isHoveringPopup;
   late final ValueNotifier<List<dynamic>?> _lspActionNotifier;
   late final UndoRedoController _undoRedoController;
-  late final String? _filePath;
+  late final String? _filePath, _fileUri, _fileUrl;
   late final FindController _findController;
   late final VoidCallback _semanticTokensListener;
   late final VoidCallback _controllerListener;
@@ -360,11 +379,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
-  final _isMobile = Platform.isAndroid || Platform.isIOS;
+  final _isMobile = 
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
-  final _isMac = Platform.isMacOS;
+  final _isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final GlobalKey _codeFieldKey = GlobalKey();
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
@@ -423,7 +444,46 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _controller.userCodeAction = _fetchCodeActionsForCurrentPosition;
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
-    _filePath = widget.filePath;
+    _fileUrl = widget.fileUrl;
+    _filePath = ((){
+      if (widget.filePath != null) {
+        if(widget.fileUrl != null) {
+          throw ArgumentError("Both `filePath` and `fileUrl` should not be provided.");
+        }
+
+        if(widget.fileUri != null) {
+          throw ArgumentError("Both `filePath` and `fileUri` should not be provided.");
+        }
+        return widget.filePath;
+      }
+    })();
+
+    _fileUri = ((){
+      String? filePath = widget.fileUri;
+
+        if (filePath == null &&
+          widget.fileUrl != null &&
+          _controller.lspConfig != null) {
+          try {
+            final uri = Uri.parse(widget.fileUrl!);
+            final filename = uri.pathSegments.isNotEmpty
+                ? uri.pathSegments.last
+                : 'untitled.txt';
+            final workspacePath = _controller.lspConfig!.workspacePath;
+            filePath = '$workspacePath/$filename';
+          } catch (e) {
+            debugPrint('Error parsing fileUrl: $e');
+          }
+        }
+
+        if (filePath == null && _controller.lspConfig != null) {
+          filePath = 'file:///workspace/untitled.${_language.name ?? 'txt'}';
+        }
+
+        _controller.fileUri = filePath;
+        return filePath;
+    })();
+
     _readOnly = widget.readOnly;
     _deleteFoldRangeOnDeletingFirstLine =
         widget.deleteFoldRangeOnDeletingFirstLine;
@@ -601,7 +661,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
     Future.microtask(CustomIcons.loadAllCustomFonts);
 
-    if (_filePath == null && _controller.lspConfig != null) {
+    if (_filePath == null && _fileUrl == null && _controller.lspConfig != null) {
       throw ArgumentError(
         "The `filePath` parameter cannot be null inorder to use `LspConfig`."
         "A valid file path is required to use the LSP services.",
@@ -615,7 +675,27 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         );
       } else if (_filePath.isNotEmpty) {
         if (_controller.openedFile != _filePath) {
-          _controller.openedFile = _filePath;
+          _controller.openFile = _filePath;
+        }
+      }
+    } else if (widget.initialText != null && widget.initialText!.isNotEmpty) {
+      _controller.text = widget.initialText!;
+    }
+    
+    if(_fileUrl != null) {
+      _controller.fileUrl = _fileUrl;
+      if (widget.initialText != null) {
+        throw ArgumentError(
+          'Cannot provide both fileUrl and initialText to CodeForge.',
+        );
+      } else if (_fileUrl.isNotEmpty) {
+        if (_controller.openedFile != _fileUri) {
+          (() async{
+            await _loadContentFromUrl(_fileUrl);
+            if (mounted && _controller.openedFile != _fileUri) {
+              _controller.openFile = _fileUri;
+            }
+          })();
         }
       }
     } else if (widget.initialText != null && widget.initialText!.isNotEmpty) {
@@ -819,6 +899,28 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     );
   }
 
+  Future<void> _loadContentFromUrl(String url) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          _controller.text = response.body;
+        }
+      } else {
+        debugPrint('Failed to load content from URL: ${response.statusCode}');
+        if (mounted) {
+          _controller.text = '// Failed to load file: HTTP ${response.statusCode}';
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading content from URL: $e');
+      if (mounted) {
+        _controller.text = '// Error loading file: $e';
+      }
+    }
+  }
+
   void _updateScrollbarLineNumberIndicator() {
     final renderObject = _codeFieldKey.currentContext?.findRenderObject();
     if (renderObject is! _CodeFieldRenderer) return;
@@ -900,6 +1002,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
   Future<void> _fetchCodeActionsForCurrentPosition() async {
     if (_controller.lspConfig == null) return;
+    final currentFile = _controller.openedFile;
+    if (currentFile == null) return;
     final sel = _controller.selection;
     final cursor = sel.extentOffset;
     final line = _controller.getLineAtOffset(cursor);
@@ -907,7 +1011,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     final character = cursor - lineStart;
 
     final actions = await _controller.lspConfig!.getCodeActions(
-      filePath: _filePath!,
+      filePath: currentFile,
       startLine: line,
       startCharacter: character,
       endLine: line,
@@ -977,8 +1081,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       }
 
       if (_controller.lspConfig != null) {
+        final currentFile = _controller.openedFile;
+        if (currentFile == null) return;
         hoverMessage = await _controller.lspConfig!.getHover(
-          _filePath!,
+          currentFile,
           line,
           character,
         );
@@ -2796,7 +2902,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     _lspActionOffsetNotifier,
                                                 signatureNotifier:
                                                     _lspSignatureNotifier,
-                                                filePath: _filePath,
+                                                filePath: _filePath ?? _fileUri,
                                                 textDirection:
                                                     widget.textDirection,
                                                 onHoverSetByTap: () {
@@ -6382,7 +6488,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       targetOffset: pos,
     );
 
-    final result = match == -1 ? null : match;
+    final result = (match == -1 ? null : match)?.toInt();
 
     _bracketCache[pos] = result;
     return result;
@@ -8521,7 +8627,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                   i;
             } on NoSuchMethodError {
               try {
-                final fileUri = Uri.file(filePath!).toString();
+                final fileUri = lspConfig!.toFileUri(filePath!);
                 return (item['edit']['changes'][fileUri][0]['range']['start']['line']
                         as int) ==
                     i;

@@ -7,7 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/github-dark.dart';
 
-Future<void> main() async {
+void main() async {
   await RustLib.init();
   runApp(const MyApp());
 }
@@ -26,34 +26,19 @@ class _MyAppState extends State<MyApp> {
 
   Future<LspConfig> getLsp() async {
     final absWorkspacePath = p.join(Directory.current.path, "lib");
-    final data = await LspStdioConfig.start(
+    return await LspStdioConfig.start(
       executable: "dart",
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
     );
-    return data;
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'Flutter Demo',
       home: Scaffold(
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            codeController?.setGitDiffDecorations(
-              addedRanges: [(1, 5), (10, 25)],
-              removedRanges: [
-                (
-                  afterLine: 29,
-                  content:
-                      'final x = 10;\nfinal y = 20;\nprint("removed line");',
-                ),
-              ],
-            );
-            codeController?.scrollToLine(30);
-          },
-        ),
         body: SafeArea(
           child: FutureBuilder<LspConfig>(
             future: getLsp(),
