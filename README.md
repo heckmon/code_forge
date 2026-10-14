@@ -134,28 +134,17 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ## Installation
 
-- 1 . Make sure to install [rustup](https://rustup.rs/) and add it to the $PATH.
-
-- 2 . Add CodeForge to your `pubspec.yaml`:
+- 1 . Add CodeForge to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  code_forge: ^10.14.0
+  code_forge: ^11.11.0
 ```
-- 3 . Then run:
+- 2 . Then run:
 
 ```bash
 flutter pub get
 ```
-
-- 4 . Add `await RustLib.init();` in your main function:
-```dart
-void main() async {
-  await RustLib.init(); // Add this line
-  runApp(const MyApp());
-}
-```
-
 
 ---
 

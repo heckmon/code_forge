@@ -66,25 +66,14 @@
 
 ## 安装
 
-1. 安装 [rustup](https://rustup.rs/) 并确保已加入 `PATH`。
-
-2. 在 `pubspec.yaml` 中添加依赖:
+1. 在 `pubspec.yaml` 中添加依赖:
 
 ```yaml
 dependencies:
-  code_forge: ^10.14.0
+  code_forge: ^11.11.0
 ```
 
-3. 在 `main()` 中添加初始化:
-
-```dart
-void main() async {
-  await RustLib.init();
-  runApp(const MyApp());
-}
-```
-
-4. 然后执行:
+2. 然后执行:
 
 ```bash
 flutter pub get

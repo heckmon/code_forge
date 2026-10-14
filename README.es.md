@@ -67,25 +67,14 @@
 
 ## Instalacion
 
-1. Instala [rustup](https://rustup.rs/) y asegurate de que este en `PATH`.
-
-2. Agrega CodeForge a `pubspec.yaml`:
+1. Agrega CodeForge a `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  code_forge: ^10.14.0
+  code_forge: ^11.11.0
 ```
 
-3. Agrega la inicializacion en `main()`:
-
-```dart
-void main() async {
-  await RustLib.init();
-  runApp(const MyApp());
-}
-```
-
-4. Luego ejecuta:
+2. Luego ejecuta:
 
 ```bash
 flutter pub get

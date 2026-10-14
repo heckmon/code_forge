@@ -495,4 +495,5 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - ### Improved performance
     - Because of the removal of rust, the ffi overhead has been completely removed and performance increased drastically. Lesser build time, smooth on 1M+ lines.
 
-    
+## 11.0.1
+   - Updated readme
