@@ -46,7 +46,7 @@
 
 > [!NOTE]
 >
-> For the web builds, builds with the `--wasm` flag for better performance.
+> For the web builds, use the `--wasm` flag for better performance.
 > eg:
 >```
 >flutter build web --wasm
