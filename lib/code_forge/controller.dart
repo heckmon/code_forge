@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:io';
+
+import 'package:universal_io/io.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../code_forge.dart';
-import '../src/rust/api/editor.dart';
-import 'rope.dart';
 
 /// Controller for the [CodeForge] code editor widget.
 ///
@@ -41,9 +40,9 @@ class CodeForgeController implements DeltaTextInputClient {
   static const _imeProjectionLineRadius = 2, _imeProjectionMaxChars = 4096;
   static const Duration _lspTypingDebounce = Duration(milliseconds: 300);
   static const Duration _lspDocumentSyncDebounce = Duration(milliseconds: 200);
-  final _isMobile = 
-    defaultTargetPlatform == TargetPlatform.android ||
-    defaultTargetPlatform == TargetPlatform.iOS;
+  final _isMobile =
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
   final List<VoidCallback> _listeners = [];
   final List<LineDecoration> _lineDecorations = [];
   final List<GutterDecoration> _gutterDecorations = [];
@@ -323,7 +322,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
       await lspConfig!.openDocument(
         openedFile!,
-        initialContent: fileUrl != null ? text : null
+        initialContent: fileUrl != null ? text : null,
       );
 
       _lspReady = true;
@@ -574,12 +573,17 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Open a file using the controller API instead of passing `filePath` parameter to [CodeForge].<br>
   set openFile(String? file) {
+    if (file != null && (kIsWeb || kIsWasm)) {
+      throw UnsupportedError(
+        'CodeForgeController.openFile is not supported on web. Use fileUrl or fileUri instead.',
+      );
+    }
     final previousFile = _openedFile;
     _openedFile = file;
     if (openedFile != null) {
-      if(!(kIsWeb || kIsWasm) && fileUrl == null) {
+      if (!(kIsWeb || kIsWasm) && fileUrl == null) {
         text = File(_openedFile!).readAsStringSync();
-      }   
+      }
     }
 
     if (previousFile != openedFile &&
@@ -1771,7 +1775,7 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Save the current content, [controller.text] to the opened file.
   void saveFile() {
-    if(kIsWasm || kIsWeb) {
+    if (kIsWasm || kIsWeb) {
       throw PlatformException(
         code: 'unsupported',
         message: 'This method is not supported on the web.',
@@ -3935,12 +3939,12 @@ class CodeForgeController implements DeltaTextInputClient {
       }
 
       final result = _rope.core.replaceRangeAndUpdateSelection(
-        start: BigInt.from(safeStart),
-        end: BigInt.from(safeEnd),
+        start: safeStart,
+        end: safeEnd,
         replacement: replacement,
         preserveOldCursor: preserveOldCursor,
-        oldBase: BigInt.from(selectionBefore.baseOffset),
-        oldExtent: BigInt.from(selectionBefore.extentOffset),
+        oldBase: selectionBefore.baseOffset,
+        oldExtent: selectionBefore.extentOffset,
       );
       _currentVersion++;
       final newSelection = TextSelection(
@@ -4564,7 +4568,7 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Refetch the current file to delflect text changes
   /// Only works if a valid file is provided via `filePath`.
   void refetchFile() {
-    if(kIsWasm || kIsWeb) {
+    if (kIsWasm || kIsWeb) {
       throw PlatformException(
         code: 'unsupported',
         message: 'This method is not supported on the web.',

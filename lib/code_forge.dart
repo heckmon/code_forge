@@ -9,4 +9,5 @@ export 'code_forge/find_controller.dart';
 export 'code_forge/syntax_highlighter.dart';
 export 'code_forge/utils.dart';
 export 'LSP/lsp.dart';
-export 'src/rust/frb_generated.dart' show RustLib;
+export 'code_forge/editor.dart';
+export 'code_forge/rope.dart';

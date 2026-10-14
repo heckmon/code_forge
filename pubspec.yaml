@@ -1,11 +1,10 @@
 name: code_forge
-description: "A sophisticated code editor package for flutter backed by rust backend."
-version: 10.14.0
+description: "A sophisticated code editor package for flutter."
+version: 11.0.0
 homepage: https://github.com/heckmon/code_forge
 
 environment:
-  sdk: ^3.13.2
-  flutter: ">=1.17.0"
+  sdk: ^3.13.5
 
 dependencies:
   flutter:
@@ -15,8 +14,8 @@ dependencies:
   web_socket_channel: ^3.0.3
   flutter_colorpicker: ^1.1.0
   vector_math: ^2.2.0
-  flutter_rust_bridge: ^2.13.0
   http: ^1.6.0
+  universal_io: ^2.3.1
 
 dev_dependencies:
   flutter_test:
@@ -25,20 +24,7 @@ dev_dependencies:
   integration_test:
     sdk: flutter
 
-flutter:
-  plugin:
-    platforms:
-      android:
-        ffiPlugin: true
-      ios:
-        ffiPlugin: true
-      linux:
-        ffiPlugin: true
-      macos:
-        ffiPlugin: true
-      windows:
-        ffiPlugin: true
-      
+flutter:    
   fonts:
     - family: Method
       fonts:

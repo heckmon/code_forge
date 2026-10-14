@@ -7,7 +7,7 @@
 <h1 align="center">CodeForge</h1>
 
 <p align="center">
-  <strong>A powerful, feature-rich code editor widget with backend written in rust</strong>
+  <strong>A powerful, feature-rich code editor widget.</strong>
 </p>
 
 <p align="center">
@@ -46,17 +46,24 @@
 
 > [!NOTE]
 >
-> code_forge does **not** support Flutter web, as it relies on `dart:io` for core functionality. Use [code_forge_web](https://pub.dev/packages/code_forge_web) for web support.
+> For the web builds, builds with the `--wasm` flag for better performance.
+> eg:
+>```
+>flutter build web --wasm
+>```
 
-## What's new in 10.14.0:
-  - Merge: [#107](https://github.com/heckmon/code_forge/pull/107)
-  - Merge: [#108](https://github.com/heckmon/code_forge/pull/108)
+## What's new in 11.0.0:
+  - ### Removed Rust
+    - The rust backend including the [ropey](https://crates.io/crates/ropey) and [zed_sum_tree](https://crates.io/crates/zed-sum-tree) has been completely replaced with pure dart ports of each.
+    - The rust ffi calls were very expensive.
+    - The user should have the rust runtime installed in their system inoder to build code_forge
+    - Many macos and ios builds were failing because of the flutter_rust_bridge dependency conflicts.
+  
+  - ### Added web support
+    - Because of the removal of Rust, now the code_forge can easily run on web platforms without the [code_forge_web](https://pub.dev/packages/code_forge_web) package
 
-
-> [!NOTE]
->
-> The debug build is **60%** slower than the profile and release builds because of the frequent FFI calls made by the editor to the rust backend, which is expensive in JIT mode. It doesn't affect the AOT mode used in profile and release. So debug builds can get extremely slow and laggy on large files.
-
+  - ### Improved performance
+    - Because of the removal of rust, the ffi overhead has been completely removed and performance increased drastically. Lesser build time, smooth on 1M+ lines.
 
 ## Why CodeForge?
 

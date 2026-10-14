@@ -8,7 +8,7 @@
 <h1 align="center">CodeForge</h1>
 
 <p align="center">
-  <strong>Un widget de editor de codigo potente y completo, con backend en Rust</strong>
+  <strong>Un widget de editor de codigo potente y completo.</strong>
 </p>
 
 <p align="center">
@@ -40,10 +40,6 @@
 </p>
 
 ### Demo de funciones: [CodeForge Features Showcase](https://heckmon.github.io/code_forge_demo/)
-
-> [!NOTE]
->
-> code_forge **no** es compatible con Flutter web porque depende de `dart:io` para funciones principales. Para web, usa [code_forge_web](https://pub.dev/packages/code_forge_web).
 
 
 ## Por que CodeForge?

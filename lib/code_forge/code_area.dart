@@ -15,7 +15,6 @@ import 'package:re_highlight/styles/lightfair.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import '../code_forge.dart';
-import '../src/rust/api/editor.dart';
 
 const int kSemanticTokenViewportPaddingLines = 1500;
 const int kExactWrappedHeightThreshold = 512;
@@ -185,7 +184,7 @@ class CodeForge extends StatefulWidget {
   /// When provided, the widget will automatically fetch content from this URL
   /// and display it in the editor. This is useful for loading remote files.
   /// Cannot be used together with [initialText].
-  /// 
+  ///
   /// Use [LspSocketConfig] for Lsp support.
   final String? fileUrl;
 
@@ -379,9 +378,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
-  final _isMobile = 
-    defaultTargetPlatform == TargetPlatform.android ||
-    defaultTargetPlatform == TargetPlatform.iOS;
+  final _isMobile =
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
@@ -403,6 +402,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    if (kIsWeb && widget.filePath != null) {
+      throw UnsupportedError(
+        'CodeForge.filePath is not supported on web. Use fileUri or fileUrl instead.',
+      );
+    }
     _controller = widget.controller ?? CodeForgeController();
 
     _controller.getFloatingCursorStartPosition = () {
@@ -445,43 +449,47 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _fileUrl = widget.fileUrl;
-    _filePath = ((){
+    _filePath = (() {
       if (widget.filePath != null) {
-        if(widget.fileUrl != null) {
-          throw ArgumentError("Both `filePath` and `fileUrl` should not be provided.");
+        if (widget.fileUrl != null) {
+          throw ArgumentError(
+            "Both `filePath` and `fileUrl` should not be provided.",
+          );
         }
 
-        if(widget.fileUri != null) {
-          throw ArgumentError("Both `filePath` and `fileUri` should not be provided.");
+        if (widget.fileUri != null) {
+          throw ArgumentError(
+            "Both `filePath` and `fileUri` should not be provided.",
+          );
         }
         return widget.filePath;
       }
     })();
 
-    _fileUri = ((){
+    _fileUri = (() {
       String? filePath = widget.fileUri;
 
-        if (filePath == null &&
+      if (filePath == null &&
           widget.fileUrl != null &&
           _controller.lspConfig != null) {
-          try {
-            final uri = Uri.parse(widget.fileUrl!);
-            final filename = uri.pathSegments.isNotEmpty
-                ? uri.pathSegments.last
-                : 'untitled.txt';
-            final workspacePath = _controller.lspConfig!.workspacePath;
-            filePath = '$workspacePath/$filename';
-          } catch (e) {
-            debugPrint('Error parsing fileUrl: $e');
-          }
+        try {
+          final uri = Uri.parse(widget.fileUrl!);
+          final filename = uri.pathSegments.isNotEmpty
+              ? uri.pathSegments.last
+              : 'untitled.txt';
+          final workspacePath = _controller.lspConfig!.workspacePath;
+          filePath = '$workspacePath/$filename';
+        } catch (e) {
+          debugPrint('Error parsing fileUrl: $e');
         }
+      }
 
-        if (filePath == null && _controller.lspConfig != null) {
-          filePath = 'file:///workspace/untitled.${_language.name ?? 'txt'}';
-        }
+      if (filePath == null && _controller.lspConfig != null) {
+        filePath = 'file:///workspace/untitled.${_language.name ?? 'txt'}';
+      }
 
-        _controller.fileUri = filePath;
-        return filePath;
+      _controller.fileUri = filePath;
+      return filePath;
     })();
 
     _readOnly = widget.readOnly;
@@ -661,7 +669,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
     Future.microtask(CustomIcons.loadAllCustomFonts);
 
-    if (_filePath == null && _fileUrl == null && _controller.lspConfig != null) {
+    if (_filePath == null &&
+        _fileUrl == null &&
+        _controller.lspConfig != null) {
       throw ArgumentError(
         "The `filePath` parameter cannot be null inorder to use `LspConfig`."
         "A valid file path is required to use the LSP services.",
@@ -681,16 +691,18 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     } else if (widget.initialText != null && widget.initialText!.isNotEmpty) {
       _controller.text = widget.initialText!;
     }
-    
-    if(_fileUrl != null) {
+
+    if (_fileUrl != null) {
       _controller.fileUrl = _fileUrl;
       if (widget.initialText != null) {
         throw ArgumentError(
           'Cannot provide both fileUrl and initialText to CodeForge.',
         );
       } else if (_fileUrl.isNotEmpty) {
-        if (_controller.openedFile != _fileUri) {
-          (() async{
+        if (_controller.openedFile == null ||
+            _fileUri == null ||
+            _controller.openedFile != _fileUri) {
+          (() async {
             await _loadContentFromUrl(_fileUrl);
             if (mounted && _controller.openedFile != _fileUri) {
               _controller.openFile = _fileUri;
@@ -910,7 +922,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       } else {
         debugPrint('Failed to load content from URL: ${response.statusCode}');
         if (mounted) {
-          _controller.text = '// Failed to load file: HTTP ${response.statusCode}';
+          _controller.text =
+              '// Failed to load file: HTTP ${response.statusCode}';
         }
       }
     } catch (e) {
@@ -4710,6 +4723,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Future<void> _runAsyncFoldComputation() async {
     if (!enableFolding) return;
     if (controller.lspFoldRanges != null) return;
+    if (controller.lineCount > 100000) return;
 
     _asyncFoldComputationPending = true;
 
@@ -6063,7 +6077,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   void _rebuildLayoutMap() {
-    _layoutMap.clear();
     final lineCount = controller.lineCount;
     final Set<int> foldedLines = {};
     for (final f in controller.foldings.values) {
@@ -6075,14 +6088,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
     }
 
-    for (int i = 0; i < lineCount; i++) {
-      final isFolded = foldedLines.contains(i);
-      _layoutMap.pushLine(
-        lenChars: BigInt.from(controller.getLineText(i).length),
-        height: _lineHeight,
-        isFolded: isFolded,
-      );
-    }
+    _layoutMap.rebuild(
+      lineLengths: controller.rope.lineLengths(),
+      height: _lineHeight,
+      foldedLines: foldedLines,
+    );
   }
 
   void _updateLayoutMapLine(int line) {
@@ -6095,7 +6105,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     );
     _layoutMap.updateLine(
       lineIdx: BigInt.from(line),
-      lenChars: BigInt.from(controller.getLineText(line).length),
+      lenChars: BigInt.from(controller.rope.lineLengthAt(line)),
       height: _lineHeight,
       isFolded: isFolded,
     );

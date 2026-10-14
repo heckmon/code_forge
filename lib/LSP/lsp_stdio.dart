@@ -100,6 +100,11 @@ class LspStdioConfig extends LspConfig {
     bool disableWarning = false,
     bool disableError = false,
   }) async {
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'LspStdioConfig is not supported on web. Use LspSocketConfig instead.',
+      );
+    }
     final effectiveInitializationOptions = _withCclsInitializationDefaults(
       executable,
       initializationOptions,

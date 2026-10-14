@@ -481,3 +481,18 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 10.14.0
   - Merge: [#107](https://github.com/heckmon/code_forge/pull/107)
   - Merge: [#108](https://github.com/heckmon/code_forge/pull/108)
+
+## 11.0.0
+  - ### Removed Rust
+      - The rust backend including the [ropey](https://crates.io/crates/ropey) and [zed_sum_tree](https://crates.io/crates/zed-sum-tree) has been completely replaced with pure dart ports of each.
+      - The rust ffi calls were very expensive.
+      - The user should have the rust runtime installed in their system inoder to build code_forge
+      - Many macos and ios builds were failing because of the flutter_rust_bridge dependency conflicts.
+  
+  - ### Added web support
+    - Because of the removal of Rust, now the code_forge can easily run on web platforms without the [code_forge_web](https://pub.dev/packages/code_forge_web) package
+
+  - ### Improved performance
+    - Because of the removal of rust, the ffi overhead has been completely removed and performance increased drastically. Lesser build time, smooth on 1M+ lines.
+
+    

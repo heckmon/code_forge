@@ -47,3 +47,10 @@ macos/Flutter/ephemeral/Flutter-Generated.xcconfig
 
 # FVM Version Cache
 .fvm/
+
+/example/linux
+/example/windows
+/example/macos
+/example/ios
+/example/android
+/example/web

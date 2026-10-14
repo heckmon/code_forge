@@ -8,7 +8,7 @@
 <h1 align="center">CodeForge</h1>
 
 <p align="center">
-  <strong>功能强大、特性丰富的代码编辑器组件，后端基于 Rust</strong>
+  <strong>功能强大、特性丰富的代码编辑器组件.</strong>
 </p>
 
 <p align="center">
@@ -40,10 +40,6 @@
 </p>
 
 ### 功能演示: [CodeForge Features Showcase](https://heckmon.github.io/code_forge_demo/)
-
-> [!NOTE]
->
-> code_forge **不支持** Flutter Web，因为核心功能依赖 `dart:io`。如需 Web 支持，请使用 [code_forge_web](https://pub.dev/packages/code_forge_web)。
 
 ## 为什么选择 CodeForge?
 

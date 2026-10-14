@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:example/finder.dart';
 import 'package:path/path.dart' as p;
 import 'package:code_forge/code_forge.dart';
@@ -7,8 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/github-dark.dart';
 
-void main() async {
-  await RustLib.init();
+void main() {
   runApp(const MyApp());
 }
 

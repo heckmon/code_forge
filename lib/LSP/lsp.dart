@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:universal_io/io.dart';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 part 'lsp_socket.dart';
@@ -270,7 +270,8 @@ sealed class LspConfig {
     if (parsed != null && parsed.scheme == 'file') {
       return parsed.toString();
     }
-    return (directory ? Uri.directory(filePath) : Uri.file(filePath)).toString();
+    return (directory ? Uri.directory(filePath) : Uri.file(filePath))
+        .toString();
   }
 
   /// Opens the document in the LSP server.
@@ -279,6 +280,12 @@ sealed class LspConfig {
   ///
   /// Otherwise, the content will be read from [filePath].
   Future<void> openDocument(String filePath, {String? initialContent}) async {
+    if (kIsWeb && initialContent == null) {
+      throw UnsupportedError(
+        'Opening an LSP document from filePath is not supported on web. '
+        'Provide initialContent or use a URI-backed document.',
+      );
+    }
     final version = (_openDocuments[filePath] ?? 0) + 1;
     _openDocuments[filePath] = version;
     final text = initialContent ?? await File(filePath).readAsString();
@@ -326,10 +333,7 @@ sealed class LspConfig {
     await sendNotification(
       method: 'textDocument/didChange',
       params: {
-        'textDocument': {
-          'uri': toFileUri(filePath),
-          'version': version,
-        },
+        'textDocument': {'uri': toFileUri(filePath), 'version': version},
         'contentChanges': changes,
       },
     );
@@ -1228,23 +1232,10 @@ class CustomIcons {
   static const IconData field = IconData(0x900, fontFamily: 'Field');
 
   /// Loads all custom icon fonts for the code_forge package.
-  /// Call [CustomIcons.loadAllCustomFonts] before using any custom icons.
+  /// Package fonts declared in `pubspec.yaml` are loaded by Flutter. This
+  /// method remains as an async compatibility hook for existing callers.
   static Future<void> loadAllCustomFonts() async {
-    final fonts = <String, String>{
-      'Method': 'assets/icons/method.ttf',
-      'Variable': 'assets/icons/variable.ttf',
-      'Class': 'assets/icons/class.ttf',
-      'Struct': 'assets/icons/struct.ttf',
-      'Event': 'assets/icons/event.ttf',
-      'Operator': 'assets/icons/operator.ttf',
-      'Interface': 'assets/icons/interface.ttf',
-      'Field': 'assets/icons/field.ttf',
-    };
-    for (final entry in fonts.entries) {
-      final loader = FontLoader(entry.key);
-      loader.addFont(rootBundle.load('packages/code_forge/${entry.value}'));
-      await loader.load();
-    }
+    await Future<void>.value();
   }
 }
 
