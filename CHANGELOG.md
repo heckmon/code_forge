@@ -501,3 +501,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 11.1.0
   - FIX: [#83](https://github.com/heckmon/code_forge/issues/83)
   - FEATURE: Added new API `lspSuggestionBuilder` on `CodeForge` class, which let the users to directly modify the LSP suggestion decorations.
+
+## 11.1.1
+  - Added repository field in pubspec.yaml
