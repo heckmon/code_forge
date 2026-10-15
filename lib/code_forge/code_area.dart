@@ -23,6 +23,18 @@ const String _wordCharPattern =
     r'[\w\u0600-\u06FF\u08A0-\u08FF\u0590-\u05FF'
     r'\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]';
 
+/// Builds the content of an LSP completion suggestion row.
+///
+/// The builder receives the completion item and whether it is currently
+/// selected. Return the complete custom row content, including any icons,
+/// labels, and details you want to display. The surrounding editor still
+/// provides selection, hover, splash, and tap behavior.
+typedef LspSuggestionBuilder = Widget Function(
+  BuildContext context,
+  LspCompletion suggestion,
+  bool isSelected,
+);
+
 /// A highly customizable code editor widget for Flutter.
 ///
 /// [CodeForge] provides a feature-rich code editing experience with support for:
@@ -136,7 +148,7 @@ class CodeForge extends StatefulWidget {
   /// eg:
   ///
   /// ```dart
-  /// // Here the line duplicate shortcut `Ctrl + D` has beeb overriden by `Ctrl + B`.
+  /// // Here the line duplicate shortcut `Ctrl + D` has overriden by `Ctrl + B`.
   /// CodeForge(
   ///   keyboardShotcuts: CodeForgeKeyboardShotcuts(
   ///     duplicate: SingleActivator(LogicalKeyboardKey.keyB, control: true)
@@ -159,6 +171,12 @@ class CodeForge extends StatefulWidget {
 
   /// Styling options for the autocomplete suggestion popup.
   final SuggestionStyle? suggestionStyle;
+
+  /// Builds custom content for each LSP completion suggestion.
+  ///
+  /// When null, the default completion row is used, including the built-in
+  /// type icons backed by the icon fonts declared in `pubspec.yaml`.
+  final LspSuggestionBuilder? lspSuggestionBuilder;
 
   /// Styling options for hover documentation popup.
   final HoverDetailsStyle? hoverDetailsStyle;
@@ -330,6 +348,7 @@ class CodeForge extends StatefulWidget {
     this.scrollbarDecoration,
     this.ghostTextStyle,
     this.suggestionStyle,
+    this.lspSuggestionBuilder,
     this.hoverDetailsStyle,
     this.matchHighlightStyle,
     this.extraLanguages = const [],
@@ -3492,6 +3511,22 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                             .center,
                                                     children: [
                                                       if (item
+                                                              is LspCompletion &&
+                                                          widget.lspSuggestionBuilder !=
+                                                              null)
+                                                        Expanded(
+                                                          child: widget.lspSuggestionBuilder!(
+                                                            context,
+                                                            item,
+                                                            ((!_isMobile &&
+                                                                    (indx ==
+                                                                        _sugSelIndex)) ||
+                                                                _controller
+                                                                        .currentlySelectedSuggestion ==
+                                                                    indx),
+                                                          ),
+                                                        )
+                                                      else if (item
                                                           is LspCompletion) ...[
                                                         item.icon,
                                                         const SizedBox(
@@ -4803,7 +4838,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     _semanticTokenTimer?.cancel();
     final requestSerial = ++_semanticTokenRequestSerial;
-    _semanticTokenTimer = Timer(const Duration(milliseconds: 180), () async {
+    _semanticTokenTimer = Timer(const Duration(milliseconds: 200), () async {
       if (_semanticTokenRequestSerial != requestSerial) return;
       if (controller.documentVersion != currentVersion ||
           controller.openedFile != currentFile ||
@@ -5026,6 +5061,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: _editorTheme,
       baseTextStyle: _textStyle,
       languageId: languageId,
+      documentText: controller.text,
     );
     _layoutMap = LayoutMap();
     _rebuildLayoutMap();
@@ -5261,6 +5297,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: theme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      documentText: controller.text,
     );
     _paragraphCache.clear();
     _bracketCache.clear();
@@ -5280,6 +5317,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      documentText: controller.text,
     );
     _paragraphCache.clear();
     _bracketCache.clear();
@@ -5338,6 +5376,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: style,
       languageId: languageId,
+      documentText: controller.text,
     );
 
     _paragraphCache.clear();
@@ -5384,6 +5423,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       editorTheme: editorTheme,
       baseTextStyle: textStyle,
       languageId: languageId,
+      documentText: controller.text,
     );
     _paragraphCache.clear();
     _bracketCache.clear();

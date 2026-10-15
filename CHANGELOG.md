@@ -496,4 +496,8 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     - Because of the removal of rust, the ffi overhead has been completely removed and performance increased drastically. Lesser build time, smooth on 1M+ lines.
 
 ## 11.0.1
-   - Updated readme
+  - Updated readme
+
+## 11.1.0
+  - FIX: [#83](https://github.com/heckmon/code_forge/issues/83)
+  - FEATURE: Added new API `lspSuggestionBuilder` on `CodeForge` class, which let the users to directly modify the LSP suggestion decorations.

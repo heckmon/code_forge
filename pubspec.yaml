@@ -1,6 +1,6 @@
 name: code_forge
-description: "A sophisticated code editor package for flutter."
-version: 11.0.1
+description: "A powerful text editor widget, capable of handling 1M+ lines of text smoothly."
+version: 11.1.0
 homepage: https://github.com/heckmon/code_forge
 
 environment:

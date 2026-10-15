@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:universal_io/io.dart';
 
 import 'package:flutter/foundation.dart';
@@ -1235,7 +1236,21 @@ class CustomIcons {
   /// Package fonts declared in `pubspec.yaml` are loaded by Flutter. This
   /// method remains as an async compatibility hook for existing callers.
   static Future<void> loadAllCustomFonts() async {
-    await Future<void>.value();
+    final fonts = <String, String>{
+      'Method': 'assets/icons/method.ttf',
+      'Variable': 'assets/icons/variable.ttf',
+      'Class': 'assets/icons/class.ttf',
+      'Struct': 'assets/icons/struct.ttf',
+      'Event': 'assets/icons/event.ttf',
+      'Operator': 'assets/icons/operator.ttf',
+      'Interface': 'assets/icons/interface.ttf',
+      'Field': 'assets/icons/field.ttf',
+    };
+    for (final entry in fonts.entries) {
+      final loader = FontLoader(entry.key);
+      loader.addFont(rootBundle.load('packages/code_forge/${entry.value}'));
+      await loader.load();
+    }
   }
 }
 

@@ -138,7 +138,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.11.0
+  code_forge: ^11.1.0
 ```
 - 2 . Then run:
 
@@ -199,6 +199,48 @@ class _EditorState extends State<Editor> {
 ```
 
 ---
+
+### Web builds
+
+CodeForge supports Flutter web builds directly. Web applications cannot access
+local filesystem paths, so use `fileUrl` instead of `filePath` when loading a
+document in the browser:
+
+```dart
+CodeForge(
+  fileUrl: 'https://example.com/files/main.dart',
+  controller: controller,
+)
+```
+
+`fileUrl` is a raw URL whose contents are fetched by the editor. It is
+important to provide it for web builds because `filePath` is not available in
+the browser. If LSP features are enabled, also provide a document URI through
+the LSP configuration (or `fileUri`) so the language server can identify the
+virtual document. A browser cannot start an LSP process through stdio; use
+`LspSocketConfig` with an LSP server exposed over WebSocket:
+
+```dart
+final controller = CodeForgeController(
+  lspConfig: LspSocketConfig(
+    workspacePath: 'file:///workspace',
+    languageId: 'dart',
+    serverUrl: 'ws://localhost:9000',
+  ),
+);
+
+CodeForge(
+  controller: controller,
+  fileUrl: 'https://raw.githubusercontent.com/heckmon/code_forge/main/lib/code_forge/controller.dart',
+)
+```
+
+The WebSocket server can be hosted with
+[`lsp-ws-proxy`](https://github.com/qualified/lsp-ws-proxy), for example:
+
+```bash
+./lsp-ws-proxy --listen 0.0.0.0:9000 -- dart language-server --protocol=lsp
+```
 
 <details>
 
@@ -494,9 +536,12 @@ CodeForge(
 | `selectionStyle` | `CodeSelectionStyle?` | Selection styling |
 | `gutterStyle` | `GutterStyle?` | Gutter styling |
 | `suggestionStyle` | `SuggestionStyle?` | Suggestion popup styling |
+| `lspSuggestionBuilder` | `LspSuggestionBuilder?` | Builds custom content for each LSP completion row, including custom icons |
 | `hoverDetailsStyle` | `HoverDetailsStyle?` | Hover popup styling |
 | `matchHighlightStyle` | `MatchHighlightStyle?` | Highlight the matching words in the controller.findWord() API |
 | `filePath` | `String?` | File path for LSP |
+| `fileUri` | `String?` | Document URI used to identify the file for LSP, including virtual web documents |
+| `fileUrl` | `String?` | Raw URL used to load editor content; use this instead of `filePath` on web |
 | `initialText` | `String?` | Initial editor content |
 | `readOnly` | `bool` | Read-only mode |
 | `lineWrap` | `bool` | Line wrapping |
@@ -664,6 +709,35 @@ SuggestionStyle(
   textStyle: TextStyle(color: Colors.white),
 )
 ```
+
+### LspSuggestionBuilder
+
+Use `lspSuggestionBuilder` to replace the default content of each LSP
+completion row. The builder receives the completion item, its
+`CompletionItemType`, the raw completion payload, and the current selection
+state through `LspCompletion`.
+
+```dart
+CodeForge(
+  lspSuggestionBuilder: (context, suggestion, isSelected) {
+    return Row(
+      children: [
+        Icon(
+          Icons.code,
+          color: isSelected ? Colors.white : Colors.amber,
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: Text(suggestion.label)),
+      ],
+    );
+  },
+)
+```
+
+When the builder is `null`, CodeForge uses its default LSP completion row and
+the built-in type icons loaded from the icon fonts declared in `pubspec.yaml`.
+The editor continues to provide the row's selection, hover, splash, and tap
+behavior around the custom content.
 
 ### HoverDetailsStyle
 ```dart

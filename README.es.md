@@ -71,7 +71,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^11.11.0
+  code_forge: ^11.1.0
 ```
 
 2. Luego ejecuta:
@@ -128,4 +128,177 @@ class _EditorState extends State<Editor> {
 
 ---
 
-Para detalles avanzados (configuracion LSP, acciones de codigo, renombrado, selector de color y mas), consulta la documentacion en ingles: [README.md](./README.md)
+## Novedades de la version 11.0.0
+
+- Se elimino Rust y sus dependencias FFI; ahora el editor usa implementaciones
+  Dart puras.
+- Se agrego soporte web directo, sin necesidad del paquete
+  [code_forge_web](https://pub.dev/packages/code_forge_web).
+- Se mejoro el rendimiento y se redujo el tiempo de compilacion.
+
+## Instalacion
+
+Agrega CodeForge a `pubspec.yaml` y ejecuta `flutter pub get`:
+
+```yaml
+dependencies:
+  code_forge: ^11.1.0
+```
+
+## Uso rapido
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:code_forge/code_forge.dart';
+import 'package:re_highlight/languages/python.dart';
+import 'package:re_highlight/styles/atom-one-dark.dart';
+
+void main() => runApp(const MyApp());
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: CodeForge(
+          language: langPython,
+          editorTheme: atomOneDarkTheme,
+        ),
+      ),
+    );
+  }
+}
+```
+
+## Compilaciones web
+
+En el navegador no existe acceso a rutas del sistema de archivos. Usa
+`fileUrl` para cargar el contenido remoto; `filePath` no esta disponible en
+compilaciones web:
+
+```dart
+CodeForge(
+  fileUrl: 'https://example.com/files/main.dart',
+  controller: controller,
+)
+```
+
+Para habilitar LSP en web, usa `LspSocketConfig` y un servidor LSP expuesto
+mediante WebSocket. Proporciona un URI virtual con `fileUri` (o configura el
+URI en el servidor) para que el servidor pueda identificar el documento:
+
+```dart
+final controller = CodeForgeController(
+  lspConfig: LspSocketConfig(
+    workspacePath: 'file:///workspace',
+    languageId: 'dart',
+    serverUrl: 'ws://localhost:9000',
+  ),
+);
+
+CodeForge(
+  controller: controller,
+  fileUrl: 'https://raw.githubusercontent.com/heckmon/code_forge/main/lib/code_forge/controller.dart',
+  fileUri: 'file:///workspace/controller.dart',
+)
+```
+
+Un proceso LSP no puede iniciarse con stdio desde el navegador. Puedes usar
+[`lsp-ws-proxy`](https://github.com/qualified/lsp-ws-proxy):
+
+```bash
+./lsp-ws-proxy --listen 0.0.0.0:9000 -- dart language-server --protocol=lsp
+```
+
+Para obtener un mejor rendimiento, compila con `flutter build web --wasm`.
+
+## Integracion LSP
+
+CodeForge incluye un cliente LSP con autocompletado, documentacion al pasar el
+raton, diagnosticos, resaltado semantico, acciones de codigo, ayuda de firma,
+pistas en linea, ir a definicion y renombrado. Admite `LspSocketConfig` para
+WebSocket y `LspStdioConfig.start` para aplicaciones de escritorio.
+
+```dart
+final lspConfig = LspSocketConfig(
+  workspacePath: '/ruta/al/proyecto',
+  languageId: 'python',
+  serverUrl: 'ws://localhost:5656',
+);
+
+final controller = CodeForgeController(lspConfig: lspConfig);
+
+CodeForge(
+  controller: controller,
+  filePath: '/ruta/al/proyecto/main.py',
+)
+```
+
+En aplicaciones nativas, `filePath` identifica el archivo real. En web,
+combina `fileUrl` para descargar el contenido con `fileUri` para el documento
+virtual del servidor.
+
+## Personalizacion
+
+Todos los elementos principales se pueden personalizar mediante temas,
+`GutterStyle`, `CodeSelectionStyle`, `SuggestionStyle`,
+`HoverDetailsStyle` y `MatchHighlightStyle`. Tambien puedes proporcionar un
+`finderBuilder`, snippets, elementos de menu contextual y controladores de
+desplazamiento.
+
+### Constructor de sugerencias LSP
+
+`lspSuggestionBuilder` permite reemplazar el contenido de cada fila de
+autocompletado LSP y elegir tus propios iconos:
+
+```dart
+CodeForge(
+  lspSuggestionBuilder: (context, suggestion, isSelected) {
+    return Row(
+      children: [
+        Icon(Icons.code, color: isSelected ? Colors.white : Colors.amber),
+        const SizedBox(width: 8),
+        Expanded(child: Text(suggestion.label)),
+      ],
+    );
+  },
+)
+```
+
+`suggestion.itemType` indica el tipo LSP (`method`, `class_`, `variable`,
+`keyword`, etc.) y `suggestion.completionItem` contiene los datos originales
+del servidor. Si el builder es `null`, se mantiene la fila predeterminada y
+los iconos TTF declarados en `pubspec.yaml`. El editor conserva la seleccion,
+el hover y el comportamiento de toque alrededor del contenido personalizado.
+
+## Referencia de API
+
+Propiedades importantes de `CodeForge`: `controller`, `editorTheme`,
+`language`, `textStyle`, `innerPadding`, `selectionStyle`, `gutterStyle`,
+`suggestionStyle`, `lspSuggestionBuilder`, `hoverDetailsStyle`,
+`matchHighlightStyle`, `filePath`, `fileUri`, `fileUrl`, `initialText`,
+`readOnly`, `lineWrap`, `autoFocus`, `enableFolding`, `enableGuideLines`,
+`enableGutter`, `enableSuggestions`, `enableKeyboardSuggestions`,
+`customCodeSnippets`, `customContextMenuItems`, `finderBuilder` y
+`deleteFoldRangeOnDeletingFirstLine`.
+
+El `CodeForgeController` permite editar texto y selecciones, deshacer y
+rehacer, buscar, desplazarse, plegar codigo, gestionar varios cursores,
+usar ghost text y ejecutar las funciones LSP. Consulta la
+[documentacion completa de la API](https://pub.dev/documentation/code_forge/latest/)
+para ver todos los metodos y tipos.
+
+## Atajos de teclado
+
+CodeForge incluye atajos para editar, navegar, cambiar la sangria, seleccionar
+texto, mostrar sugerencias LSP y solicitar ayuda de firma. Se pueden
+personalizar mediante `CodeForgeKeyboardShortcuts`.
+
+## Busqueda, licencia y ejemplos
+
+El editor incluye busqueda y reemplazo, resaltado de coincidencias, plegado,
+diagnosticos y soporte RTL. Consulta el [README en ingles](./README.md) y la
+[demostracion de funciones](https://heckmon.github.io/code_forge_demo/) para
+ver ejemplos completos. CodeForge se distribuye bajo la licencia MIT.

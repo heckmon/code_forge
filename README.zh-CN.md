@@ -70,7 +70,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^11.11.0
+  code_forge: ^11.1.0
 ```
 
 2. 然后执行:
@@ -127,4 +127,167 @@ class _EditorState extends State<Editor> {
 
 ---
 
-更多高级能力（LSP 配置、代码动作、重命名、颜色选择器等）请参考英文文档: [README.md](./README.md)
+## 11.0.0 版本更新
+
+- 移除了 Rust 和 FFI 依赖，改为纯 Dart 实现。
+- 现在直接支持 Web，不再需要
+  [code_forge_web](https://pub.dev/packages/code_forge_web)。
+- 显著提升性能并缩短构建时间。
+
+## 安装
+
+在 `pubspec.yaml` 中添加依赖，然后运行 `flutter pub get`：
+
+```yaml
+dependencies:
+  code_forge: ^11.1.0
+```
+
+## 快速开始
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:code_forge/code_forge.dart';
+import 'package:re_highlight/languages/python.dart';
+import 'package:re_highlight/styles/atom-one-dark.dart';
+
+void main() => runApp(const MyApp());
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: CodeForge(
+          language: langPython,
+          editorTheme: atomOneDarkTheme,
+        ),
+      ),
+    );
+  }
+}
+```
+
+## Web 构建
+
+浏览器无法访问本地文件系统路径。Web 构建中不能使用 `filePath`，请使用
+`fileUrl` 加载远程文件内容：
+
+```dart
+CodeForge(
+  fileUrl: 'https://example.com/files/main.dart',
+  controller: controller,
+)
+```
+
+若要在 Web 中启用 LSP，请使用 `LspSocketConfig`，并将 LSP 服务器通过
+WebSocket 暴露出来。同时提供 `fileUri`（或在 LSP 配置中设置 URI）作为
+虚拟文档标识：
+
+```dart
+final controller = CodeForgeController(
+  lspConfig: LspSocketConfig(
+    workspacePath: 'file:///workspace',
+    languageId: 'dart',
+    serverUrl: 'ws://localhost:9000',
+  ),
+);
+
+CodeForge(
+  controller: controller,
+  fileUrl: 'https://raw.githubusercontent.com/heckmon/code_forge/main/lib/code_forge/controller.dart',
+  fileUri: 'file:///workspace/controller.dart',
+)
+```
+
+浏览器不能通过 stdio 启动 LSP 进程，可以使用
+[`lsp-ws-proxy`](https://github.com/qualified/lsp-ws-proxy)：
+
+```bash
+./lsp-ws-proxy --listen 0.0.0.0:9000 -- dart language-server --protocol=lsp
+```
+
+为了获得更好的性能，建议使用 `flutter build web --wasm` 构建。
+
+## LSP 集成
+
+CodeForge 内置 LSP 客户端，支持智能补全、悬停文档、诊断信息、语义高亮、
+代码动作、签名帮助、内联提示、跳转到定义和符号重命名。桌面应用可以
+使用 `LspStdioConfig.start`，也可以使用 `LspSocketConfig` 连接 WebSocket。
+
+```dart
+final lspConfig = LspSocketConfig(
+  workspacePath: '/path/to/project',
+  languageId: 'python',
+  serverUrl: 'ws://localhost:5656',
+);
+
+final controller = CodeForgeController(lspConfig: lspConfig);
+
+CodeForge(
+  controller: controller,
+  filePath: '/path/to/project/main.py',
+)
+```
+
+原生平台使用 `filePath` 标识真实文件；Web 平台使用 `fileUrl` 下载内容，
+并使用 `fileUri` 标识 LSP 服务器中的虚拟文档。
+
+## 自定义
+
+可以通过主题、`GutterStyle`、`CodeSelectionStyle`、`SuggestionStyle`、
+`HoverDetailsStyle` 和 `MatchHighlightStyle` 定制编辑器。还可以提供
+`finderBuilder`、代码片段、右键菜单项以及自定义滚动控制器。
+
+### LSP 补全建议构建器
+
+`lspSuggestionBuilder` 可以替换每一条 LSP 补全建议的内容，并允许使用
+自定义图标：
+
+```dart
+CodeForge(
+  lspSuggestionBuilder: (context, suggestion, isSelected) {
+    return Row(
+      children: [
+        Icon(Icons.code, color: isSelected ? Colors.white : Colors.amber),
+        const SizedBox(width: 8),
+        Expanded(child: Text(suggestion.label)),
+      ],
+    );
+  },
+)
+```
+
+`suggestion.itemType` 表示 LSP 类型（例如 `method`、`class_`、`variable`、
+`keyword`），`suggestion.completionItem` 保存服务器返回的原始数据。如果
+builder 为 `null`，则继续使用默认建议行和 `pubspec.yaml` 中声明的 TTF
+图标。编辑器仍然负责自定义内容外围的选中、悬停和点击行为。
+
+## API 参考
+
+`CodeForge` 的重要属性包括：`controller`、`editorTheme`、`language`、
+`textStyle`、`innerPadding`、`selectionStyle`、`gutterStyle`、
+`suggestionStyle`、`lspSuggestionBuilder`、`hoverDetailsStyle`、
+`matchHighlightStyle`、`filePath`、`fileUri`、`fileUrl`、`initialText`、
+`readOnly`、`lineWrap`、`autoFocus`、`enableFolding`、`enableGuideLines`、
+`enableGutter`、`enableSuggestions`、`enableKeyboardSuggestions`、
+`customCodeSnippets`、`customContextMenuItems`、`finderBuilder` 和
+`deleteFoldRangeOnDeletingFirstLine`。
+
+`CodeForgeController` 支持文本和选区编辑、撤销/重做、搜索、滚动、代码折叠、
+多光标、ghost text 以及 LSP 操作。所有方法和类型请查看
+[完整 API 文档](https://pub.dev/documentation/code_forge/latest/)。
+
+## 键盘快捷键
+
+CodeForge 内置编辑、导航、缩进、选择、LSP 补全和签名帮助快捷键，可以通过
+`CodeForgeKeyboardShortcuts` 自定义。
+
+## 搜索、许可证和示例
+
+编辑器支持搜索与替换、匹配高亮、代码折叠、诊断信息和 RTL 语言。更多完整
+示例请查看[英文 README](./README.md)和
+[功能演示](https://heckmon.github.io/code_forge_demo/)。CodeForge 使用 MIT
+许可证发布。

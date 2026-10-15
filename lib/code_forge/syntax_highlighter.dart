@@ -44,11 +44,15 @@ class SyntaxHighlighter {
   final String? languageId;
   final Map<int, HighlightedLine> _grammarCache = {}, _mergedCache = {};
   final Map<int, List<SemanticWordSpan>> _lineSemanticSpans = {};
-  final Map<String, TextSpan?> _lineSpanCache = {};
+  final Map<int, HighlightedLine> _lineSpanCache = {};
+  final Map<int, List<({int start, int end})>> _multilineCommentRanges = {};
+  String? _documentText;
   late final String _langId;
   late final Highlight _highlight;
   late final Map<String, TextStyle> _resolvedTheme;
   late final List<Mode> _registeredExtraLanguages;
+  late final List<Mode> _blockCommentModes;
+  late final List<({RegExp begin, RegExp end})> _blockCommentPatterns;
   late final Map<String, List<String>> _semanticMapping;
   static const int isolateThreshold = 500;
   static const int _cacheKeepMargin = 500;
@@ -65,6 +69,7 @@ class SyntaxHighlighter {
     this.baseTextStyle,
     this.languageId,
     this.extraLanguages = const [],
+    String? documentText,
   }) {
     _langId = language.hashCode.toString();
     _resolvedTheme = _buildResolvedTheme(editorTheme);
@@ -78,6 +83,17 @@ class SyntaxHighlighter {
     }
 
     _semanticMapping = getSemanticMapping(languageId ?? '');
+    _blockCommentModes = <Mode>[];
+    _collectBlockCommentModes(language, _blockCommentModes, <Mode>{});
+    _blockCommentPatterns = [
+      for (final mode in _blockCommentModes)
+        if (_modeRegExp(mode.begin) case final begin?)
+          if (_modeRegExp(mode.end) case final end?) (begin: begin, end: end),
+    ];
+    if (documentText != null) {
+      _documentText = documentText;
+      _setDocumentText(documentText);
+    }
   }
 
   void updateSemanticTokens(
@@ -141,6 +157,16 @@ class SyntaxHighlighter {
     String deletedText,
     String fullText,
   ) {
+    if (!_tryUpdateCommentRangesForSimpleEdit(
+      editLine: editLine,
+      editStart: editStart,
+      oldEnd: oldEnd,
+      insertedText: insertedText,
+      deletedText: deletedText,
+      fullText: fullText,
+    )) {
+      updateDocumentText(fullText);
+    }
     _documentVersion++;
     final insertedLineBreaks = '\n'.allMatches(insertedText).length;
     final deletedLineBreaks = '\n'.allMatches(deletedText).length;
@@ -245,6 +271,15 @@ class SyntaxHighlighter {
     _version++;
   }
 
+  void updateDocumentText(String text) {
+    if (_documentText == text) return;
+    _documentText = text;
+    _setDocumentText(text);
+    _mergedCache.clear();
+    _lineSpanCache.clear();
+    _version++;
+  }
+
   void invalidateAll() {
     _grammarCache.clear();
     _mergedCache.clear();
@@ -291,11 +326,16 @@ class SyntaxHighlighter {
 
     final semanticSpans = _lineSemanticSpans[lineIndex];
     if (_isEditing || semanticSpans == null || semanticSpans.isEmpty) {
-      if (_lineSpanCache.containsKey(lineText)) {
-        return _lineSpanCache[lineText];
+      final cachedLine = _lineSpanCache[lineIndex];
+      if (cachedLine != null && cachedLine.text == lineText) {
+        return cachedLine.span;
       }
       if (cachedGrammarSpan != null) {
-        _lineSpanCache[lineText] = cachedGrammarSpan;
+        _lineSpanCache[lineIndex] = HighlightedLine(
+          lineText,
+          cachedGrammarSpan,
+          _version,
+        );
         return cachedGrammarSpan;
       }
     }
@@ -307,20 +347,30 @@ class SyntaxHighlighter {
         semanticSpans,
       );
 
-      _lineSpanCache[lineText] = mergedSpan;
+      _lineSpanCache[lineIndex] = HighlightedLine(
+        lineText,
+        mergedSpan,
+        _version,
+      );
       _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
       return mergedSpan;
     }
 
-    if (_lineSpanCache.containsKey(lineText) &&
+    final cachedLine = _lineSpanCache[lineIndex];
+    if (cachedLine != null &&
+        cachedLine.text == lineText &&
         (semanticSpans == null || semanticSpans.isEmpty || _isEditing)) {
-      return _lineSpanCache[lineText];
+      return cachedLine.span;
     }
 
-    final grammarSpan = _highlightLine(lineText);
+    final grammarSpan = _highlightLine(lineIndex, lineText);
 
     if (_isEditing) {
-      _lineSpanCache[lineText] = grammarSpan;
+      _lineSpanCache[lineIndex] = HighlightedLine(
+        lineText,
+        grammarSpan,
+        _version,
+      );
       return grammarSpan;
     }
 
@@ -330,7 +380,7 @@ class SyntaxHighlighter {
       semanticSpans,
     );
 
-    _lineSpanCache[lineText] = mergedSpan;
+    _lineSpanCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
     _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
 
     return mergedSpan;
@@ -380,7 +430,11 @@ class SyntaxHighlighter {
         grammarCache.span,
         semanticSpans,
       );
-      _lineSpanCache[lineText] = mergedSpan;
+      _lineSpanCache[lineIndex] = HighlightedLine(
+        lineText,
+        mergedSpan,
+        _version,
+      );
       _mergedCache[lineIndex] = HighlightedLine(lineText, mergedSpan, _version);
       return mergedSpan;
     }
@@ -621,7 +675,7 @@ class SyntaxHighlighter {
     return null;
   }
 
-  TextSpan? _highlightLine(String lineText) {
+  TextSpan? _highlightLine(int lineIndex, String lineText) {
     if (lineText.isEmpty) return null;
 
     try {
@@ -632,9 +686,13 @@ class SyntaxHighlighter {
       if (_isTsxOrJsx && _looksLikeJsxTagLine(lineText)) {
         span = _applyJsxTagFallback(lineText, span);
       }
-      return span;
+      return _applyMultilineCommentStyle(lineIndex, lineText, span);
     } catch (e) {
-      return TextSpan(text: lineText, style: baseTextStyle);
+      return _applyMultilineCommentStyle(
+        lineIndex,
+        lineText,
+        TextSpan(text: lineText, style: baseTextStyle),
+      );
     }
   }
 
@@ -908,7 +966,7 @@ class SyntaxHighlighter {
       if (requestVersion != _version) return;
       for (final entry in linesToProcess.entries) {
         if (requestVersion != _version) return;
-        final span = _highlightLine(entry.value);
+        final span = _highlightLine(entry.key, entry.value);
         _grammarCache[entry.key] = HighlightedLine(entry.value, span, _version);
       }
       return;
@@ -930,7 +988,13 @@ class SyntaxHighlighter {
 
     for (final entry in results.entries) {
       final spanData = entry.value;
-      final textSpan = spanData != null ? _spanDataToTextSpan(spanData) : null;
+      final textSpan = spanData != null
+          ? _applyMultilineCommentStyle(
+              entry.key,
+              linesToProcess[entry.key]!,
+              _spanDataToTextSpan(spanData),
+            )
+          : null;
       _grammarCache[entry.key] = HighlightedLine(
         linesToProcess[entry.key]!,
         textSpan,
@@ -984,6 +1048,240 @@ class SyntaxHighlighter {
     );
   }
 
+  void _setDocumentText(String text) {
+    _multilineCommentRanges.clear();
+    if (_blockCommentPatterns.isEmpty || text.isEmpty) return;
+
+    final ranges = <({int start, int end})>[];
+    var cursor = 0;
+    while (cursor < text.length) {
+      ({int start, RegExp begin, RegExp close})? nextComment;
+      for (final pattern in _blockCommentPatterns) {
+        final begin = pattern.begin;
+        final end = pattern.end;
+        final match = _firstMatchAtOrAfter(begin, text, cursor);
+        if (match == null) continue;
+        final start = match.start;
+        if (nextComment == null || start < nextComment.start) {
+          nextComment = (start: start, begin: begin, close: end);
+        }
+      }
+      if (nextComment == null) break;
+
+      final openerEnd =
+          nextComment.start +
+          _matchLengthAt(nextComment.begin, text, nextComment.start);
+      final closeMatch = _firstMatchAtOrAfter(
+        nextComment.close,
+        text,
+        openerEnd,
+      );
+      if (closeMatch == null) break;
+      final end = openerEnd + closeMatch.end;
+      if (end > nextComment.start) {
+        ranges.add((start: nextComment.start, end: end));
+      }
+      cursor = end;
+    }
+
+    final lineStarts = <int>[0];
+    for (var i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) == 10) lineStarts.add(i + 1);
+    }
+    for (final range in ranges) {
+      var lineIndex = _lineIndexAtOffset(lineStarts, range.start);
+      while (lineIndex < lineStarts.length &&
+          lineStarts[lineIndex] < range.end) {
+        final lineStart = lineStarts[lineIndex];
+        final lineEnd = lineIndex + 1 < lineStarts.length
+            ? lineStarts[lineIndex + 1] - 1
+            : text.length;
+        final overlapStart = range.start.clamp(lineStart, lineEnd);
+        final overlapEnd = range.end.clamp(lineStart, lineEnd);
+        if (overlapEnd > overlapStart) {
+          _multilineCommentRanges.putIfAbsent(lineIndex, () => []).add((
+            start: overlapStart - lineStart,
+            end: overlapEnd - lineStart,
+          ));
+        }
+        lineIndex++;
+      }
+    }
+  }
+
+  int _lineIndexAtOffset(List<int> lineStarts, int offset) {
+    var low = 0;
+    var high = lineStarts.length - 1;
+    while (low < high) {
+      final middle = (low + high + 1) >> 1;
+      if (lineStarts[middle] <= offset) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return low;
+  }
+
+  void _collectBlockCommentModes(
+    Mode mode,
+    List<Mode> result,
+    Set<Mode> visited,
+  ) {
+    if (!visited.add(mode)) return;
+    if (_isCommentMode(mode) &&
+        _modeRegExp(mode.begin) != null &&
+        _modeRegExp(mode.end) != null &&
+        mode.end != r'$' &&
+        mode.end != r'\n') {
+      result.add(mode);
+    }
+    final contains = mode.contains;
+    if (contains is Mode) {
+      _collectBlockCommentModes(contains, result, visited);
+    } else if (contains is List) {
+      for (final child in contains.whereType<Mode>()) {
+        _collectBlockCommentModes(child, result, visited);
+      }
+    }
+    final variants = mode.variants;
+    if (variants is List) {
+      for (final variant in variants.whereType<Mode>()) {
+        _collectBlockCommentModes(variant, result, visited);
+      }
+    }
+  }
+
+  bool _isCommentMode(Mode mode) {
+    // ignore: deprecated_member_use
+    final scope = mode.scope ?? mode.className;
+    if (scope is String) {
+      return scope == 'comment' || scope.startsWith('comment.');
+    }
+    if (scope is Map) {
+      return scope.values.any(
+        (value) =>
+            value is String &&
+            (value == 'comment' || value.startsWith('comment.')),
+      );
+    }
+    return false;
+  }
+
+  RegExp? _modeRegExp(dynamic pattern) {
+    if (pattern is! String || pattern.isEmpty) return null;
+    try {
+      return RegExp(pattern);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int _matchLengthAt(RegExp expression, String text, int offset) {
+    final match = expression.matchAsPrefix(text, offset);
+    return match != null ? match.end - offset : 0;
+  }
+
+  RegExpMatch? _firstMatchAtOrAfter(
+    RegExp expression,
+    String text,
+    int offset,
+  ) {
+    for (final match in expression.allMatches(text, offset)) {
+      return match;
+    }
+    return null;
+  }
+
+  bool _tryUpdateCommentRangesForSimpleEdit({
+    required int editLine,
+    required int editStart,
+    required int oldEnd,
+    required String insertedText,
+    required String deletedText,
+    required String fullText,
+  }) {
+    if (insertedText.contains('\n') ||
+        insertedText.contains('\r') ||
+        deletedText.contains('\n') ||
+        deletedText.contains('\r') ||
+        _containsCommentDelimiter(insertedText) ||
+        _containsCommentDelimiter(deletedText)) {
+      return false;
+    }
+
+    final lineStart = fullText.lastIndexOf('\n', editStart - 1) + 1;
+    final localStart = editStart - lineStart;
+    final deletedLength = oldEnd - editStart;
+    final delta = insertedText.length - deletedLength;
+    final ranges = _multilineCommentRanges[editLine];
+    if (ranges != null && delta != 0) {
+      for (var i = 0; i < ranges.length; i++) {
+        final range = ranges[i];
+        if (range.end <= localStart) continue;
+        if (range.start >= localStart + deletedLength) {
+          ranges[i] = (start: range.start + delta, end: range.end + delta);
+        } else {
+          ranges[i] = (
+            start: range.start,
+            end: (range.end + delta).clamp(range.start, fullText.length),
+          );
+        }
+      }
+    }
+    _documentText = fullText;
+    return true;
+  }
+
+  bool _containsCommentDelimiter(String text) {
+    if (text.isEmpty) return false;
+    for (final pattern in _blockCommentPatterns) {
+      if (pattern.begin.hasMatch(text) || pattern.end.hasMatch(text)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  TextSpan? _applyMultilineCommentStyle(
+    int lineIndex,
+    String lineText,
+    TextSpan? span,
+  ) {
+    final ranges = _multilineCommentRanges[lineIndex];
+    if (ranges == null || ranges.isEmpty || lineText.isEmpty) return span;
+
+    final commentStyle = _resolvedTheme['comment'] ?? baseTextStyle;
+    final segments = <({String text, TextStyle? style})>[];
+    _flattenGrammarSpan(span, segments, baseTextStyle);
+    final children = <TextSpan>[];
+    var current = 0;
+
+    for (final range in ranges) {
+      final start = range.start.clamp(0, lineText.length);
+      final end = range.end.clamp(start, lineText.length);
+      if (start > current) {
+        _addGrammarSegments(children, segments, current, start, lineText);
+      }
+      if (end > start) {
+        children.add(
+          TextSpan(text: lineText.substring(start, end), style: commentStyle),
+        );
+      }
+      current = end;
+    }
+    if (current < lineText.length) {
+      _addGrammarSegments(
+        children,
+        segments,
+        current,
+        lineText.length,
+        lineText,
+      );
+    }
+    return TextSpan(style: baseTextStyle, children: children);
+  }
+
   Map<String, TextStyle> _buildResolvedTheme(Map<String, TextStyle> theme) {
     final resolved = Map<String, TextStyle>.from(theme);
 
@@ -1002,6 +1300,7 @@ class SyntaxHighlighter {
     _mergedCache.clear();
     _lineSemanticSpans.clear();
     _lineSpanCache.clear();
+    _multilineCommentRanges.clear();
   }
 }
 
