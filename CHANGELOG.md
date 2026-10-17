@@ -504,3 +504,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 11.1.1
   - Added repository field in pubspec.yaml
+
+## 11.2.0
+  - FIX: [#109](https://github.com/heckmon/code_forge/issues/109)

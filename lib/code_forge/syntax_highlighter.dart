@@ -1210,7 +1210,9 @@ class SyntaxHighlighter {
       return false;
     }
 
-    final lineStart = fullText.lastIndexOf('\n', editStart - 1) + 1;
+    final lineStart = editStart == 0
+        ? 0
+        : fullText.lastIndexOf('\n', editStart - 1) + 1;
     final localStart = editStart - lineStart;
     final deletedLength = oldEnd - editStart;
     final delta = insertedText.length - deletedLength;

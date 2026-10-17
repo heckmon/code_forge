@@ -71,7 +71,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^11.1.0
+  code_forge: ^11.2.0
 ```
 
 2. Luego ejecuta:
