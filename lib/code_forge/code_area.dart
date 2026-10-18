@@ -6446,6 +6446,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   void _scrollToLine(int line) {
+    if (!attached || !vscrollController.hasClients) return;
     if (line < 0 || line >= controller.lineCount) return;
 
     for (final fold in _foldRanges.values.where((f) => f != null)) {
@@ -6486,6 +6487,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           curve: Curves.easeInOut,
         )
         .then((_) {
+          if (!attached) return;
           _highlightedLine = line;
           lineHighlightController.forward(from: 0.0);
         });

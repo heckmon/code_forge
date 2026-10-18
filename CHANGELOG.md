@@ -507,3 +507,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 11.2.0
   - FIX: [#109](https://github.com/heckmon/code_forge/issues/109)
+
+## 11.3.0
+  - FIX: [#110](https://github.com/heckmon/code_forge/issues/110)

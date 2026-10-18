@@ -71,7 +71,7 @@
 
 ```yaml
 dependencies:
-  code_forge: ^11.2.0
+  code_forge: ^11.3.0
 ```
 
 2. Luego ejecuta:
@@ -142,7 +142,7 @@ Agrega CodeForge a `pubspec.yaml` y ejecuta `flutter pub get`:
 
 ```yaml
 dependencies:
-  code_forge: ^11.1.0
+  code_forge: ^11.3.0
 ```
 
 ## Uso rapido
