@@ -63,9 +63,12 @@
 |---------|:---------:|:------:|
 | Syntax Highlighting | 180+ languages<br>[Availabe languages](https://github.com/reqable/re-highlight/tree/main/lib/languages) | ✅ |
 | Code Folding | Smart detection |  Limited |
+| Multi cursor | Spawn without limit <br> (Alt + Click) | ❌ |
 | LSP Integration | Full support | ❌ |
-| AI Completion | Multi-model | ❌ |
-| Semantic Tokens | Real-time | ❌ |
+| Indent guide lines | VScode like guide lines | ❌ |
+| RTL Support | For Arabic like langauges| ❌ |
+| Git diff UI | Show additions and deletions | ❌ |
+| AI Completion | Ghost text support | ❌ |
 | Diagnostics | Inline errors | ❌ |
 | Undo/Redo | Smart grouping | Basic |
 | Full Theming |[Available themes](https://github.com/reqable/re-highlight/tree/main/lib/styles) | Limited |
@@ -75,7 +78,6 @@
 - Uses the rope data structure instead of regular char array to to handle large text.
 - Uses flutter's low level `RenderBox` and `ParagrahBuilder` to render text insted of `TextField` for efficiency.
 - Built in [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) client
-- AI Code completion.
 
 ---
 
@@ -128,7 +130,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.3.0
+  code_forge: ^11.3.1
 ```
 - 2 . Then run:
 
@@ -833,7 +835,9 @@ CodeForge supports a variety of keyboard shortcuts for efficient editing:
 
 ## Used by
 
- - [ROXUM IDE](https://github.com/heckmon/roxum-ide) - A minimal and powerful IDE/Code editor for Android.
+ - [Roxum IDE](https://github.com/heckmon/roxum-ide) - A minimal and powerful IDE/Code editor for Android.
+ - [Haha Note](https://github.com/catpuppyapp/HahaNote-Release) - An open source note taking app, supports e2ee sync
+ - [Proxypin](https://github.com/wanghongenpin/proxypin) - An open source traffic capture HTTP(S) with multiplatform support.
 
   ##### *Want to show your app here? Create a discussion in [this](https://github.com/heckmon/code_forge/discussions/categories/used-by) thread with your app details.*
 ---
