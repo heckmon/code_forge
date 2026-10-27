@@ -4585,8 +4585,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   CodeSelectionStyle _selectionStyle;
   List<LspErrors> _diagnostics;
   int _cachedCaretOffset = -1, _cachedCaretLine = 0, _cachedCaretLineStart = 0;
-  Rect? _lastImeCaretRect;
-  Rect? _lastImeComposingRect;
+  Rect? _lastImeCaretRect, _lastImeComposingRect;
   Size? _lastImeEditableSize;
   double _imeComposingCaretDx = 0.0, _imeComposingWidth = 0.0;
   double _screenWidth = 0.0;
@@ -4616,16 +4615,13 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   double _longLineWidth = 0.0, _wrapWidth = double.infinity;
   List<double> _wrappedHeightDeltas = const [];
   int _wrappedHeightIndexLineCount = -1;
-  double _wrappedHeightEstimate = 0.0;
+  double _wrappedHeightEstimate = 0.0, _cachedRtlContentWidth = 0.0;
+  double _cachedTotalHeight = 0.0;
   bool _wrappedHeightEstimateFromSamples = false;
-  double _cachedRtlContentWidth = 0.0;
-  Timer? _resizeTimer, _layoutDebounceTimer;
-  Timer? _bracketHighlightResumeTimer;
+  Timer? _resizeTimer, _layoutDebounceTimer, _bracketHighlightResumeTimer;
   int _lastSemanticTokenRequestVersion = -1;
   int _lastSemanticTokenRequestStartLine = -1;
-  int _lastSemanticTokenRequestEndLine = -1;
-  int _semanticTokenRequestSerial = 0;
-  double _cachedTotalHeight = 0.0;
+  int _lastSemanticTokenRequestEndLine = -1, _semanticTokenRequestSerial = 0;
   String? _aiResponse, _lastProcessedText;
   int _lastProcessedContentVersion = -1;
   TextSelection? _lastSelectionForAi;
@@ -4636,8 +4632,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   int? _ghostTextAnchorLine, _highlightedLine;
   int _lastAppliedSemanticVersion = -1, _lastDocumentVersion = -1;
   bool _suspendBracketHighlight = false;
-  int _previousLineCount = 0;
-  int _ghostTextLineCount = 0, _cachedLineCount = 0;
+  int _previousLineCount = 0, _ghostTextLineCount = 0, _cachedLineCount = 0;
   int _virtualRemovedTotalLineCount = 0;
   Animation<double>? _lineHighlightAnimation;
 
@@ -5976,15 +5971,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
                   lineIdx <= f.endIndex,
             );
             _layoutMap.insertLine(
-              lineIdx: BigInt.from(lineIdx),
-              lenChars: BigInt.from(controller.getLineText(lineIdx).length),
+              lineIdx: lineIdx,
               height: _lineHeight,
               isFolded: isFolded,
             );
           }
         } else if (lineDelta < 0) {
           for (int i = 0; i < -lineDelta; i++) {
-            _layoutMap.removeLine(lineIdx: BigInt.from(insertionLine + 1));
+            _layoutMap.removeLine(lineIdx: insertionLine + 1);
           }
           _updateLayoutMapLine(insertionLine);
         }
@@ -6129,7 +6123,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
 
     _layoutMap.rebuild(
-      lineLengths: controller.rope.lineLengths(),
+      lineCount: controller.rope.lineCount,
       height: _lineHeight,
       foldedLines: foldedLines,
     );
@@ -6144,8 +6138,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           f != null && f.isFolded && line > f.startIndex && line <= f.endIndex,
     );
     _layoutMap.updateLine(
-      lineIdx: BigInt.from(line),
-      lenChars: BigInt.from(controller.rope.lineLengthAt(line)),
+      lineIdx: line,
       height: _lineHeight,
       isFolded: isFolded,
     );
@@ -7869,6 +7862,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
 
     double currentY = firstVisibleLineY;
+    final contentWidth =
+        size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
     for (int i = firstVisibleLine; i <= lastVisibleLine && i < lineCount; i++) {
       if (hasActiveFolds && _isLineFolded(i)) continue;
 
@@ -7879,8 +7874,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       ui.Paragraph paragraph;
       String lineText;
 
-      final contentWidth =
-          size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
       final paragraphWidth = lineWrap
           ? _wrapWidth
           : (isRTL ? max(contentWidth * 3, 10000.0) : null);
@@ -8962,9 +8955,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final rustBlocks = guidesComputeViewport(
       rope: controller.rope.core,
-      firstVisible: BigInt.from(firstVisibleLine),
-      lastVisible: BigInt.from(lastVisibleLine),
-      tabSize: BigInt.from(tabSize),
+      firstVisible: firstVisibleLine,
+      lastVisible: lastVisibleLine,
+      tabSize: tabSize,
     );
 
     for (final b in rustBlocks) {

@@ -513,3 +513,6 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 11.3.1
   - Updated README
+
+## 11.4.0
+  - ENHANCEMENT: Massive performance improvement.

@@ -1,8 +1,12 @@
-import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
+import 'package:flutter/widgets.dart';
+
+/// A run of text with a single resolved direction. Offsets are UTF-16 code
+/// units, matching [TextSelection], [String.length] and LSP positions.
 class BiDiSegment {
-  final BigInt start;
-  final BigInt end;
+  final int start;
+  final int end;
   final TextDirection direction;
 
   const BiDiSegment({
@@ -13,37 +17,58 @@ class BiDiSegment {
 }
 
 class SelectionState {
-  final BigInt baseOffset;
-  final BigInt extentOffset;
+  final int baseOffset;
+  final int extentOffset;
 
   const SelectionState({required this.baseOffset, required this.extentOffset});
 }
 
-/// A high-fanout B-tree rope.
+/// A persistent (immutable-node) B-tree rope indexed in UTF-16 code units.
 ///
-/// Leaves contain bounded Unicode chunks. Internal nodes cache character and
-/// newline counts, allowing edits and line/character seeks to descend the tree
-/// without materialising the document.
+/// Design notes
+/// * All offsets and lengths are UTF-16 code units, so they line up with
+///   Flutter's `TextSelection`/`TextPosition`, `String.length` and LSP.
+///   Leaf boundaries never split a surrogate pair. Callers must not pass an
+///   offset that lands in the middle of a pair.
+/// * Nodes are immutable. An edit copies only the O(log n) nodes on the path
+///   and shares the rest, so [copy] is O(1) and the `*Immutable` helpers cost
+///   O(log n). Cheap snapshots make undo history simple.
+/// * Every node caches length, newline count and strong RTL/LTR counts, so
+///   line seeks and [textDirection] are O(log n) / O(1).
+/// * Deletes merge underfull siblings so the tree does not degrade.
+///
+/// Only `\n` counts as a line break. `\r` before `\n` is stripped from line
+/// text. Normalise lone `\r` on load if you need to support old Mac files.
+///
+/// Complexity (n = document length, k = result size):
+///   insert/delete/replace      O(log n + leaf size)
+///   getLineStartOffset etc.    O(log n + leaf size)
+///   slice / lineRange          O(log n + k)
+///   getText / lineLengths      O(n)  (export, save, stats only)
 class Rope {
   static const _leafCapacity = 1024;
   static const _nodeCapacity = 32;
-  late _RopeNode _root;
-  SelectionState _selection = SelectionState(
-    baseOffset: BigInt.zero,
-    extentOffset: BigInt.zero,
+  static const _minLeaf = _leafCapacity ~/ 4;
+  static const _minNode = _nodeCapacity ~/ 4;
+  static const _loadChunk = _leafCapacity * 3 ~/ 4;
+  static const _insertChunk = _leafCapacity ~/ 2;
+
+  _Node _root;
+  SelectionState _selection = const SelectionState(
+    baseOffset: 0,
+    extentOffset: 0,
   );
 
-  Rope([String initialText = '']) {
-    _root = _RopeNode.fromText(initialText);
-  }
+  Rope([String initialText = '']) : _root = _Node.fromText(initialText);
 
   Rope._fromRoot(this._root, this._selection);
 
   Rope get core => this;
-  int get length => _root.charCount;
-  int get lineCount => _root.newlineCount + 1;
+  int get length => _root.length;
+  int get lineCount => _root.newlines + 1;
 
-  Rope copy() => Rope._fromRoot(_root.clone(), _selection);
+  /// O(1): nodes are immutable, so the snapshot shares the whole tree.
+  Rope copy() => Rope._fromRoot(_root, _selection);
 
   Rope insertImmutable(int position, String text) {
     final result = copy();
@@ -57,34 +82,39 @@ class Rope {
     return result;
   }
 
+  /// Appends [other] leaf by leaf. Never materialises either document.
   Rope concatImmutable(Rope other) {
     final result = copy();
-    result.insert(length, other.getText());
+    other._root.forEachLeaf((leaf) => result.insert(result.length, leaf));
     return result;
   }
 
+  /// Both halves share structure with this rope. [position] must not be in
+  /// the middle of a surrogate pair.
   (Rope, Rope) splitImmutable(int position) {
     if (position < 0 || position > length) {
       throw RangeError('Invalid position: $position for length $length');
     }
-    return (
-      Rope._fromRoot(_root.range(0, position), _selection),
-      Rope._fromRoot(_root.range(position, length), _selection),
-    );
+    final left = copy()..delete(position, length);
+    final right = copy()..delete(0, position);
+    left.setSelection(selection);
+    right.setSelection(selection);
+    return (left, right);
   }
 
   TextSelection get selection => TextSelection(
-    baseOffset: _selection.baseOffset.toInt(),
-    extentOffset: _selection.extentOffset.toInt(),
+    baseOffset: _selection.baseOffset,
+    extentOffset: _selection.extentOffset,
   );
 
   void setSelection(TextSelection value) {
     _selection = SelectionState(
-      baseOffset: BigInt.from(value.baseOffset.clamp(0, length)),
-      extentOffset: BigInt.from(value.extentOffset.clamp(0, length)),
+      baseOffset: value.baseOffset.clamp(0, length),
+      extentOffset: value.extentOffset.clamp(0, length),
     );
   }
 
+  /// Replaces `[start, end)` with [replacement] and remaps the selection.
   SelectionState replaceRangeAndUpdateSelection({
     required int start,
     required int end,
@@ -95,97 +125,144 @@ class Rope {
   }) {
     final safeStart = start.clamp(0, length);
     final safeEnd = end.clamp(safeStart, length);
-    delete(safeStart, safeEnd);
-    insert(safeStart, replacement);
+    final removedLength = safeEnd - safeStart;
+    final replacementLength = replacement.length;
+
+    replace(safeStart, safeEnd, replacement);
 
     int mapOffset(int offset) {
       if (offset <= safeStart) return offset;
-      if (offset >= safeEnd) {
-        return (offset + replacement.runes.length - (safeEnd - safeStart))
-            .clamp(0, length);
-      }
-      return (safeStart +
-              (offset - safeStart).clamp(0, replacement.runes.length))
-          .clamp(0, length);
+      if (offset >= safeEnd) return offset + replacementLength - removedLength;
+      return safeStart + math.min(offset - safeStart, replacementLength);
     }
 
-    final endOffset = safeStart + replacement.runes.length;
+    final endOffset = safeStart + replacementLength;
+    final total = length;
     _selection = SelectionState(
-      baseOffset: BigInt.from(
-        (preserveOldCursor ? mapOffset(oldBase) : endOffset).clamp(0, length),
+      baseOffset: (preserveOldCursor ? mapOffset(oldBase) : endOffset).clamp(
+        0,
+        total,
       ),
-      extentOffset: BigInt.from(
-        (preserveOldCursor ? mapOffset(oldExtent) : endOffset).clamp(0, length),
-      ),
+      extentOffset: (preserveOldCursor ? mapOffset(oldExtent) : endOffset)
+          .clamp(0, total),
     );
     return _selection;
   }
 
-  String getText() => _root.text();
+  /// O(n). Use for save/export only, never per keystroke.
+  String getText() {
+    final buffer = StringBuffer();
+    _root.writeTo(buffer);
+    return buffer.toString();
+  }
 
   String substring(int start, [int? end]) => slice(start, end ?? length);
 
   String slice(int start, int end) {
     final safeStart = start.clamp(0, length);
     final safeEnd = end.clamp(safeStart, length);
+    if (safeStart == safeEnd) return '';
     return _root.slice(safeStart, safeEnd);
   }
 
+  /// UTF-16 code unit at [position], or -1 when out of range.
+  int codeUnitAt(int position) {
+    if (position < 0 || position >= length) return -1;
+    return _root.codeUnitAt(position);
+  }
+
+  /// The character at [position]. Returns the whole pair for an astral
+  /// character whose high surrogate sits at [position].
   String charAt(int position) {
-    if (position < 0 || position >= length) return '';
-    return _root.charAt(position);
+    final unit = codeUnitAt(position);
+    if (unit < 0) return '';
+    if (_U.isHigh(unit)) {
+      final next = codeUnitAt(position + 1);
+      if (next >= 0 && _U.isLow(next)) {
+        return String.fromCharCodes([unit, next]);
+      }
+    }
+    return String.fromCharCode(unit);
   }
 
   void insert(int position, String text) {
     if (text.isEmpty) return;
-    final index = position.clamp(0, length);
-    final runes = text.runes.toList();
-    var offset = index;
-    for (var start = 0; start < runes.length; start += _leafCapacity) {
-      final chunk = String.fromCharCodes(runes.skip(start).take(_leafCapacity));
-      final split = _root.insert(offset, chunk);
-      if (split != null) {
-        _root = _RopeNode.internal([_root, split]);
-      }
-      offset += chunk.runes.length;
+    var offset = position.clamp(0, length);
+
+    if (text.length <= _insertChunk) {
+      _insertChunkAt(offset, text);
+      return;
     }
+    for (final chunk in _U.chunk(text, _insertChunk)) {
+      _insertChunkAt(offset, chunk);
+      offset += chunk.length;
+    }
+  }
+
+  void _insertChunkAt(int offset, String chunk) {
+    final (node, split) = _root.insert(offset, chunk);
+    _root = split == null ? node : _Internal([node, split]);
   }
 
   void delete(int start, int end) {
     final safeStart = start.clamp(0, length);
     final safeEnd = end.clamp(safeStart, length);
     if (safeStart == safeEnd) return;
-    _root.remove(safeStart, safeEnd);
-    if (_root is _RopeInternal && (_root as _RopeInternal).children.isEmpty) {
-      _root = _RopeLeaf('');
+
+    var root = _root.remove(safeStart, safeEnd) ?? _Leaf('');
+    while (root is _Internal && root.children.length == 1) {
+      root = root.children.first;
     }
-    while (_root is _RopeInternal &&
-        (_root as _RopeInternal).children.length == 1) {
-      _root = (_root as _RopeInternal).children.single;
-    }
+    _root = root;
   }
 
-  List<String> get cachedLines => cachedLinesRange(0, lineCount);
-
-  List<String> cachedLinesRange(int startLine, int endLine) {
-    final start = startLine.clamp(0, lineCount);
-    final end = endLine.clamp(start, lineCount);
-    return [for (var line = start; line < end; line++) getLineText(line)];
+  void replace(int start, int end, String text) {
+    delete(start, end);
+    insert(start.clamp(0, length), text);
   }
 
-  Iterable<String> get lines => cachedLines;
+  /// Lines `[startLine, endLine)` fetched with a single slice and split.
+  /// Use this for viewport rendering, highlighting and gutters.
+  List<String> lineRange(int startLine, int endLine) {
+    final first = startLine.clamp(0, lineCount);
+    final last = endLine.clamp(first, lineCount);
+    if (first == last) return const [];
+
+    final startOffset = getLineStartOffset(first);
+    final endOffset = last >= lineCount
+        ? length
+        : getLineStartOffset(last) - 1; // exclude the newline ending last-1
+    final parts = slice(startOffset, endOffset).split('\n');
+    for (var i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.endsWith('\r')) parts[i] = part.substring(0, part.length - 1);
+    }
+    return parts;
+  }
+
+  @Deprecated('O(n) and not cached. Use lineRange for visible lines.')
+  List<String> get cachedLines => lineRange(0, lineCount);
+
+  @Deprecated('Renamed to lineRange.')
+  List<String> cachedLinesRange(int startLine, int endLine) =>
+      lineRange(startLine, endLine);
+
+  /// Lazily yields lines in batches. Still O(n) if fully consumed.
+  Iterable<String> get lines sync* {
+    for (var line = 0; line < lineCount; line += 256) {
+      yield* lineRange(line, line + 256);
+    }
+  }
 
   String getLineText(int lineIndex) {
     final start = getLineStartOffset(lineIndex);
     var end = findLineEnd(start);
-    if (end > start && charAt(end - 1) == '\r') end--;
+    if (end > start && codeUnitAt(end - 1) == 13) end--;
     return slice(start, end);
   }
 
-  int getLineAtOffset(int charOffset) {
-    final offset = charOffset.clamp(0, length);
-    return _root.newlinesBefore(offset);
-  }
+  int getLineAtOffset(int charOffset) =>
+      _root.newlinesBefore(charOffset.clamp(0, length));
 
   int getLineStartOffset(int lineIndex) {
     final index = lineIndex.clamp(0, lineCount - 1);
@@ -195,410 +272,418 @@ class Rope {
 
   int findLineStart(int offset) => getLineStartOffset(getLineAtOffset(offset));
 
-  int findLineEnd(int offset) {
-    final start = offset.clamp(0, length);
-    final newline = _root.nextNewline(start);
-    return newline ?? length;
-  }
+  int findLineEnd(int offset) =>
+      _root.nextNewline(offset.clamp(0, length)) ?? length;
 
+  /// Length of the line in code units, excluding `\n` and a preceding `\r`.
   int lineLengthAt(int lineIndex) {
     final start = getLineStartOffset(lineIndex);
     final end = findLineEnd(start);
-    final length = end - start;
-    return length > 0 && charAt(end - 1) == '\r' ? length - 1 : length;
+    final lineLength = end - start;
+    return lineLength > 0 && codeUnitAt(end - 1) == 13
+        ? lineLength - 1
+        : lineLength;
   }
 
+  /// O(n). Length of every line in code units.
   List<int> lineLengths() {
     final lengths = <int>[];
     var current = 0;
     var previousWasCarriageReturn = false;
 
-    void consume(String chunk) {
+    _root.forEachLeaf((chunk) {
       for (var i = 0; i < chunk.length; i++) {
-        final codeUnit = chunk.codeUnitAt(i);
-        if (codeUnit == 10) {
+        final unit = chunk.codeUnitAt(i);
+        if (unit == 10) {
           lengths.add(previousWasCarriageReturn ? current - 1 : current);
           current = 0;
           previousWasCarriageReturn = false;
-          continue;
-        }
-        current++;
-        previousWasCarriageReturn = codeUnit == 13;
-        if (codeUnit >= 0xd800 &&
-            codeUnit <= 0xdbff &&
-            i + 1 < chunk.length &&
-            chunk.codeUnitAt(i + 1) >= 0xdc00 &&
-            chunk.codeUnitAt(i + 1) <= 0xdfff) {
-          i++;
+        } else {
+          current++;
+          previousWasCarriageReturn = unit == 13;
         }
       }
-    }
-
-    _root.forEachLeaf(consume);
+    });
     lengths.add(previousWasCarriageReturn ? current - 1 : current);
     return lengths;
   }
 
-  TextDirection get textDirection {
-    var ltr = 0;
-    var rtl = 0;
-    _root.forEachChar((rune) {
-      if ((rune >= 0x590 && rune <= 0x8ff) ||
-          (rune >= 0xfb1d && rune <= 0xfdff)) {
-        rtl++;
-      } else if (String.fromCharCode(rune).trim().isNotEmpty) {
-        ltr++;
-      }
-    });
-    return rtl > ltr ? TextDirection.rtl : TextDirection.ltr;
-  }
+  TextDirection get textDirection =>
+      _root.rtl > _root.ltr ? TextDirection.rtl : TextDirection.ltr;
 
   bool get containsRtl => textDirection == TextDirection.rtl;
   bool get isRtl => containsRtl;
   bool get isLtr => !containsRtl;
-  bool get isMixed => false;
+
+  /// True when the document has both strong RTL and strong LTR text. O(1).
+  bool get isMixed => _root.rtl > 0 && _root.ltr > 0;
   TextDirection get primaryDirection => textDirection;
 
-  List<BiDiSegment> get bidiSegments => length == 0
-      ? []
-      : [
+  /// Direction runs for the whole document. O(n). Prefer
+  /// [getBiDiSegmentsForLine] / [getBiDiSegmentsInRange] when rendering.
+  List<BiDiSegment> get bidiSegments => getBiDiSegmentsInRange(0, length);
+
+  List<BiDiSegment> getBiDiSegmentsForLine(int lineIndex) {
+    final start = getLineStartOffset(lineIndex);
+    return getBiDiSegmentsInRange(start, findLineEnd(start));
+  }
+
+  /// Splits `[start, end)` into runs of one strong direction. Neutral
+  /// characters attach to the run before them (leading neutrals join the
+  /// first run). Costs O(log n + range length).
+  List<BiDiSegment> getBiDiSegmentsInRange(int start, int end) {
+    final from = start.clamp(0, length);
+    final to = end.clamp(from, length);
+    if (from == to) return const [];
+
+    final text = slice(from, to);
+    final segments = <BiDiSegment>[];
+    TextDirection? current;
+    var runStart = 0;
+
+    for (var i = 0; i < text.length; i++) {
+      final direction = _U.strongDirection(text.codeUnitAt(i));
+      if (direction == null) continue;
+      if (current == null) {
+        current = direction;
+      } else if (direction != current) {
+        segments.add(
           BiDiSegment(
-            start: BigInt.zero,
-            end: BigInt.from(length),
-            direction: textDirection,
+            start: from + runStart,
+            end: from + i,
+            direction: current,
           ),
-        ];
-
-  List<BiDiSegment> getBiDiSegmentsForLine(int lineIndex) =>
-      getBiDiSegmentsInRange(
-        getLineStartOffset(lineIndex),
-        findLineEnd(getLineStartOffset(lineIndex)),
-      );
-
-  List<BiDiSegment> getBiDiSegmentsInRange(int start, int end) =>
-      bidiSegments.where((segment) {
-        return segment.end.toInt() > start && segment.start.toInt() < end;
-      }).toList();
+        );
+        runStart = i;
+        current = direction;
+      }
+    }
+    segments.add(
+      BiDiSegment(
+        start: from + runStart,
+        end: to,
+        direction: current ?? TextDirection.ltr,
+      ),
+    );
+    return segments;
+  }
 
   List<(int start, int end)> getRtlSegments() => bidiSegments
       .where((segment) => segment.direction == TextDirection.rtl)
-      .map((segment) => (segment.start.toInt(), segment.end.toInt()))
+      .map((segment) => (segment.start, segment.end))
       .toList();
 
   String toStringWithBiDiControls() {
     final text = getText();
     if (!containsRtl) return text;
-    return '${String.fromCharCode(0x202b)}$text'
-        '${String.fromCharCode(0x202c)}';
+    return '${String.fromCharCode(0x202b)}$text${String.fromCharCode(0x202c)}';
   }
 }
 
-abstract class _RopeNode {
-  _RopeNode();
+abstract final class _U {
+  static bool isHigh(int c) => c >= 0xd800 && c <= 0xdbff;
+  static bool isLow(int c) => c >= 0xdc00 && c <= 0xdfff;
 
-  int charCount = 0;
-  int newlineCount = 0;
+  static bool isRtl(int c) =>
+      (c >= 0x590 && c <= 0x8ff) || // Hebrew, Arabic, Syriac, Thaana, ...
+      (c >= 0xfb1d && c <= 0xfdff) || // Hebrew/Arabic presentation forms A
+      (c >= 0xfe70 && c <= 0xfeff) || // Arabic presentation forms B
+      c == 0x200f; // RLM
 
-  _RopeNode clone();
-  String text();
+  static bool isStrongLtr(int c) {
+    if (c < 0x80) return (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+    if (c < 0xc0 || c == 0xd7 || c == 0xf7) return false;
+    if (isRtl(c)) return false;
+    if (c >= 0x2000 && c <= 0x2bff) return false; // punctuation, symbols
+    if (c >= 0x3000 && c <= 0x303f) return false; // CJK punctuation
+    if (c >= 0xd800 && c <= 0xdfff) return false; // surrogates (emoji, etc.)
+    return true;
+  }
+
+  static TextDirection? strongDirection(int c) {
+    if (isRtl(c)) return TextDirection.rtl;
+    if (isStrongLtr(c)) return TextDirection.ltr;
+    return null;
+  }
+
+  /// Largest end <= [tentativeEnd] (or just past it) that does not split a
+  /// surrogate pair.
+  static int safeEnd(String s, int start, int tentativeEnd) {
+    if (tentativeEnd >= s.length) return s.length;
+    if (isHigh(s.codeUnitAt(tentativeEnd - 1)) &&
+        isLow(s.codeUnitAt(tentativeEnd))) {
+      return tentativeEnd - 1 > start ? tentativeEnd - 1 : tentativeEnd + 1;
+    }
+    return tentativeEnd;
+  }
+
+  static List<String> chunk(String text, int size) {
+    final out = <String>[];
+    var i = 0;
+    while (i < text.length) {
+      final end = safeEnd(text, i, math.min(i + size, text.length));
+      out.add(text.substring(i, end));
+      i = end;
+    }
+    return out;
+  }
+}
+
+abstract class _Node {
+  final int length;
+  final int newlines;
+  final int rtl;
+  final int ltr;
+
+  const _Node(this.length, this.newlines, this.rtl, this.ltr);
+
+  factory _Node.fromText(String text) {
+    if (text.isEmpty) return _Leaf('');
+    var level = <_Node>[
+      for (final chunk in _U.chunk(text, Rope._loadChunk)) _Leaf(chunk),
+    ];
+    while (level.length > 1) {
+      final next = <_Node>[];
+      for (var i = 0; i < level.length; i += Rope._nodeCapacity) {
+        next.add(
+          _Internal(
+            level.sublist(i, math.min(i + Rope._nodeCapacity, level.length)),
+          ),
+        );
+      }
+      level = next;
+    }
+    return level.single;
+  }
+
+  /// Returns the replacement node and an optional right sibling if it split.
+  (_Node, _Node?) insert(int index, String text);
+
+  /// Removes `[start, end)` (local, already clamped and non-empty). Returns
+  /// null when the node becomes empty.
+  _Node? remove(int start, int end);
+
   String slice(int start, int end);
-  String charAt(int index);
-  _RopeNode? insert(int index, String text);
-  void remove(int start, int end);
+  int codeUnitAt(int index);
   int newlinesBefore(int offset);
   int nthNewline(int index);
   int? nextNewline(int offset);
-  void forEachChar(void Function(int) callback);
+  void writeTo(StringBuffer buffer);
   void forEachLeaf(void Function(String) callback);
-
-  factory _RopeNode.fromText(String text) {
-    if (text.isEmpty) return _RopeLeaf('');
-    final chunks = <_RopeNode>[];
-    final runes = text.runes.toList();
-    for (var i = 0; i < runes.length; i += Rope._leafCapacity) {
-      chunks.add(
-        _RopeLeaf(String.fromCharCodes(runes.skip(i).take(Rope._leafCapacity))),
-      );
-    }
-    if (chunks.length == 1) return chunks.single;
-    final roots = <_RopeNode>[];
-    for (var i = 0; i < chunks.length; i += Rope._nodeCapacity) {
-      roots.add(
-        _RopeNode.internal(chunks.skip(i).take(Rope._nodeCapacity).toList()),
-      );
-    }
-    while (roots.length > 1) {
-      final next = <_RopeNode>[];
-      for (var i = 0; i < roots.length; i += Rope._nodeCapacity) {
-        next.add(
-          _RopeNode.internal(roots.skip(i).take(Rope._nodeCapacity).toList()),
-        );
-      }
-      roots
-        ..clear()
-        ..addAll(next);
-    }
-    return roots.single;
-  }
-
-  factory _RopeNode.internal(List<_RopeNode> children) =>
-      _RopeInternal(children);
-
-  _RopeNode range(int start, int end) {
-    final result = _RopeNode.fromText(slice(start, end));
-    return result;
-  }
 }
 
-class _RopeLeaf extends _RopeNode {
-  String value;
+class _Leaf extends _Node {
+  final String value;
 
-  _RopeLeaf(this.value) {
-    _refresh();
-  }
-
-  void _refresh() {
-    charCount = value.runes.length;
-    newlineCount = '\n'.allMatches(value).length;
-  }
-
-  @override
-  _RopeNode clone() => _RopeLeaf(value);
-
-  @override
-  String text() => value;
-
-  @override
-  String slice(int start, int end) {
-    final startUnits = _codeUnitOffsetForRuneIndex(start);
-    final endUnits = _codeUnitOffsetForRuneIndex(end);
-    return value.substring(startUnits, endUnits);
-  }
-
-  @override
-  String charAt(int index) {
-    var runeIndex = 0;
-    for (var codeUnitIndex = 0; codeUnitIndex < value.length; codeUnitIndex++) {
-      final codeUnit = value.codeUnitAt(codeUnitIndex);
-      if (runeIndex == index) {
-        if (codeUnit >= 0xd800 &&
-            codeUnit <= 0xdbff &&
-            codeUnitIndex + 1 < value.length) {
-          return value.substring(codeUnitIndex, codeUnitIndex + 2);
-        }
-        return value.substring(codeUnitIndex, codeUnitIndex + 1);
+  factory _Leaf(String value) {
+    var newlines = 0;
+    var rtl = 0;
+    var ltr = 0;
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit == 10) {
+        newlines++;
+        continue;
       }
-      if (codeUnit >= 0xd800 &&
-          codeUnit <= 0xdbff &&
-          codeUnitIndex + 1 < value.length &&
-          value.codeUnitAt(codeUnitIndex + 1) >= 0xdc00 &&
-          value.codeUnitAt(codeUnitIndex + 1) <= 0xdfff) {
-        codeUnitIndex++;
+      final direction = _U.strongDirection(unit);
+      if (direction == TextDirection.rtl) {
+        rtl++;
+      } else if (direction == TextDirection.ltr) {
+        ltr++;
       }
-      runeIndex++;
     }
-    return '';
+    return _Leaf._(value, newlines, rtl, ltr);
+  }
+
+  _Leaf._(this.value, int newlines, int rtl, int ltr)
+    : super(value.length, newlines, rtl, ltr);
+
+  @override
+  (_Node, _Node?) insert(int index, String text) {
+    final combined = value.substring(0, index) + text + value.substring(index);
+    if (combined.length <= Rope._leafCapacity) return (_Leaf(combined), null);
+
+    var mid = combined.length >> 1;
+    if (_U.isHigh(combined.codeUnitAt(mid - 1)) &&
+        _U.isLow(combined.codeUnitAt(mid))) {
+      mid = mid - 1 > 0 ? mid - 1 : mid + 1;
+    }
+    return (_Leaf(combined.substring(0, mid)), _Leaf(combined.substring(mid)));
   }
 
   @override
-  _RopeNode? insert(int index, String text) {
-    final runes = value.runes.toList()..insertAll(index, text.runes);
-    if (runes.length <= Rope._leafCapacity) {
-      value = String.fromCharCodes(runes);
-      _refresh();
-      return null;
-    }
-    final midpoint = runes.length ~/ 2;
-    value = String.fromCharCodes(runes.take(midpoint));
-    _refresh();
-    return _RopeLeaf(String.fromCharCodes(runes.skip(midpoint)));
+  _Node? remove(int start, int end) {
+    if (start <= 0 && end >= length) return null;
+    return _Leaf(value.substring(0, start) + value.substring(end));
   }
 
   @override
-  void remove(int start, int end) {
-    final runes = value.runes.toList()..removeRange(start, end);
-    value = String.fromCharCodes(runes);
-    _refresh();
-  }
+  String slice(int start, int end) => value.substring(start, end);
+
+  @override
+  int codeUnitAt(int index) => value.codeUnitAt(index);
 
   @override
   int newlinesBefore(int offset) {
-    final end = _codeUnitOffsetForRuneIndex(offset);
     var count = 0;
-    for (var i = 0; i < end; i++) {
-      if (value.codeUnitAt(i) == 10) count++;
+    var pos = value.indexOf('\n');
+    while (pos >= 0 && pos < offset) {
+      count++;
+      pos = value.indexOf('\n', pos + 1);
     }
     return count;
   }
 
   @override
   int nthNewline(int index) {
-    var seen = 0;
-    var runeIndex = 0;
-    for (var i = 0; i < value.length; i++) {
-      if (value.codeUnitAt(i) == 10 && seen++ == index) {
-        return runeIndex;
-      }
-      if (value.codeUnitAt(i) >= 0xd800 &&
-          value.codeUnitAt(i) <= 0xdbff &&
-          i + 1 < value.length &&
-          value.codeUnitAt(i + 1) >= 0xdc00 &&
-          value.codeUnitAt(i + 1) <= 0xdfff) {
-        i++;
-      }
-      runeIndex++;
+    var pos = -1;
+    for (var i = 0; i <= index; i++) {
+      pos = value.indexOf('\n', pos + 1);
+      if (pos < 0) return length;
     }
-    return charCount;
+    return pos;
   }
 
   @override
   int? nextNewline(int offset) {
-    var runeIndex = 0;
-    for (var i = 0; i < value.length; i++) {
-      final codeUnit = value.codeUnitAt(i);
-      if (runeIndex >= offset && codeUnit == 10) return runeIndex;
-      if (codeUnit >= 0xd800 &&
-          codeUnit <= 0xdbff &&
-          i + 1 < value.length &&
-          value.codeUnitAt(i + 1) >= 0xdc00 &&
-          value.codeUnitAt(i + 1) <= 0xdfff) {
-        i++;
-      }
-      runeIndex++;
-    }
-    return null;
-  }
-
-  int _codeUnitOffsetForRuneIndex(int index) {
-    if (index <= 0) return 0;
-    var runeIndex = 0;
-    for (var i = 0; i < value.length; i++, runeIndex++) {
-      if (runeIndex == index) return i;
-      final codeUnit = value.codeUnitAt(i);
-      if (codeUnit >= 0xd800 &&
-          codeUnit <= 0xdbff &&
-          i + 1 < value.length &&
-          value.codeUnitAt(i + 1) >= 0xdc00 &&
-          value.codeUnitAt(i + 1) <= 0xdfff) {
-        i++;
-      }
-    }
-    return value.length;
+    final pos = value.indexOf('\n', offset);
+    return pos < 0 ? null : pos;
   }
 
   @override
-  void forEachChar(void Function(int) callback) {
-    for (final rune in value.runes) {
-      callback(rune);
-    }
-  }
+  void writeTo(StringBuffer buffer) => buffer.write(value);
 
   @override
   void forEachLeaf(void Function(String) callback) => callback(value);
 }
 
-class _RopeInternal extends _RopeNode {
-  final List<_RopeNode> children;
+class _Internal extends _Node {
+  final List<_Node> children;
 
-  _RopeInternal(this.children) {
-    _refresh();
-  }
-
-  void _refresh() {
-    charCount = 0;
-    newlineCount = 0;
+  factory _Internal(List<_Node> children) {
+    var length = 0;
+    var newlines = 0;
+    var rtl = 0;
+    var ltr = 0;
     for (final child in children) {
-      charCount += child.charCount;
-      newlineCount += child.newlineCount;
+      length += child.length;
+      newlines += child.newlines;
+      rtl += child.rtl;
+      ltr += child.ltr;
     }
+    return _Internal._(children, length, newlines, rtl, ltr);
+  }
+
+  _Internal._(this.children, int length, int newlines, int rtl, int ltr)
+    : super(length, newlines, rtl, ltr);
+
+  @override
+  (_Node, _Node?) insert(int index, String text) {
+    var offset = index;
+    var childIndex = children.length - 1;
+    for (var i = 0; i < children.length - 1; i++) {
+      if (offset <= children[i].length) {
+        childIndex = i;
+        break;
+      }
+      offset -= children[i].length;
+    }
+
+    final (node, split) = children[childIndex].insert(offset, text);
+    final updated = List<_Node>.of(children);
+    updated[childIndex] = node;
+    if (split != null) updated.insert(childIndex + 1, split);
+
+    if (updated.length <= Rope._nodeCapacity) return (_Internal(updated), null);
+    final mid = updated.length >> 1;
+    return (
+      _Internal(updated.sublist(0, mid)),
+      _Internal(updated.sublist(mid)),
+    );
   }
 
   @override
-  _RopeNode clone() =>
-      _RopeInternal([for (final child in children) child.clone()]);
+  _Node? remove(int start, int end) {
+    final kept = <_Node>[];
+    var cursor = 0;
+    for (final child in children) {
+      final childStart = cursor;
+      final childEnd = childStart + child.length;
+      cursor = childEnd;
 
-  @override
-  String text() {
-    final result = StringBuffer();
-    result.writeAll(children.map((child) => child.text()));
-    return result.toString();
+      if (childEnd <= start || childStart >= end) {
+        kept.add(child);
+      } else if (start <= childStart && end >= childEnd) {
+        continue;
+      } else {
+        final result = child.remove(
+          math.max(start - childStart, 0),
+          math.min(end - childStart, child.length),
+        );
+        if (result != null) kept.add(result);
+      }
+    }
+    if (kept.isEmpty) return null;
+    return _Internal(_mergeUnderfull(kept));
+  }
+
+  /// Merges adjacent underfull siblings of the same kind. All leaves sit at
+  /// the same depth, so siblings are always the same type.
+  static List<_Node> _mergeUnderfull(List<_Node> nodes) {
+    if (nodes.length < 2) return nodes;
+    final out = <_Node>[nodes.first];
+    for (var i = 1; i < nodes.length; i++) {
+      final a = out.last;
+      final b = nodes[i];
+      if (a is _Leaf && b is _Leaf) {
+        final small = a.length < Rope._minLeaf || b.length < Rope._minLeaf;
+        if (small && a.length + b.length <= Rope._leafCapacity) {
+          out[out.length - 1] = _Leaf(a.value + b.value);
+          continue;
+        }
+      } else if (a is _Internal && b is _Internal) {
+        final small =
+            a.children.length < Rope._minNode ||
+            b.children.length < Rope._minNode;
+        if (small &&
+            a.children.length + b.children.length <= Rope._nodeCapacity) {
+          out[out.length - 1] = _Internal([...a.children, ...b.children]);
+          continue;
+        }
+      }
+      out.add(b);
+    }
+    return out;
   }
 
   @override
   String slice(int start, int end) {
-    final result = StringBuffer();
+    final buffer = StringBuffer();
     var cursor = 0;
     for (final child in children) {
-      final childEnd = cursor + child.charCount;
+      final childEnd = cursor + child.length;
       if (childEnd > start && cursor < end) {
-        result.write(
+        buffer.write(
           child.slice(
-            (start - cursor).clamp(0, child.charCount),
-            (end - cursor).clamp(0, child.charCount),
+            math.max(start - cursor, 0),
+            math.min(end - cursor, child.length),
           ),
         );
       }
       cursor = childEnd;
       if (cursor >= end) break;
     }
-    return result.toString();
+    return buffer.toString();
   }
 
   @override
-  String charAt(int index) {
+  int codeUnitAt(int index) {
     var offset = index;
     for (final child in children) {
-      if (offset < child.charCount) return child.charAt(offset);
-      offset -= child.charCount;
+      if (offset < child.length) return child.codeUnitAt(offset);
+      offset -= child.length;
     }
-    return '';
-  }
-
-  @override
-  _RopeNode? insert(int index, String text) {
-    var offset = index;
-    var childIndex = children.length - 1;
-    for (var i = 0; i < children.length; i++) {
-      if (offset <= children[i].charCount || i == children.length - 1) {
-        childIndex = i;
-        break;
-      }
-      offset -= children[i].charCount;
-    }
-    final split = children[childIndex].insert(offset, text);
-    if (split != null) children.insert(childIndex + 1, split);
-    _refresh();
-    if (children.length <= Rope._nodeCapacity) return null;
-    final midpoint = children.length ~/ 2;
-    final right = _RopeInternal(children.sublist(midpoint));
-    children.removeRange(midpoint, children.length);
-    _refresh();
-    return right;
-  }
-
-  @override
-  void remove(int start, int end) {
-    for (var i = children.length - 1; i >= 0; i--) {
-      final child = children[i];
-      final childStart = cursorFor(i);
-      final childEnd = childStart + child.charCount;
-      if (childEnd > start && childStart < end) {
-        child.remove(
-          (start - childStart).clamp(0, child.charCount),
-          (end - childStart).clamp(0, child.charCount),
-        );
-        if (child.charCount == 0) children.removeAt(i);
-      }
-    }
-    _refresh();
-  }
-
-  int cursorFor(int index) {
-    var result = 0;
-    for (var i = 0; i < index; i++) {
-      result += children[i].charCount;
-    }
-    return result;
+    return -1;
   }
 
   @override
@@ -606,11 +691,11 @@ class _RopeInternal extends _RopeNode {
     var remaining = offset;
     var result = 0;
     for (final child in children) {
-      if (remaining <= child.charCount) {
+      if (remaining <= child.length) {
         return result + child.newlinesBefore(remaining);
       }
-      remaining -= child.charCount;
-      result += child.newlineCount;
+      remaining -= child.length;
+      result += child.newlines;
     }
     return result;
   }
@@ -620,32 +705,33 @@ class _RopeInternal extends _RopeNode {
     var remaining = index;
     var offset = 0;
     for (final child in children) {
-      if (remaining < child.newlineCount) {
+      if (remaining < child.newlines) {
         return offset + child.nthNewline(remaining);
       }
-      remaining -= child.newlineCount;
-      offset += child.charCount;
+      remaining -= child.newlines;
+      offset += child.length;
     }
-    return charCount;
+    return length;
   }
 
   @override
   int? nextNewline(int offset) {
     var cursor = 0;
     for (final child in children) {
-      if (offset < cursor + child.charCount) {
+      final childEnd = cursor + child.length;
+      if (child.newlines > 0 && offset < childEnd) {
         final result = child.nextNewline(offset > cursor ? offset - cursor : 0);
         if (result != null) return cursor + result;
       }
-      cursor += child.charCount;
+      cursor = childEnd;
     }
     return null;
   }
 
   @override
-  void forEachChar(void Function(int) callback) {
+  void writeTo(StringBuffer buffer) {
     for (final child in children) {
-      child.forEachChar(callback);
+      child.writeTo(buffer);
     }
   }
 

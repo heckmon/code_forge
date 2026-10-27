@@ -68,7 +68,6 @@ class _MyAppState extends State<MyApp> {
                 controller: codeController,
                 textStyle: GoogleFonts.jetBrainsMono(),
                 filePath: absFilePath,
-                tabSize: 4,
                 matchHighlightStyle: const MatchHighlightStyle(
                   currentMatchStyle: TextStyle(
                     backgroundColor: Color(0xFFFFA726),

@@ -52,8 +52,8 @@
 >flutter build web --wasm
 >```
 
-## What's new in 11.3.0:
-  - FIX: [#110](https://github.com/heckmon/code_forge/issues/110)
+## What's new in 11.4.0:
+  - ENHANCEMENT: Massive performance improvement.
 
 ## Why CodeForge?
 
@@ -130,7 +130,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.3.1
+  code_forge: ^11.4.0
 ```
 - 2 . Then run:
 

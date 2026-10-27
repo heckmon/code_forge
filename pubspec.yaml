@@ -1,6 +1,6 @@
 name: code_forge
 description: "A powerful text editor widget, capable of handling 1M+ lines of text smoothly."
-version: 11.3.1
+version: 11.4.0
 homepage: https://github.com/heckmon/code_forge
 repository: https://github.com/heckmon/code_forge
 
