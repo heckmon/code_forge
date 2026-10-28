@@ -8,7 +8,6 @@ analyzer:
     - macos/**
     - linux/**
     - cargokit/**
-include: analysis_options_base.yaml
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

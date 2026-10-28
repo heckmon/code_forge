@@ -15,6 +15,7 @@ import 'package:re_highlight/styles/lightfair.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import '../code_forge.dart';
+import 'minimap.dart';
 
 const int kSemanticTokenViewportPaddingLines = 1500;
 const int kExactWrappedHeightThreshold = 512;
@@ -160,6 +161,9 @@ class CodeForge extends StatefulWidget {
   /// Using the same shortcut on multiple operations may causes undefined behaviour.**
   final CodeForgeKeyboardShortcuts keyboardShotcuts;
 
+  /// Styling options for the minimap.
+  final MinimapStyle? minimapStyle;
+
   /// Styling options for text selection and cursor.
   final CodeSelectionStyle? selectionStyle;
 
@@ -225,6 +229,10 @@ class CodeForge extends StatefulWidget {
 
   /// Whether to automatically focus the editor when mounted.
   final bool autoFocus;
+
+  /// Whether to enable the VSCode like minimap on the editor, 
+  /// which mirrors editor operations.
+  final bool enableMinimap;
 
   /// Whether to enable code folding functionality.
   ///
@@ -331,6 +339,7 @@ class CodeForge extends StatefulWidget {
     this.readOnly = false,
     this.autoFocus = false,
     this.lineWrap = false,
+    this.enableMinimap = true,
     this.enableFolding = true,
     this.enableGuideLines = true,
     this.enableLocalSuggestions = false,
@@ -342,6 +351,7 @@ class CodeForge extends StatefulWidget {
     this.enableGutter = true,
     this.enableGutterDivider = false,
     this.deleteFoldRangeOnDeletingFirstLine = false,
+    this.minimapStyle,
     this.selectionStyle,
     this.gutterStyle,
     this.gutterBuilder,
@@ -386,30 +396,33 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final UndoRedoController _undoRedoController;
   late final String? _filePath, _fileUri, _fileUrl;
   late final FindController _findController;
-  late final VoidCallback _semanticTokensListener;
-  late final VoidCallback _controllerListener;
-  late final VoidCallback _scrollbarLineNumberListener;
-  late final bool _deleteFoldRangeOnDeletingFirstLine;
+  late final VoidCallback _semanticTokensListener, _controllerListener;
   late final VoidCallback _signatureListener, _hoverListener;
   late final VoidCallback _isHoveringPopupListener, _selectedSuggestionListener;
   late final VoidCallback _snippetSuggestionsListener, _snippetNotifierListener;
+  late final bool _deleteFoldRangeOnDeletingFirstLine;
   late bool _readOnly;
+  late SyntaxHighlighter _syntaxHighlighter;
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
+  final ValueNotifier<(double, double)> _minimapHoverNotifier = ValueNotifier((0, 0));
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
   final _isMobile =
-      defaultTargetPlatform == TargetPlatform.android ||
-      defaultTargetPlatform == TargetPlatform.iOS;
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
   final _isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final GlobalKey _codeFieldKey = GlobalKey();
+  final ScrollController _minimapScrollCtrl = ScrollController();
   TextInputConnection? _connection;
   StreamSubscription? _lspResponsesSubscription;
   bool _isHovering = false, _isSignatureInvoked = false;
   bool _isMobileSuggActive = false, _isInjectingSnippets = false;
   bool _snippetsActive = false, _hoverSetByTap = false;
+  bool _minimapOverlayVisiblility = false, _isSyncingScroll = false;
+  bool _minimapOverlayHover = false;
   int _prevSnippetTextLength = 0, _semanticTokensVersion = 0;
   List<LspSemanticToken>? _semanticTokens;
   List<Map<String, dynamic>> _extraText = [];
@@ -468,6 +481,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _fileUrl = widget.fileUrl;
+    _syntaxHighlighter = SyntaxHighlighter(
+      language: _language,
+      extraLanguages: widget.extraLanguages,
+      editorTheme: _editorTheme,
+      baseTextStyle: widget.textStyle,
+      languageId: _controller.lspConfig?.languageId,
+      documentText: _controller.text,
+    );
     _filePath = (() {
       if (widget.filePath != null) {
         if (widget.fileUrl != null) {
@@ -772,9 +793,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     };
 
     _controller.addListener(_controllerListener);
-
-    _scrollbarLineNumberListener = _updateScrollbarLineNumberIndicator;
-    _vscrollController.addListener(_scrollbarLineNumberListener);
+    _vscrollController.addListener(_updateScrollbarLineNumberIndicator);
+    _vscrollController.addListener(_updateMinimapScroll);
+    _minimapScrollCtrl.addListener(_updateVScrollFromMinimap);
 
     _hoverListener = () {
       final hov = _hoverNotifier.value;
@@ -962,6 +983,106 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     );
     if (_scrollbarLineNumberIndicator.value != lineNumber) {
       _scrollbarLineNumberIndicator.value = lineNumber;
+    }
+  }
+
+  void _updateMinimapScroll() {
+    if (_isSyncingScroll ||
+        !_vscrollController.hasClients ||
+        !_minimapScrollCtrl.hasClients) {
+      return;
+    }
+
+    final editor = _vscrollController.position;
+    final minimap = _minimapScrollCtrl.position;
+
+    if (!editor.hasContentDimensions ||
+        !minimap.hasContentDimensions ||
+        !editor.hasViewportDimension ||
+        !minimap.hasViewportDimension) {
+      return;
+    }
+
+    final editorMax = editor.maxScrollExtent;
+    final minimapMax = minimap.maxScrollExtent;
+
+    final progress = editorMax > 0
+        ? (editor.pixels / editorMax).clamp(0.0, 1.0)
+        : 0.0;
+
+    final targetOffset = progress * minimapMax;
+
+    _isSyncingScroll = true;
+    try {
+      if ((minimap.pixels - targetOffset).abs() > 0.5) {
+        _minimapScrollCtrl.jumpTo(targetOffset);
+      }
+
+      final editorDocumentHeight =
+          editor.maxScrollExtent + editor.viewportDimension;
+
+      final minimapDocumentHeight = _controller.lineCount * 2.55;
+
+      if (editorDocumentHeight > 0) {
+        final scale = minimapDocumentHeight / editorDocumentHeight;
+
+        _minimapHoverNotifier.value = (
+          _minimapScrollCtrl.offset,
+          scale,
+        );
+      }
+    } finally {
+      _isSyncingScroll = false;
+    }
+  }
+
+  void _updateVScrollFromMinimap() {
+    if (_isSyncingScroll ||
+        !_vscrollController.hasClients ||
+        !_minimapScrollCtrl.hasClients) {
+      return;
+    }
+
+    final editor = _vscrollController.position;
+    final minimap = _minimapScrollCtrl.position;
+
+    if (!editor.hasContentDimensions || !minimap.hasContentDimensions) {
+      return;
+    }
+
+    final editorMax = editor.maxScrollExtent;
+    final minimapMax = minimap.maxScrollExtent;
+
+    final progress = minimapMax > 0
+      ? (minimap.pixels / minimapMax).clamp(0.0, 1.0)
+      : 0.0;
+
+    final targetOffset = progress * editorMax;
+
+    _isSyncingScroll = true;
+    try {
+      if ((editor.pixels - targetOffset).abs() > 0.5) {
+        _vscrollController.jumpTo(targetOffset);
+      }
+
+      if (editor.hasViewportDimension &&
+          minimap.hasViewportDimension) {
+        final editorDocumentHeight =
+            editor.maxScrollExtent + editor.viewportDimension;
+
+        final minimapDocumentHeight = _controller.lineCount * 2.55;
+
+        if (editorDocumentHeight > 0) {
+          final scale = minimapDocumentHeight / editorDocumentHeight;
+
+          _minimapHoverNotifier.value = (
+            _minimapScrollCtrl.offset,
+            scale,
+          );
+        }
+      }
+    } finally {
+      _isSyncingScroll = false;
     }
   }
 
@@ -1192,7 +1313,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   void dispose() {
     _controller.removeListener(_controllerListener);
     _controller.semanticTokens.removeListener(_semanticTokensListener);
-    _vscrollController.removeListener(_scrollbarLineNumberListener);
+    _vscrollController.removeListener(_updateScrollbarLineNumberIndicator);
+    _vscrollController.removeListener(_updateMinimapScroll);
+    _minimapScrollCtrl.removeListener(_updateVScrollFromMinimap);
     _lspSignatureNotifier.removeListener(_signatureListener);
     _hoverNotifier.removeListener(_hoverListener);
     _isHoveringPopup.removeListener(_isHoveringPopupListener);
@@ -1799,7 +1922,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 : RTLAwareScrollPhysics(
                                                     isRTL:
                                                         widget.textDirection ==
-                                                        TextDirection.rtl,
+                                                        .rtl,
                                                     isMobile: _isMobile,
                                                   ),
                                           ),
@@ -1811,12 +1934,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                       ),
                                       viewportBuilder: (_, voffset, hoffset) => CustomViewport(
                                         verticalOffset: voffset,
-                                        verticalAxisDirection:
-                                            AxisDirection.down,
+                                        verticalAxisDirection: .down,
                                         horizontalOffset: hoffset,
                                         horizontalAxisDirection:
-                                            widget.textDirection ==
-                                                TextDirection.rtl
+                                            widget.textDirection == .rtl
                                             ? AxisDirection.left
                                             : AxisDirection.right,
                                         mainAxis: Axis.vertical,
@@ -2871,6 +2992,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 context: context,
                                                 controller: _controller,
                                                 editorTheme: _editorTheme,
+                                                syntaxHighlighter: _syntaxHighlighter,
                                                 language: _language,
                                                 extraLanguages:
                                                     widget.extraLanguages,
@@ -4244,6 +4366,122 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       );
                     },
                   ),
+                  if(widget.enableMinimap)
+                  Positioned(
+                    right: widget.textDirection == .ltr
+                      ? _scrollbarDecoration.thickness
+                      : null,
+                    left: widget.textDirection == .rtl
+                      ? _scrollbarDecoration.thickness
+                      : null,
+                    top: 0,
+                    height: editorHeight,
+                    child: ClipRect(
+                      child: MouseRegion(
+                        onEnter: (_) {
+                          if(!_minimapOverlayVisiblility) {
+                            setState(() => _minimapOverlayVisiblility = true);
+                          }
+                        },
+                        onExit: (_) {
+                          if(_minimapOverlayVisiblility) {
+                            setState(() => _minimapOverlayVisiblility = false);
+                          }
+                        },
+                        child: Stack(
+                          children: [
+                            SingleChildScrollView(
+                              controller: _minimapScrollCtrl,
+                              child: CustomPaint(
+                                size: Size(
+                                  widget.minimapStyle?.width
+                                    ?? constraints.maxWidth * 0.065,
+                                  _controller.lineCount * 2.55,
+                                ),
+                                painter: MiniMapPainter(
+                                  fontSize: widget.minimapStyle?.fontSize
+                                    ?? 2.5,
+                                  lineHeight: widget.minimapStyle?.lineHeight
+                                    ?? 3,
+                                  controller: _controller,
+                                  bgColor: widget.minimapStyle?.backgroundColor
+                                    ?? (
+                                     _editorTheme['root']!.color
+                                      ?? Colors.grey[400]!
+                                  ).withAlpha(6),
+                                  scrollCtrl: _minimapScrollCtrl,
+                                  lineWrap: widget.lineWrap,
+                                  highlighter: _syntaxHighlighter,
+                                  textDirection: widget.textDirection
+                                ),
+                              ),
+                            ),
+                            if(_minimapOverlayVisiblility || _isMobile)
+                            ValueListenableBuilder<(double, double)>(
+                              valueListenable: _minimapHoverNotifier,
+                              builder: (_, miniMapVal, _) {
+                                final editor = _vscrollController.position;
+                                final minimap = _minimapScrollCtrl.position;
+                        
+                                if (!editor.hasViewportDimension ||
+                                    !minimap.hasViewportDimension) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Positioned(
+                                  left: 0,
+                                  top: 
+                                    editor.pixels * miniMapVal.$2 - miniMapVal.$1,
+                                  width: widget.minimapStyle?.width
+                                    ?? constraints.maxWidth * (
+                                      _isMobile ? 0.15: 0.065
+                                    ),
+                                  height:editor.viewportDimension * miniMapVal.$2,
+                                  child: GestureDetector(
+                                    onVerticalDragUpdate: (details) {
+                                      _vscrollController.jumpTo(
+                                        (_vscrollController.offset
+                                        + details.delta.dy * 15).clamp(
+                                          0, _vscrollController.position.maxScrollExtent
+                                        )
+                                      );
+                                    },
+                                    child: MouseRegion(
+                                      onEnter:(_) {
+                                        if(!_minimapOverlayHover) {
+                                          setState(() {
+                                            _minimapOverlayHover = true;
+                                          });
+                                        }
+                                      },
+                                      onExit:(_) {
+                                        if(_minimapOverlayHover) {
+                                          setState(() {
+                                            _minimapOverlayHover = false;
+                                          });
+                                        }
+                                      },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: (_minimapOverlayHover
+                                            ? widget.minimapStyle?.overlayHoverColor
+                                            : widget.minimapStyle?.overlayColor
+                                           ) ?? (
+                                            _editorTheme['root']!.color
+                                            ?? Colors.grey[400]!
+                                          ).withAlpha(_minimapOverlayHover ? 60 : 30),
+                                          borderRadius: .circular(3)
+                                        )
+                                      ),
+                                    ),
+                                  )
+                                );
+                              }
+                            )
+                          ],
+                        ),
+                      ),
+                    )
+                  ),
                 ],
               ),
             ),
@@ -4356,6 +4594,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final CodeForgeController controller;
   final Map<String, TextStyle> editorTheme;
   final Mode language;
+  final SyntaxHighlighter syntaxHighlighter;
   final List<Mode> extraLanguages;
   final String? languageId;
   final LspConfig? lspConfig;
@@ -4393,6 +4632,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.controller,
     required this.editorTheme,
     required this.language,
+    required this.syntaxHighlighter,
     required this.extraLanguages,
     required this.vscrollController,
     required this.hscrollController,
@@ -4443,6 +4683,7 @@ class _CodeField extends LeafRenderObjectWidget {
       controller: controller,
       editorTheme: editorTheme,
       language: language,
+      syntaxHighlighter: syntaxHighlighter,
       extraLanguages: extraLanguages,
       languageId: languageId,
       lspConfig: lspConfig,
@@ -4572,8 +4813,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   late double _lineHeight;
   late ui.ParagraphStyle _paragraphStyle;
   late ui.TextStyle _uiTextStyle;
-  late SyntaxHighlighter _syntaxHighlighter;
   late double _gutterWidth;
+  SyntaxHighlighter syntaxHighlighter;
   TextStyle? _ghostTextStyle;
   Map<String, TextStyle> _editorTheme;
   Mode _language;
@@ -4648,7 +4889,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   void updateSemanticTokens(List<LspSemanticToken> tokens, int version) {
     if (version < _lastAppliedSemanticVersion) return;
     _lastAppliedSemanticVersion = version;
-    _syntaxHighlighter.updateSemanticTokens(
+    syntaxHighlighter.updateSemanticTokens(
       tokens,
       controller.getLineText,
       controller.lineCount,
@@ -4782,7 +5023,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   void _checkDocumentVersionAndClearCache() {
-    final currentDocVersion = _syntaxHighlighter.documentVersion;
+    final currentDocVersion = syntaxHighlighter.documentVersion;
     if (currentDocVersion != _lastDocumentVersion) {
       _lastDocumentVersion = currentDocVersion;
       _paragraphCache.clear();
@@ -4890,7 +5131,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }) {
     final fontSize = textStyle?.fontSize ?? 14.0;
     final fontFamily = textStyle?.fontFamily;
-    return _syntaxHighlighter.buildHighlightedParagraph(
+    return syntaxHighlighter.buildHighlightedParagraph(
       lineIndex,
       text,
       _paragraphStyle,
@@ -4998,6 +5239,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.vscrollController,
     required this.hscrollController,
     required this.focusNode,
+    required this.syntaxHighlighter,
     required this.caretBlinkController,
     required this.lineHighlightController,
     required this.isMobile,
@@ -5044,20 +5286,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final fontSize = _textStyle?.fontSize ?? 14.0;
     final fontFamily = _textStyle?.fontFamily;
     final color =
-        _textStyle?.color ?? _editorTheme['root']?.color ?? Colors.black;
+      _textStyle?.color
+      ?? _editorTheme['root']?.color ?? Colors.black;
     final lineHeightMultiplier = _textStyle?.height ?? 1.2;
 
     _screenWidth = MediaQuery.sizeOf(context).width;
     _lineHeight = fontSize * lineHeightMultiplier;
-
-    _syntaxHighlighter = SyntaxHighlighter(
-      language: _language,
-      extraLanguages: _extraLanguages,
-      editorTheme: _editorTheme,
-      baseTextStyle: _textStyle,
-      languageId: languageId,
-      documentText: controller.text,
-    );
     _layoutMap = LayoutMap();
     _rebuildLayoutMap();
 
@@ -5283,10 +5517,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (identical(theme, _editorTheme)) return;
     _editorTheme = theme;
     try {
-      _syntaxHighlighter.dispose();
+      syntaxHighlighter.dispose();
     } catch (_) {}
 
-    _syntaxHighlighter = SyntaxHighlighter(
+    syntaxHighlighter = SyntaxHighlighter(
       language: language,
       extraLanguages: _extraLanguages,
       editorTheme: theme,
@@ -5304,9 +5538,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (identical(lang, _language)) return;
     _language = lang;
     try {
-      _syntaxHighlighter.dispose();
+      syntaxHighlighter.dispose();
     } catch (_) {}
-    _syntaxHighlighter = SyntaxHighlighter(
+    syntaxHighlighter = SyntaxHighlighter(
       language: lang,
       extraLanguages: _extraLanguages,
       editorTheme: editorTheme,
@@ -5363,9 +5597,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _bracketHighlightPainter.color = color;
 
     try {
-      _syntaxHighlighter.dispose();
+      syntaxHighlighter.dispose();
     } catch (_) {}
-    _syntaxHighlighter = SyntaxHighlighter(
+    syntaxHighlighter = SyntaxHighlighter(
       language: language,
       extraLanguages: _extraLanguages,
       editorTheme: editorTheme,
@@ -5410,9 +5644,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (listEquals(value, _extraLanguages)) return;
     _extraLanguages = value;
     try {
-      _syntaxHighlighter.dispose();
+      syntaxHighlighter.dispose();
     } catch (_) {}
-    _syntaxHighlighter = SyntaxHighlighter(
+    syntaxHighlighter = SyntaxHighlighter(
       language: language,
       extraLanguages: _extraLanguages,
       editorTheme: editorTheme,
@@ -5811,7 +6045,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final deletedText = previousText.substring(dirtyRange.start, oldEnd);
       final editLine = controller.getLineAtOffset(dirtyRange.start);
 
-      _syntaxHighlighter.applyDocumentEdit(
+      syntaxHighlighter.applyDocumentEdit(
         editLine,
         dirtyRange.start,
         oldEnd,
@@ -5845,7 +6079,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       } else {
         _lineHeightCache.remove(affectedLine);
       }
-      _syntaxHighlighter.invalidateLines({affectedLine});
+      syntaxHighlighter.invalidateLines({affectedLine});
     }
     controller.clearDirtyRegion();
 
@@ -5876,7 +6110,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _searchHighlightCache.clear();
       _lineIndentCache.clear();
       _bracketCache.clear();
-      _syntaxHighlighter.invalidateAll();
+      syntaxHighlighter.invalidateAll();
 
       if (enableGutter && gutterStyle.gutterWidth == null) {
         final fontSize = textStyle?.fontSize ?? 14.0;
@@ -7762,14 +7996,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     for (int i = firstVisibleLine; i <= lastVisibleLine; i++) {
       if (hasActiveFolds && _isLineFolded(i)) continue;
       final lineText = _lineTextCache[i] ?? controller.getLineText(i);
-      if (!_syntaxHighlighter.hasCachedLineSpan(i, lineText)) {
+      if (!syntaxHighlighter.hasCachedLineSpan(i, lineText)) {
         needsSyntaxHighlight = true;
         break;
       }
     }
     if (needsSyntaxHighlight) {
       unawaited(
-        _syntaxHighlighter
+        syntaxHighlighter
             .preHighlightLines(
               firstVisibleLine,
               lastVisibleLine,
@@ -8215,7 +8449,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             } else {
               final zoomFontSize = (textStyle?.fontSize ?? 14) * 1.5;
               final fontFamily = textStyle?.fontFamily;
-              zoomParagraph = _syntaxHighlighter.buildHighlightedParagraph(
+              zoomParagraph = syntaxHighlighter.buildHighlightedParagraph(
                 caretLineIndex,
                 previewText,
                 _paragraphStyle,
@@ -8339,7 +8573,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
               if (displayText.isEmpty) displayText = ' ';
 
-              final para = _syntaxHighlighter.buildHighlightedParagraph(
+              final para = syntaxHighlighter.buildHighlightedParagraph(
                 line,
                 displayText,
                 _paragraphStyle,
@@ -11491,7 +11725,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   void dispose() {
     controller.removeListener(_onControllerChange);
     controller.setScrollCallback(null);
-    _syntaxHighlighter.dispose();
+    syntaxHighlighter.dispose();
     super.dispose();
   }
 

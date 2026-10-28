@@ -272,6 +272,47 @@ class ScrollbarDecoration {
   });
 }
 
+/// Provide this class to the [CodeForge] widget to style the minimap.
+class MinimapStyle {
+  /// Width of the minimap.
+  final double? width;
+
+  /// The background color of the minimap.
+  /// Defaults to `editorForegroundColor.withAlpha(6)`.
+  final Color? backgroundColor;
+
+  /// The color for the position indicator overlay that appears on the
+  /// minimap.
+  /// Defaults to `editorForegroundColor.withAlpha(30)`.
+  final Color? overlayColor;
+
+  /// The hovering color for the position indicator overlay that appears on the
+  /// minimap.
+  /// Defaults to `editorForegroundColor.withAlpha(60)`.
+  final Color? overlayHoverColor;
+
+  /// Border radius of the overlay rectangle.
+  final double? overlayBorderRadius;
+
+  /// Font size of the mirrored text in the minimap.
+  /// Defaults to 2.5.
+  final double fontSize;
+  
+  /// Line height of the mirrored text in the minimap.
+  /// Defaults to 3.
+  final double lineHeight;
+
+  const MinimapStyle({
+    this.width,
+    this.backgroundColor,
+    this.overlayColor,
+    this.overlayHoverColor,
+    this.overlayBorderRadius,
+    this.fontSize = 2.5,
+    this.lineHeight = 3
+  });
+}
+
 /// This class provides styling options for code selection in the code editor.
 class CodeSelectionStyle {
   /// The color of the cursor line, defaults to the highlight theme text color.

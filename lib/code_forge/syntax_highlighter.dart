@@ -838,6 +838,39 @@ class SyntaxHighlighter {
     return p;
   }
 
+  ui.Paragraph buildMiniMapHighlight(
+    int lineIndex,
+    String lineText,
+    ui.ParagraphStyle paragraphStyle,
+    double fontSize,
+    String? fontFamily, {
+    double? width,
+  }) {
+    final span = getCachedLineSpan(lineIndex, lineText);
+    final builder = ui.ParagraphBuilder(paragraphStyle);
+
+    if (span == null || lineText.isEmpty) {
+      builder.pushStyle(_getUiTextStyle(null, fontSize, fontFamily));
+      builder.addText(lineText.isEmpty ? ' ' : lineText);
+      builder.pop();
+    } else {
+      _addTextSpanToBuilder(
+        builder,
+        span,
+        fontSize,
+        fontFamily,
+      );
+    }
+
+    final paragraph = builder.build();
+    paragraph.layout(
+      ui.ParagraphConstraints(width: width ?? double.infinity),
+    );
+
+    return paragraph;
+  }
+
+
   void _addTextSpanToBuilder(
     ui.ParagraphBuilder builder,
     TextSpan span,

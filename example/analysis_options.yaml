@@ -16,7 +16,6 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
-include: ../analysis_options_base.yaml
 
 linter:
   # The lint rules applied to this project can be customized in the
