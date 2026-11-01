@@ -229,7 +229,8 @@ class CodeForge extends StatefulWidget {
   final bool autoFocus;
 
   /// Whether to enable the VSCode like minimap on the editor,
-  /// which mirrors editor operations.
+  /// which mirrors editor operations. <br>
+  /// Disabled by default.
   final bool enableMinimap;
 
   /// Whether to enable code folding functionality.
@@ -337,7 +338,7 @@ class CodeForge extends StatefulWidget {
     this.readOnly = false,
     this.autoFocus = false,
     this.lineWrap = false,
-    this.enableMinimap = true,
+    this.enableMinimap = false,
     this.enableFolding = true,
     this.enableGuideLines = true,
     this.enableLocalSuggestions = false,
