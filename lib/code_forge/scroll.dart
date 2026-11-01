@@ -212,11 +212,11 @@ class _CustomThumbBorder extends RoundedRectangleBorder {
     required super.borderRadius,
   }) : super(side: BorderSide.none) {
     _lineNumberPainter =
-      TextPainter(
-          text: TextSpan(text: lineNumber.toString(), style: lineNumberStyle),
-        )
-        ..textDirection = textDirection
-        ..layout();
+        TextPainter(
+            text: TextSpan(text: lineNumber.toString(), style: lineNumberStyle),
+          )
+          ..textDirection = textDirection
+          ..layout();
   }
 
   @override

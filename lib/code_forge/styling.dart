@@ -297,7 +297,7 @@ class MinimapStyle {
   /// Font size of the mirrored text in the minimap.
   /// Defaults to 2.5.
   final double fontSize;
-  
+
   /// Line height of the mirrored text in the minimap.
   /// Defaults to 3.
   final double lineHeight;
@@ -309,7 +309,7 @@ class MinimapStyle {
     this.overlayHoverColor,
     this.overlayBorderRadius,
     this.fontSize = 2.5,
-    this.lineHeight = 3
+    this.lineHeight = 3,
   });
 }
 

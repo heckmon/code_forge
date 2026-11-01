@@ -33,12 +33,12 @@ class MiniMapPainter extends CustomPainter {
     required this.selectionRepaint,
     required this.diagnosticsRepaint,
   }) : super(
-      repaint: Listenable.merge([
-        scrollCtrl,
-        selectionRepaint,
-        diagnosticsRepaint,
-      ]),
-    );
+         repaint: Listenable.merge([
+           scrollCtrl,
+           selectionRepaint,
+           diagnosticsRepaint,
+         ]),
+       );
 
   @override
   void paint(Canvas canvas, Size size) {

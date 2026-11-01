@@ -854,22 +854,14 @@ class SyntaxHighlighter {
       builder.addText(lineText.isEmpty ? ' ' : lineText);
       builder.pop();
     } else {
-      _addTextSpanToBuilder(
-        builder,
-        span,
-        fontSize,
-        fontFamily,
-      );
+      _addTextSpanToBuilder(builder, span, fontSize, fontFamily);
     }
 
     final paragraph = builder.build();
-    paragraph.layout(
-      ui.ParagraphConstraints(width: width ?? double.infinity),
-    );
+    paragraph.layout(ui.ParagraphConstraints(width: width ?? double.infinity));
 
     return paragraph;
   }
-
 
   void _addTextSpanToBuilder(
     ui.ParagraphBuilder builder,

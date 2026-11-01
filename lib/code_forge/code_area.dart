@@ -410,7 +410,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   ));
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
   final ValueNotifier<int> _minimapSelectionRevision = ValueNotifier(0);
-  final _isMobile = 
+  final _isMobile =
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
   final _suggScrollController = ScrollController();
@@ -4446,32 +4446,36 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                               Listener(
                                 onPointerSignal: (event) {
                                   if (event is PointerScrollEvent) {
-                                    GestureBinding.instance
-                                      .pointerSignalResolver
-                                      .register(event, (e) {
-                                        final scroll = e as PointerScrollEvent;
-                                        final ctrl = _vscrollController;
-                                        if (!ctrl.hasClients) return;
+                                    GestureBinding
+                                        .instance
+                                        .pointerSignalResolver
+                                        .register(event, (e) {
+                                          final scroll =
+                                              e as PointerScrollEvent;
+                                          final ctrl = _vscrollController;
+                                          if (!ctrl.hasClients) return;
 
-                                        const speed = 0.4;
-                                        final target =
-                                            (ctrl.offset +
-                                                    scroll.scrollDelta.dy *
-                                                        speed)
-                                                .clamp(
-                                                  ctrl
-                                                      .position
-                                                      .minScrollExtent,
-                                                  ctrl
-                                                      .position
-                                                      .maxScrollExtent,
-                                                );
-                                        ctrl.jumpTo(target);
-                                      });
+                                          const speed = 0.4;
+                                          final target =
+                                              (ctrl.offset +
+                                                      scroll.scrollDelta.dy *
+                                                          speed)
+                                                  .clamp(
+                                                    ctrl
+                                                        .position
+                                                        .minScrollExtent,
+                                                    ctrl
+                                                        .position
+                                                        .maxScrollExtent,
+                                                  );
+                                          ctrl.jumpTo(target);
+                                        });
                                   }
                                 },
                                 onPointerDown: (event) {
-                                  _jumpToMinimapPosition(event.localPosition.dy);
+                                  _jumpToMinimapPosition(
+                                    event.localPosition.dy,
+                                  );
                                 },
                                 child: SingleChildScrollView(
                                   controller: _minimapScrollCtrl,
@@ -4479,7 +4483,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                   child: CustomPaint(
                                     size: Size(
                                       widget.minimapStyle?.width ??
-                                          constraints.maxWidth * (_isMobile ? 0.15 : 0.065),
+                                          constraints.maxWidth *
+                                              (_isMobile ? 0.15 : 0.065),
                                       _controller.lineCount *
                                           (widget.minimapStyle?.lineHeight ??
                                               3),
