@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -4390,29 +4391,48 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                         },
                         child: Stack(
                           children: [
-                            SingleChildScrollView(
-                              controller: _minimapScrollCtrl,
-                              child: CustomPaint(
-                                size: Size(
-                                  widget.minimapStyle?.width
-                                    ?? constraints.maxWidth * 0.065,
-                                  _controller.lineCount * 2.55,
-                                ),
-                                painter: MiniMapPainter(
-                                  fontSize: widget.minimapStyle?.fontSize
-                                    ?? 2.5,
-                                  lineHeight: widget.minimapStyle?.lineHeight
-                                    ?? 3,
-                                  controller: _controller,
-                                  bgColor: widget.minimapStyle?.backgroundColor
-                                    ?? (
-                                     _editorTheme['root']!.color
-                                      ?? Colors.grey[400]!
-                                  ).withAlpha(6),
-                                  scrollCtrl: _minimapScrollCtrl,
-                                  lineWrap: widget.lineWrap,
-                                  highlighter: _syntaxHighlighter,
-                                  textDirection: widget.textDirection
+                            Listener(
+                              onPointerSignal: (event) {
+                                if (event is PointerScrollEvent) {
+                                  GestureBinding.instance.pointerSignalResolver.register(event, (e) {
+                                    final scroll = e as PointerScrollEvent;
+                                    final ctrl = _vscrollController;
+                                    if (!ctrl.hasClients) return;
+
+                                    const speed = 0.4;
+                                    final target = (ctrl.offset + scroll.scrollDelta.dy * speed).clamp(
+                                      ctrl.position.minScrollExtent,
+                                      ctrl.position.maxScrollExtent,
+                                    );
+                                    ctrl.jumpTo(target);
+                                  });
+                                }
+                              },
+                              child: SingleChildScrollView(
+                                controller: _minimapScrollCtrl,
+                                physics: NeverScrollableScrollPhysics(),
+                                child: CustomPaint(
+                                  size: Size(
+                                    widget.minimapStyle?.width
+                                      ?? constraints.maxWidth * 0.065,
+                                    _controller.lineCount * 2.55,
+                                  ),
+                                  painter: MiniMapPainter(
+                                    fontSize: widget.minimapStyle?.fontSize
+                                      ?? 2.5,
+                                    lineHeight: widget.minimapStyle?.lineHeight
+                                      ?? 3,
+                                    controller: _controller,
+                                    bgColor: widget.minimapStyle?.backgroundColor
+                                      ?? (
+                                       _editorTheme['root']!.color
+                                        ?? Colors.grey[400]!
+                                    ).withAlpha(6),
+                                    scrollCtrl: _minimapScrollCtrl,
+                                    lineWrap: widget.lineWrap,
+                                    highlighter: _syntaxHighlighter,
+                                    textDirection: widget.textDirection
+                                  ),
                                 ),
                               ),
                             ),
@@ -4420,6 +4440,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             ValueListenableBuilder<(double, double)>(
                               valueListenable: _minimapHoverNotifier,
                               builder: (_, miniMapVal, _) {
+                                final lineHeight = widget.minimapStyle?.lineHeight ?? 3;
                                 final editor = _vscrollController.position;
                                 final minimap = _minimapScrollCtrl.position;
                         
@@ -4429,8 +4450,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                 }
                                 return Positioned(
                                   left: 0,
-                                  top: 
-                                    editor.pixels * miniMapVal.$2 - miniMapVal.$1,
+                                  top: editor.pixels * miniMapVal.$2 - miniMapVal.$1,
                                   width: widget.minimapStyle?.width
                                     ?? constraints.maxWidth * (
                                       _isMobile ? 0.15: 0.065
@@ -4438,11 +4458,20 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                   height:editor.viewportDimension * miniMapVal.$2,
                                   child: GestureDetector(
                                     onVerticalDragUpdate: (details) {
+                                      if (!_vscrollController.hasClients) return;
+
+                                      final ed = _vscrollController.position;
+                                      final overlayHeight = ed.viewportDimension * miniMapVal.$2;
+                                      final contentHeight = _controller.lineCount * lineHeight;
+                                      final visibleHeight = math.min(minimap.viewportDimension, contentHeight);
+                                      final track = visibleHeight - overlayHeight;
+
+                                      if (track <= 0) return;
+
+                                      final delta = details.primaryDelta ?? 0;
                                       _vscrollController.jumpTo(
-                                        (_vscrollController.offset
-                                        + details.delta.dy * 15).clamp(
-                                          0, _vscrollController.position.maxScrollExtent
-                                        )
+                                        (ed.pixels + delta * ed.maxScrollExtent / track)
+                                        .clamp(ed.minScrollExtent, ed.maxScrollExtent),
                                       );
                                     },
                                     child: MouseRegion(

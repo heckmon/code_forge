@@ -29,11 +29,19 @@ class MiniMapPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (!scrollCtrl.hasClients) return;
+
     canvas.drawPaint(Paint()..color = bgColor);
+    
+    final position = scrollCtrl.position;
+
+    if (!position.hasViewportDimension || !position.hasContentDimensions) {
+      return;
+    }
 
     final lineCount = controller.lineCount;
     final viewTop = scrollCtrl.offset;
-    final viewBottom = viewTop + scrollCtrl.position.viewportDimension;
+    final viewBottom = viewTop + position.viewportDimension;
     final firstVisibleLine = _findVisibleLineByYPosition(viewTop, lineHeight);
     final lastVisibleLine = _findVisibleLineByYPosition(viewBottom, lineHeight);
     double y_offset = firstVisibleLine * lineHeight;
