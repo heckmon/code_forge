@@ -516,3 +516,10 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 
 ## 11.4.0
   - ENHANCEMENT: Massive performance improvement.
+
+## 11.5.0
+  - FIX: [#112](https://github.com/heckmon/code_forge/issues/112)
+  - FEATURE: Added VSCode like minimap
+    <p align="left">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="400" width="400"/>
+    </p>
