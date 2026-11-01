@@ -18,9 +18,6 @@ import 'package:vector_math/vector_math_64.dart' show Vector3;
 import '../code_forge.dart';
 import 'minimap.dart';
 
-const int kSemanticTokenViewportPaddingLines = 1500;
-const int kExactWrappedHeightThreshold = 512;
-const int kWrappedHeightSampleSize = 64;
 const String _wordCharPattern =
     r'[\w\u0600-\u06FF\u08A0-\u08FF\u0590-\u05FF'
     r'\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]';
@@ -231,7 +228,7 @@ class CodeForge extends StatefulWidget {
   /// Whether to automatically focus the editor when mounted.
   final bool autoFocus;
 
-  /// Whether to enable the VSCode like minimap on the editor, 
+  /// Whether to enable the VSCode like minimap on the editor,
   /// which mirrors editor operations.
   final bool enableMinimap;
 
@@ -406,11 +403,15 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late SyntaxHighlighter _syntaxHighlighter;
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
-  final ValueNotifier<(double, double)> _minimapHoverNotifier = ValueNotifier((0, 0));
+  final ValueNotifier<(double, double)> _minimapHoverNotifier = ValueNotifier((
+    0,
+    0,
+  ));
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
-  final _isMobile =
-    defaultTargetPlatform == TargetPlatform.android ||
-    defaultTargetPlatform == TargetPlatform.iOS;
+  final ValueNotifier<int> _minimapSelectionRevision = ValueNotifier(0);
+  final _isMobile = 
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
   final _suggScrollController = ScrollController();
   final _actionScrollController = ScrollController();
   final Map<String, String> _suggestionDetailsCache = {};
@@ -756,6 +757,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
 
     _controllerListener = () {
+      _minimapSelectionRevision.value++;
       _resetCursorBlink();
       _updateScrollbarLineNumberIndicator();
 
@@ -987,6 +989,37 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
   }
 
+  void _jumpToMinimapPosition(double position) {
+    if (!_vscrollController.hasClients || !_minimapScrollCtrl.hasClients) {
+      return;
+    }
+
+    final editor = _vscrollController.position;
+    final minimap = _minimapScrollCtrl.position;
+    if (!editor.hasContentDimensions ||
+        !minimap.hasContentDimensions ||
+        !editor.hasViewportDimension ||
+        !minimap.hasViewportDimension) {
+      return;
+    }
+
+    final editorDocumentHeight =
+        editor.maxScrollExtent + editor.viewportDimension;
+    if (editorDocumentHeight <= 0) return;
+
+    final overlayHeight = math.min(
+      minimap.viewportDimension,
+      minimap.viewportDimension *
+          editor.viewportDimension /
+          editorDocumentHeight,
+    );
+    final track = minimap.viewportDimension - overlayHeight;
+    if (track <= 0) return;
+
+    final progress = ((position - overlayHeight / 2) / track).clamp(0.0, 1.0);
+    _minimapScrollCtrl.jumpTo(progress * minimap.maxScrollExtent);
+  }
+
   void _updateMinimapScroll() {
     if (_isSyncingScroll ||
         !_vscrollController.hasClients ||
@@ -1022,15 +1055,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       final editorDocumentHeight =
           editor.maxScrollExtent + editor.viewportDimension;
 
-      final minimapDocumentHeight = _controller.lineCount * 2.55;
-
       if (editorDocumentHeight > 0) {
-        final scale = minimapDocumentHeight / editorDocumentHeight;
-
-        _minimapHoverNotifier.value = (
-          _minimapScrollCtrl.offset,
-          scale,
+        final overlayHeight = math.min(
+          minimap.viewportDimension,
+          minimap.viewportDimension *
+              editor.viewportDimension /
+              editorDocumentHeight,
         );
+        _minimapHoverNotifier.value = (progress, overlayHeight);
       }
     } finally {
       _isSyncingScroll = false;
@@ -1055,8 +1087,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     final minimapMax = minimap.maxScrollExtent;
 
     final progress = minimapMax > 0
-      ? (minimap.pixels / minimapMax).clamp(0.0, 1.0)
-      : 0.0;
+        ? (minimap.pixels / minimapMax).clamp(0.0, 1.0)
+        : 0.0;
 
     final targetOffset = progress * editorMax;
 
@@ -1066,20 +1098,21 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         _vscrollController.jumpTo(targetOffset);
       }
 
-      if (editor.hasViewportDimension &&
-          minimap.hasViewportDimension) {
+      if (editor.hasViewportDimension && minimap.hasViewportDimension) {
         final editorDocumentHeight =
             editor.maxScrollExtent + editor.viewportDimension;
 
-        final minimapDocumentHeight = _controller.lineCount * 2.55;
-
         if (editorDocumentHeight > 0) {
-          final scale = minimapDocumentHeight / editorDocumentHeight;
-
-          _minimapHoverNotifier.value = (
-            _minimapScrollCtrl.offset,
-            scale,
+          final overlayHeight = math.min(
+            minimap.viewportDimension,
+            minimap.viewportDimension *
+                editor.viewportDimension /
+                editorDocumentHeight,
           );
+          final progress = editor.maxScrollExtent > 0
+              ? (editor.pixels / editor.maxScrollExtent).clamp(0.0, 1.0)
+              : 0.0;
+          _minimapHoverNotifier.value = (progress, overlayHeight);
         }
       }
     } finally {
@@ -1338,6 +1371,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _isHoveringPopup.dispose();
     _offsetNotifier.dispose();
     _lspActionOffsetNotifier.dispose();
+    _minimapSelectionRevision.dispose();
     _suggScrollController.dispose();
     _actionScrollController.dispose();
     _hoverTimer?.cancel();
@@ -1418,7 +1452,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    _controller.pressHomeKey(isShiftPressed: withShift);
+    final renderer = _codeFieldKey.currentContext?.findRenderObject();
+    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+      renderer.moveToWrappedLineStart(isShiftPressed: withShift);
+    } else {
+      _controller.pressHomeKey(isShiftPressed: withShift);
+    }
   }
 
   void _handleEndKey(bool withShift) {
@@ -1426,7 +1465,26 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _suggestionNotifier.value = null;
     }
 
-    _controller.pressEndKey(isShiftPressed: withShift);
+    final renderer = _codeFieldKey.currentContext?.findRenderObject();
+    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+      renderer.moveToWrappedLineEnd(isShiftPressed: withShift);
+    } else {
+      _controller.pressEndKey(isShiftPressed: withShift);
+    }
+  }
+
+  void _moveVertical(bool down, bool withShift) {
+    final renderer = _codeFieldKey.currentContext?.findRenderObject();
+    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+      renderer.moveVerticallyInWrappedText(
+        down: down,
+        isShiftPressed: withShift,
+      );
+    } else if (down) {
+      _controller.pressDownArrowKey(isShiftPressed: withShift);
+    } else {
+      _controller.pressUpArrowKey(isShiftPressed: withShift);
+    }
   }
 
   Widget _buildContextMenu() {
@@ -2213,9 +2271,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       event,
                                                       HardwareKeyboard.instance,
                                                     )) {
-                                                  _controller.pressUpArrowKey(
-                                                    isShiftPressed: true,
-                                                  );
+                                                  _moveVertical(false, true);
                                                   _commonKeyFunctions();
                                                   return KeyEventResult.handled;
                                                 }
@@ -2225,9 +2281,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       event,
                                                       HardwareKeyboard.instance,
                                                     )) {
-                                                  _controller.pressDownArrowKey(
-                                                    isShiftPressed: true,
-                                                  );
+                                                  _moveVertical(true, true);
                                                   _commonKeyFunctions();
                                                   return KeyEventResult.handled;
                                                 }
@@ -2237,9 +2291,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       event,
                                                       HardwareKeyboard.instance,
                                                     )) {
-                                                  _controller.pressHomeKey(
-                                                    isShiftPressed: true,
-                                                  );
+                                                  _handleHomeKey(true);
                                                   _commonKeyFunctions();
                                                   return KeyEventResult.handled;
                                                 }
@@ -2249,9 +2301,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       event,
                                                       HardwareKeyboard.instance,
                                                     )) {
-                                                  _controller.pressEndKey(
-                                                    isShiftPressed: true,
-                                                  );
+                                                  _handleEndKey(true);
                                                   _commonKeyFunctions();
                                                   return KeyEventResult.handled;
                                                 }
@@ -2813,11 +2863,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
                                                     case LogicalKeyboardKey
                                                         .arrowDown:
-                                                      _controller
-                                                          .pressDownArrowKey(
-                                                            isShiftPressed:
-                                                                isShiftPressed,
-                                                          );
+                                                      _moveVertical(
+                                                        true,
+                                                        isShiftPressed,
+                                                      );
 
                                                       if (_controller
                                                           .hasMultiCursors) {
@@ -2834,11 +2883,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
                                                     case LogicalKeyboardKey
                                                         .arrowUp:
-                                                      _controller
-                                                          .pressUpArrowKey(
-                                                            isShiftPressed:
-                                                                isShiftPressed,
-                                                          );
+                                                      _moveVertical(
+                                                        false,
+                                                        isShiftPressed,
+                                                      );
 
                                                       if (_controller
                                                           .hasMultiCursors) {
@@ -2993,7 +3041,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 context: context,
                                                 controller: _controller,
                                                 editorTheme: _editorTheme,
-                                                syntaxHighlighter: _syntaxHighlighter,
+                                                syntaxHighlighter:
+                                                    _syntaxHighlighter,
                                                 language: _language,
                                                 extraLanguages:
                                                     widget.extraLanguages,
@@ -4367,150 +4416,191 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       );
                     },
                   ),
-                  if(widget.enableMinimap)
-                  Positioned(
-                    right: widget.textDirection == .ltr
-                      ? _scrollbarDecoration.thickness
-                      : null,
-                    left: widget.textDirection == .rtl
-                      ? _scrollbarDecoration.thickness
-                      : null,
-                    top: 0,
-                    height: editorHeight,
-                    child: ClipRect(
-                      child: MouseRegion(
-                        onEnter: (_) {
-                          if(!_minimapOverlayVisiblility) {
-                            setState(() => _minimapOverlayVisiblility = true);
-                          }
-                        },
-                        onExit: (_) {
-                          if(_minimapOverlayVisiblility) {
-                            setState(() => _minimapOverlayVisiblility = false);
-                          }
-                        },
-                        child: Stack(
-                          children: [
-                            Listener(
-                              onPointerSignal: (event) {
-                                if (event is PointerScrollEvent) {
-                                  GestureBinding.instance.pointerSignalResolver.register(event, (e) {
-                                    final scroll = e as PointerScrollEvent;
-                                    final ctrl = _vscrollController;
-                                    if (!ctrl.hasClients) return;
+                  if (widget.enableMinimap)
+                    Positioned(
+                      right: widget.textDirection == .ltr
+                          ? _scrollbarDecoration.thickness
+                          : null,
+                      left: widget.textDirection == .rtl
+                          ? _scrollbarDecoration.thickness
+                          : null,
+                      top: 0,
+                      height: editorHeight,
+                      child: ClipRect(
+                        child: MouseRegion(
+                          onEnter: (_) {
+                            if (!_minimapOverlayVisiblility) {
+                              setState(() => _minimapOverlayVisiblility = true);
+                            }
+                          },
+                          onExit: (_) {
+                            if (_minimapOverlayVisiblility) {
+                              setState(
+                                () => _minimapOverlayVisiblility = false,
+                              );
+                            }
+                          },
+                          child: Stack(
+                            children: [
+                              Listener(
+                                onPointerSignal: (event) {
+                                  if (event is PointerScrollEvent) {
+                                    GestureBinding.instance
+                                      .pointerSignalResolver
+                                      .register(event, (e) {
+                                        final scroll = e as PointerScrollEvent;
+                                        final ctrl = _vscrollController;
+                                        if (!ctrl.hasClients) return;
 
-                                    const speed = 0.4;
-                                    final target = (ctrl.offset + scroll.scrollDelta.dy * speed).clamp(
-                                      ctrl.position.minScrollExtent,
-                                      ctrl.position.maxScrollExtent,
-                                    );
-                                    ctrl.jumpTo(target);
-                                  });
-                                }
-                              },
-                              child: SingleChildScrollView(
-                                controller: _minimapScrollCtrl,
-                                physics: NeverScrollableScrollPhysics(),
-                                child: CustomPaint(
-                                  size: Size(
-                                    widget.minimapStyle?.width
-                                      ?? constraints.maxWidth * 0.065,
-                                    _controller.lineCount * 2.55,
-                                  ),
-                                  painter: MiniMapPainter(
-                                    fontSize: widget.minimapStyle?.fontSize
-                                      ?? 2.5,
-                                    lineHeight: widget.minimapStyle?.lineHeight
-                                      ?? 3,
-                                    controller: _controller,
-                                    bgColor: widget.minimapStyle?.backgroundColor
-                                      ?? (
-                                       _editorTheme['root']!.color
-                                        ?? Colors.grey[400]!
-                                    ).withAlpha(6),
-                                    scrollCtrl: _minimapScrollCtrl,
-                                    lineWrap: widget.lineWrap,
-                                    highlighter: _syntaxHighlighter,
-                                    textDirection: widget.textDirection
+                                        const speed = 0.4;
+                                        final target =
+                                            (ctrl.offset +
+                                                    scroll.scrollDelta.dy *
+                                                        speed)
+                                                .clamp(
+                                                  ctrl
+                                                      .position
+                                                      .minScrollExtent,
+                                                  ctrl
+                                                      .position
+                                                      .maxScrollExtent,
+                                                );
+                                        ctrl.jumpTo(target);
+                                      });
+                                  }
+                                },
+                                onPointerDown: (event) {
+                                  _jumpToMinimapPosition(event.localPosition.dy);
+                                },
+                                child: SingleChildScrollView(
+                                  controller: _minimapScrollCtrl,
+                                  physics: NeverScrollableScrollPhysics(),
+                                  child: CustomPaint(
+                                    size: Size(
+                                      widget.minimapStyle?.width ??
+                                          constraints.maxWidth * (_isMobile ? 0.15 : 0.065),
+                                      _controller.lineCount *
+                                          (widget.minimapStyle?.lineHeight ??
+                                              3),
+                                    ),
+                                    painter: MiniMapPainter(
+                                      fontSize:
+                                          widget.minimapStyle?.fontSize ?? 2.5,
+                                      lineHeight:
+                                          widget.minimapStyle?.lineHeight ?? 3,
+                                      controller: _controller,
+                                      bgColor:
+                                          widget
+                                              .minimapStyle
+                                              ?.backgroundColor ??
+                                          (_editorTheme['root']!.color ??
+                                                  Colors.grey[400]!)
+                                              .withAlpha(6),
+                                      scrollCtrl: _minimapScrollCtrl,
+                                      lineWrap: widget.lineWrap,
+                                      highlighter: _syntaxHighlighter,
+                                      textDirection: widget.textDirection,
+                                      selectionColor:
+                                          _selectionStyle.selectionColor,
+                                      selectionRepaint:
+                                          _minimapSelectionRevision,
+                                      diagnosticsRepaint: _diagnosticsNotifier,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            if(_minimapOverlayVisiblility || _isMobile)
-                            ValueListenableBuilder<(double, double)>(
-                              valueListenable: _minimapHoverNotifier,
-                              builder: (_, miniMapVal, _) {
-                                final lineHeight = widget.minimapStyle?.lineHeight ?? 3;
-                                final editor = _vscrollController.position;
-                                final minimap = _minimapScrollCtrl.position;
-                        
-                                if (!editor.hasViewportDimension ||
-                                    !minimap.hasViewportDimension) {
-                                  return const SizedBox.shrink();
-                                }
-                                return Positioned(
-                                  left: 0,
-                                  top: editor.pixels * miniMapVal.$2 - miniMapVal.$1,
-                                  width: widget.minimapStyle?.width
-                                    ?? constraints.maxWidth * (
-                                      _isMobile ? 0.15: 0.065
-                                    ),
-                                  height:editor.viewportDimension * miniMapVal.$2,
-                                  child: GestureDetector(
-                                    onVerticalDragUpdate: (details) {
-                                      if (!_vscrollController.hasClients) return;
+                              if (_minimapOverlayVisiblility || _isMobile)
+                                ValueListenableBuilder<(double, double)>(
+                                  valueListenable: _minimapHoverNotifier,
+                                  builder: (_, miniMapVal, _) {
+                                    final editor = _vscrollController.position;
+                                    final minimap = _minimapScrollCtrl.position;
 
-                                      final ed = _vscrollController.position;
-                                      final overlayHeight = ed.viewportDimension * miniMapVal.$2;
-                                      final contentHeight = _controller.lineCount * lineHeight;
-                                      final visibleHeight = math.min(minimap.viewportDimension, contentHeight);
-                                      final track = visibleHeight - overlayHeight;
+                                    if (!editor.hasViewportDimension ||
+                                        !minimap.hasViewportDimension) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    final overlayHeight = miniMapVal.$2;
+                                    final track = math.max(
+                                      0.0,
+                                      minimap.viewportDimension - overlayHeight,
+                                    );
+                                    return Positioned(
+                                      top: miniMapVal.$1 * track,
+                                      width:
+                                          widget.minimapStyle?.width ??
+                                          constraints.maxWidth *
+                                              (_isMobile ? 0.15 : 0.065),
+                                      height: overlayHeight,
+                                      child: GestureDetector(
+                                        onVerticalDragUpdate: (details) {
+                                          if (!_vscrollController.hasClients)
+                                            return;
 
-                                      if (track <= 0) return;
+                                          final ed =
+                                              _vscrollController.position;
 
-                                      final delta = details.primaryDelta ?? 0;
-                                      _vscrollController.jumpTo(
-                                        (ed.pixels + delta * ed.maxScrollExtent / track)
-                                        .clamp(ed.minScrollExtent, ed.maxScrollExtent),
-                                      );
-                                    },
-                                    child: MouseRegion(
-                                      onEnter:(_) {
-                                        if(!_minimapOverlayHover) {
-                                          setState(() {
-                                            _minimapOverlayHover = true;
-                                          });
-                                        }
-                                      },
-                                      onExit:(_) {
-                                        if(_minimapOverlayHover) {
-                                          setState(() {
-                                            _minimapOverlayHover = false;
-                                          });
-                                        }
-                                      },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: (_minimapOverlayHover
-                                            ? widget.minimapStyle?.overlayHoverColor
-                                            : widget.minimapStyle?.overlayColor
-                                           ) ?? (
-                                            _editorTheme['root']!.color
-                                            ?? Colors.grey[400]!
-                                          ).withAlpha(_minimapOverlayHover ? 60 : 30),
-                                          borderRadius: .circular(3)
-                                        )
+                                          if (track <= 0) return;
+
+                                          final delta =
+                                              details.primaryDelta ?? 0;
+                                          _vscrollController.jumpTo(
+                                            (ed.pixels +
+                                                    delta *
+                                                        ed.maxScrollExtent /
+                                                        track)
+                                                .clamp(
+                                                  ed.minScrollExtent,
+                                                  ed.maxScrollExtent,
+                                                ),
+                                          );
+                                        },
+                                        child: MouseRegion(
+                                          onEnter: (_) {
+                                            if (!_minimapOverlayHover) {
+                                              setState(() {
+                                                _minimapOverlayHover = true;
+                                              });
+                                            }
+                                          },
+                                          onExit: (_) {
+                                            if (_minimapOverlayHover) {
+                                              setState(() {
+                                                _minimapOverlayHover = false;
+                                              });
+                                            }
+                                          },
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  (_minimapOverlayHover
+                                                      ? widget
+                                                            .minimapStyle
+                                                            ?.overlayHoverColor
+                                                      : widget
+                                                            .minimapStyle
+                                                            ?.overlayColor) ??
+                                                  (_editorTheme['root']!
+                                                              .color ??
+                                                          Colors.grey[400]!)
+                                                      .withAlpha(
+                                                        _minimapOverlayHover
+                                                            ? 60
+                                                            : 30,
+                                                      ),
+                                              borderRadius: .circular(3),
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  )
-                                );
-                              }
-                            )
-                          ],
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
                       ),
-                    )
-                  ),
+                    ),
                 ],
               ),
             ),
@@ -4887,7 +4977,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   int _wrappedHeightIndexLineCount = -1;
   double _wrappedHeightEstimate = 0.0, _cachedRtlContentWidth = 0.0;
   double _cachedTotalHeight = 0.0;
-  bool _wrappedHeightEstimateFromSamples = false;
   Timer? _resizeTimer, _layoutDebounceTimer, _bracketHighlightResumeTimer;
   int _lastSemanticTokenRequestVersion = -1;
   int _lastSemanticTokenRequestStartLine = -1;
@@ -5083,23 +5172,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (controller.lineCount <= 0) return;
 
     final currentVersion = controller.documentVersion;
-    final buffer = kSemanticTokenViewportPaddingLines;
-    final startLine = (firstVisibleLine - buffer)
-        .clamp(0, controller.lineCount - 1)
-        .toInt();
-    final endLine = (lastVisibleLine + buffer)
-        .clamp(0, controller.lineCount - 1)
-        .toInt();
 
     if (_lastSemanticTokenRequestVersion == currentVersion &&
-        _lastSemanticTokenRequestStartLine == startLine &&
-        _lastSemanticTokenRequestEndLine == endLine) {
+        _lastSemanticTokenRequestStartLine == firstVisibleLine &&
+        _lastSemanticTokenRequestEndLine == lastVisibleLine) {
       return;
     }
 
     _lastSemanticTokenRequestVersion = currentVersion;
-    _lastSemanticTokenRequestStartLine = startLine;
-    _lastSemanticTokenRequestEndLine = endLine;
+    _lastSemanticTokenRequestStartLine = firstVisibleLine;
+    _lastSemanticTokenRequestEndLine = lastVisibleLine;
 
     _semanticTokenTimer?.cancel();
     final requestSerial = ++_semanticTokenRequestSerial;
@@ -5111,14 +5193,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         return;
       }
 
-      final endLineText = controller.getLineText(endLine);
+      final endLineText = controller.getLineText(lastVisibleLine);
 
       try {
         final tokens = await config.getSemanticTokensRange(
           currentFile,
-          startLine: startLine,
+          startLine: firstVisibleLine,
           startCharacter: 0,
-          endLine: endLine,
+          endLine: lastVisibleLine,
           endCharacter: endLineText.length,
         );
 
@@ -5176,7 +5258,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _wrappedHeightDeltas = const [];
     _wrappedHeightIndexLineCount = -1;
     _wrappedHeightEstimate = 0.0;
-    _wrappedHeightEstimateFromSamples = false;
+    _lineOffsetCache.clear();
+    _caretInfoCache.clear();
+    _cachedCaretOffset = -1;
   }
 
   void _removeWrappedLineHeight(int lineIndex) {
@@ -5229,13 +5313,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   }
 
   double _wrappedLineYOffset(int lineIndex) {
+    final lineCount = controller.lineCount;
+    if (_lineHeightCache.length < lineCount) {
+      for (int i = 0; i < lineCount; i++) {
+        _getWrappedLineHeight(i);
+      }
+    }
     _ensureWrappedHeightIndex();
-    final clamped = lineIndex.clamp(0, controller.lineCount);
+    final clamped = lineIndex.clamp(0, lineCount);
     return clamped * _wrappedHeightEstimate +
         _wrappedHeightDeltaBefore(clamped);
   }
-
-  double _wrappedContentHeight() => _wrappedLineYOffset(controller.lineCount);
 
   int _findWrappedLineByYPosition(double yPosition) {
     _ensureWrappedHeightIndex();
@@ -5257,10 +5345,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
   void _cacheWrappedLineHeight(int lineIndex, double height) {
     final previous = _lineHeightCache[lineIndex];
+    if (previous != null && (previous - height).abs() < 0.01) {
+      return;
+    }
     _ensureWrappedHeightIndex();
     final oldHeight = previous ?? _wrappedHeightEstimate;
     _lineHeightCache[lineIndex] = height;
     _addWrappedHeightDelta(lineIndex, height - oldHeight);
+    _lineOffsetCache.clear();
+    _caretInfoCache.clear();
+    _cachedCaretOffset = -1;
   }
 
   _CodeFieldRenderer({
@@ -5315,8 +5409,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final fontSize = _textStyle?.fontSize ?? 14.0;
     final fontFamily = _textStyle?.fontFamily;
     final color =
-      _textStyle?.color
-      ?? _editorTheme['root']?.color ?? Colors.black;
+        _textStyle?.color ?? _editorTheme['root']?.color ?? Colors.black;
     final lineHeightMultiplier = _textStyle?.height ?? 1.2;
 
     _screenWidth = MediaQuery.sizeOf(context).width;
@@ -5784,14 +5877,16 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (caretY >= 0 && caretY <= vScrollOffset + (innerPadding?.top ?? 0)) {
       final targetOffset = caretY - (innerPadding?.top ?? 0);
-      vscrollController.jumpTo(
-        targetOffset.clamp(0, vscrollController.position.maxScrollExtent),
-      );
+      final nextOffset = targetOffset
+          .clamp(0.0, vscrollController.position.maxScrollExtent)
+          .toDouble();
+      vscrollController.jumpTo(nextOffset);
     } else if (caretY + caretHeight > vScrollOffset + viewportHeight) {
       final targetOffset = caretY + caretHeight - viewportHeight;
-      vscrollController.jumpTo(
-        targetOffset.clamp(0, vscrollController.position.maxScrollExtent),
-      );
+      final nextOffset = targetOffset
+          .clamp(0.0, vscrollController.position.maxScrollExtent)
+          .toDouble();
+      vscrollController.jumpTo(nextOffset);
     }
 
     if (isRTL) {
@@ -5822,8 +5917,25 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
   }
 
+  void _ensureCaretVisibleForCurrentLayout() {
+    if (_isFoldToggleInProgress) return;
+    if (lineWrap) {
+      _scheduleCaretSyncAfterLayout();
+    } else {
+      _ensureCaretVisible();
+    }
+  }
+
   void _deferLayout({required int lineDelta}) {
     _layoutDebounceTimer?.cancel();
+
+    if (lineWrap) {
+      _isDeferringLayout = false;
+      markNeedsLayout();
+      markNeedsPaint();
+      _scheduleCaretSyncAfterLayout();
+      return;
+    }
 
     if (lineDelta.abs() <= 4) {
       _isDeferringLayout = false;
@@ -5842,7 +5954,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     }
     _previousLineCount = _cachedLineCount;
 
-    if (!_isFoldToggleInProgress) {
+    if (!_isFoldToggleInProgress && !lineWrap) {
       _ensureCaretVisible();
     }
     markNeedsPaint();
@@ -5859,12 +5971,23 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     _caretSyncAfterLayoutScheduled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _caretSyncAfterLayoutScheduled = false;
-      if (!attached) return;
-      if (!vscrollController.hasClients || !hscrollController.hasClients) {
+      if (!attached) {
+        _caretSyncAfterLayoutScheduled = false;
         return;
       }
-      _ensureCaretVisible();
+      if (!vscrollController.hasClients || !hscrollController.hasClients) {
+        _caretSyncAfterLayoutScheduled = false;
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _caretSyncAfterLayoutScheduled = false;
+        if (!attached ||
+            !vscrollController.hasClients ||
+            !hscrollController.hasClients) {
+          return;
+        }
+        _ensureCaretVisible();
+      });
     });
   }
 
@@ -5999,9 +6122,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (controller.imeCompositionChanged) {
       controller.imeCompositionChanged = false;
       _caretInfoCache.clear();
-      if (!_isFoldToggleInProgress) {
-        _ensureCaretVisible();
-      }
+      _ensureCaretVisibleForCurrentLayout();
       if (controller.contentVersion == _lastProcessedContentVersion) {
         markNeedsPaint();
         return;
@@ -6012,9 +6133,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (controller.selectionOnly) {
       controller.selectionOnly = false;
-      if (!_isFoldToggleInProgress) {
-        _ensureCaretVisible();
-      }
+      _ensureCaretVisibleForCurrentLayout();
 
       if (isMobile && controller.selection.isCollapsed) {
         _showBubble = true;
@@ -6039,9 +6158,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (controller.bufferNeedsRepaint) {
       controller.bufferNeedsRepaint = false;
-      if (!_isFoldToggleInProgress) {
-        _ensureCaretVisible();
-      }
+      _ensureCaretVisibleForCurrentLayout();
       markNeedsPaint();
       return;
     }
@@ -6073,7 +6190,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       final oldEnd = dirtyRange.start + removedLength;
       final deletedText = previousText.substring(dirtyRange.start, oldEnd);
       final editLine = controller.getLineAtOffset(dirtyRange.start);
-
       syntaxHighlighter.applyDocumentEdit(
         editLine,
         dirtyRange.start,
@@ -6124,7 +6240,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       _lineOffsetCache.clear();
       _caretInfoCache.clear();
       _cachedCaretOffset = -1;
-
       final startInvalidation = insertionLine > 0 ? insertionLine - 1 : 0;
 
       _lineTextCache.clear();
@@ -6249,11 +6364,18 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     } else if (affectedLine != null) {
       _foldRanges.remove(affectedLine);
       _foldedLineCacheDirty = true;
+      if (lineWrap) {
+        _lineOffsetCache.clear();
+        _caretInfoCache.clear();
+        _cachedCaretOffset = -1;
+      }
 
       final newLineWidth = _getLineWidth(affectedLine);
       final currentContentWidth =
           size.width - _gutterWidth - (innerPadding?.horizontal ?? 0);
-      if (newLineWidth > currentContentWidth || newLineWidth > _longLineWidth) {
+      if (lineWrap ||
+          newLineWidth > currentContentWidth ||
+          newLineWidth > _longLineWidth) {
         _longLineWidth = newLineWidth;
         markNeedsLayout();
       } else {
@@ -6365,7 +6487,11 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (focusNode.hasFocus &&
         !_isFoldToggleInProgress &&
         _lastProcessedText != newText) {
-      _ensureCaretVisible();
+      if (lineWrap) {
+        _scheduleCaretSyncAfterLayout();
+      } else {
+        _ensureCaretVisible();
+      }
     }
 
     if (_lastProcessedText == newText) return;
@@ -7087,6 +7213,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           final lastBox = boxes.last;
           caretX = lastBox.right;
           caretYInLine = _rowTopForBox(lastBox);
+          if (clampedCol < lineText.length) {
+            final nextBoxes = para.getBoxesForRange(
+              clampedCol,
+              min(clampedCol + 1, lineText.length),
+            );
+            if (nextBoxes.isNotEmpty &&
+                nextBoxes.first.top > lastBox.top + 0.1) {
+              caretX = nextBoxes.first.left;
+              caretYInLine = _rowTopForBox(nextBoxes.first);
+            }
+          }
         } else {
           final fallback = para.getBoxesForRange(0, 1);
           if (fallback.isNotEmpty) {
@@ -7110,6 +7247,201 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     );
     _caretInfoCache[cursorOffset] = result;
     return result;
+  }
+
+  ui.Paragraph _wrappedParagraphForLine(int lineIndex) {
+    final lineText = controller.getLineText(lineIndex);
+    final cached = _paragraphCache[lineIndex];
+    if (cached != null && _lineTextCache[lineIndex] == lineText) {
+      return cached;
+    }
+    final paragraph = _buildHighlightedParagraph(
+      lineIndex,
+      lineText,
+      width: _wrapWidth,
+      allowSynchronousHighlight: true,
+    );
+    _paragraphCache[lineIndex] = paragraph;
+    _lineTextCache[lineIndex] = lineText;
+    _cacheWrappedLineHeight(lineIndex, paragraph.height);
+    return paragraph;
+  }
+
+  int _scalarOffsetAtParagraphPosition(
+    String lineText,
+    ui.TextPosition position,
+  ) {
+    final utf16Offset = position.offset.clamp(0, lineText.length);
+    return CodeForgeController.utf16ToScalarOffset(lineText, utf16Offset);
+  }
+
+  List<double> _wrappedRowTops(ui.Paragraph paragraph, String lineText) {
+    final tops = <double>[];
+    for (var offset = 0; offset < lineText.length; offset++) {
+      final boxes = paragraph.getBoxesForRange(offset, offset + 1);
+      for (final box in boxes) {
+        if (tops.every((top) => (top - box.top).abs() > 0.1)) {
+          tops.add(box.top);
+        }
+      }
+    }
+    if (tops.isEmpty) return [0.0];
+    tops.sort();
+    return tops;
+  }
+
+  int _wrappedRowIndex(
+    ui.Paragraph paragraph,
+    String lineText,
+    int utf16Column,
+  ) {
+    if (lineText.isEmpty) return 0;
+    final clampedColumn = utf16Column.clamp(0, lineText.length);
+    final probeStart = clampedColumn == lineText.length
+        ? max(0, clampedColumn - 1)
+        : clampedColumn;
+    final boxes = paragraph.getBoxesForRange(
+      probeStart,
+      min(probeStart + 1, lineText.length),
+    );
+    if (boxes.isEmpty) return 0;
+    final tops = _wrappedRowTops(paragraph, lineText);
+    var closest = 0;
+    var distance = double.infinity;
+    for (var i = 0; i < tops.length; i++) {
+      final nextDistance = (tops[i] - boxes.first.top).abs();
+      if (nextDistance < distance) {
+        distance = nextDistance;
+        closest = i;
+      }
+    }
+    return closest;
+  }
+
+  void _setWrappedSelection(int lineIndex, int column, bool isShiftPressed) {
+    final lineStart = controller.getLineStartOffset(lineIndex);
+    final newOffset = (lineStart + column).clamp(0, controller.length);
+    final selection = controller.selection;
+    controller.setSelectionSilently(
+      isShiftPressed
+          ? TextSelection(
+              baseOffset: selection.baseOffset,
+              extentOffset: newOffset,
+            )
+          : TextSelection.collapsed(offset: newOffset),
+    );
+  }
+
+  void moveVerticallyInWrappedText({
+    required bool down,
+    bool isShiftPressed = false,
+  }) {
+    if (!lineWrap || controller.lineCount == 0) {
+      if (down) {
+        controller.pressDownArrowKey(isShiftPressed: isShiftPressed);
+      } else {
+        controller.pressUpArrowKey(isShiftPressed: isShiftPressed);
+      }
+      return;
+    }
+
+    final selection = controller.selection;
+    final currentLine = controller.getLineAtOffset(selection.extentOffset);
+    final lineText = controller.getLineText(currentLine);
+    final paragraph = _wrappedParagraphForLine(currentLine);
+    final caret = _getCaretInfo();
+    final utf16Column = CodeForgeController.scalarToStringIndex(
+      lineText,
+      selection.extentOffset - controller.getLineStartOffset(currentLine),
+    );
+    final row = _wrappedRowIndex(paragraph, lineText, utf16Column);
+    final rowTops = _wrappedRowTops(paragraph, lineText);
+    final targetRow = row + (down ? 1 : -1);
+
+    if (targetRow >= 0 && targetRow < rowTops.length) {
+      final position = paragraph.getPositionForOffset(
+        Offset(caret.offset.dx, rowTops[targetRow] + _lineHeight / 2),
+      );
+      _setWrappedSelection(
+        currentLine,
+        _scalarOffsetAtParagraphPosition(lineText, position),
+        isShiftPressed,
+      );
+      return;
+    }
+
+    final targetLine = currentLine + (down ? 1 : -1);
+    if (targetLine < 0 || targetLine >= controller.lineCount) {
+      _setWrappedSelection(
+        currentLine,
+        down
+            ? CodeForgeController.utf16ToScalarOffset(lineText, lineText.length)
+            : 0,
+        isShiftPressed,
+      );
+      return;
+    }
+
+    final targetText = controller.getLineText(targetLine);
+    final targetParagraph = _wrappedParagraphForLine(targetLine);
+    final targetRows = _wrappedRowTops(targetParagraph, targetText);
+    final targetVisualRow = down ? 0 : targetRows.length - 1;
+    final targetPosition = targetParagraph.getPositionForOffset(
+      Offset(caret.offset.dx, targetRows[targetVisualRow] + _lineHeight / 2),
+    );
+    _setWrappedSelection(
+      targetLine,
+      _scalarOffsetAtParagraphPosition(targetText, targetPosition),
+      isShiftPressed,
+    );
+  }
+
+  void moveToWrappedLineStart({bool isShiftPressed = false}) {
+    if (!lineWrap) {
+      controller.pressHomeKey(isShiftPressed: isShiftPressed);
+      return;
+    }
+    final line = controller.getLineAtOffset(controller.selection.extentOffset);
+    final text = controller.getLineText(line);
+    final paragraph = _wrappedParagraphForLine(line);
+    final utf16Column = CodeForgeController.scalarToStringIndex(
+      text,
+      controller.selection.extentOffset - controller.getLineStartOffset(line),
+    );
+    final row = _wrappedRowIndex(paragraph, text, utf16Column);
+    final rowTops = _wrappedRowTops(paragraph, text);
+    final position = paragraph.getPositionForOffset(
+      Offset(0, rowTops[row] + _lineHeight / 2),
+    );
+    _setWrappedSelection(
+      line,
+      _scalarOffsetAtParagraphPosition(text, position),
+      isShiftPressed,
+    );
+  }
+
+  void moveToWrappedLineEnd({bool isShiftPressed = false}) {
+    if (!lineWrap) {
+      controller.pressEndKey(isShiftPressed: isShiftPressed);
+      return;
+    }
+    final line = controller.getLineAtOffset(controller.selection.extentOffset);
+    final text = controller.getLineText(line);
+    final paragraph = _wrappedParagraphForLine(line);
+    final utf16Column = CodeForgeController.scalarToStringIndex(
+      text,
+      controller.selection.extentOffset - controller.getLineStartOffset(line),
+    );
+    final row = _wrappedRowIndex(paragraph, text, utf16Column);
+    final rowTops = _wrappedRowTops(paragraph, text);
+    final position = paragraph.getPositionForOffset(
+      Offset(_wrapWidth, rowTops[row] + _lineHeight / 2),
+    );
+    _setWrappedSelection(
+      line,
+      _scalarOffsetAtParagraphPosition(text, position),
+      isShiftPressed,
+    );
   }
 
   ({int lineIndex, int columnIndex, Offset offset, double height})
@@ -7203,6 +7535,17 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           final lastBox = boxes.last;
           caretX = lastBox.right;
           caretYInLine = _rowTopForBox(lastBox);
+          if (clampedCol < lineText.length) {
+            final nextBoxes = para.getBoxesForRange(
+              clampedCol,
+              min(clampedCol + 1, lineText.length),
+            );
+            if (nextBoxes.isNotEmpty &&
+                nextBoxes.first.top > lastBox.top + 0.1) {
+              caretX = nextBoxes.first.left;
+              caretYInLine = _rowTopForBox(nextBoxes.first);
+            }
+          }
         } else {
           final fallback = para.getBoxesForRange(0, 1);
           if (fallback.isNotEmpty) {
@@ -7251,7 +7594,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     if (lineCount == 0) return 0;
 
     final tappedLineIndex = _findVisibleLineByYPosition(position.dy);
-
     String lineText;
     if (_lineTextCache.containsKey(tappedLineIndex)) {
       lineText = _lineTextCache[tappedLineIndex]!;
@@ -7346,7 +7688,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     final lineStartOffset = controller.getLineStartOffset(tappedLineIndex);
     final absoluteOffset = lineStartOffset + scalarColumn;
-
     return absoluteOffset.clamp(0, controller.length);
   }
 
@@ -7618,7 +7959,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   @override
   void performLayout() {
     final lineCount = controller.lineCount;
-
     if (lineCount != _cachedLineCount) {
       final maxKey = _lineTextCache.keys.isEmpty
           ? 0
@@ -7679,6 +8019,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final hasActiveFolds = _hasActiveFolds;
     double visibleHeight = 0;
     double maxLineWidth = _longLineWidth;
+    var wrappedHeightsRecomputed = false;
 
     if (lineWrap) {
       final viewportWidth = constraints.maxWidth.isFinite
@@ -7710,16 +8051,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
 
       if (hasActiveFolds) {
-        final foldedCount = _countFoldedLinesBefore(lineCount);
-        final visibleLineCount = (lineCount - foldedCount).clamp(0, lineCount);
-
-        if (lineCount > kExactWrappedHeightThreshold) {
-          visibleHeight = _estimateWrappedHeight(visibleLineCount);
-        } else {
-          for (int i = 0; i < lineCount; i++) {
-            if (_isLineFolded(i)) continue;
-            visibleHeight += _getWrappedLineHeight(i);
-          }
+        wrappedHeightsRecomputed = true;
+        for (int i = 0; i < lineCount; i++) {
+          if (_isLineFolded(i)) continue;
+          visibleHeight += _getWrappedLineHeight(i);
         }
       } else {
         final canReuseExactWrappedHeight =
@@ -7730,10 +8065,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
         if (canReuseExactWrappedHeight) {
           visibleHeight = _cachedTotalHeight;
-        } else if (lineCount > kExactWrappedHeightThreshold) {
-          visibleHeight = _estimateWrappedHeight(lineCount);
-          _isCachedHeightExact = false;
         } else {
+          wrappedHeightsRecomputed = true;
           for (int i = 0; i < lineCount; i++) {
             visibleHeight += _getWrappedLineHeight(i);
           }
@@ -7778,6 +8111,12 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           }
         }
       }
+    }
+
+    if (wrappedHeightsRecomputed) {
+      _lineOffsetCache.clear();
+      _caretInfoCache.clear();
+      _cachedCaretOffset = -1;
     }
 
     _longLineWidth = maxLineWidth;
@@ -7833,51 +8172,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     return height;
   }
 
-  double _estimateWrappedHeight(int visibleLineCount) {
-    if (visibleLineCount <= 0) return 0.0;
-
-    final sampleCount = visibleLineCount < kWrappedHeightSampleSize
-        ? visibleLineCount
-        : kWrappedHeightSampleSize;
-
-    if (sampleCount <= 0) {
-      return visibleLineCount * _lineHeight;
-    }
-
-    final step = (visibleLineCount / sampleCount).ceil().clamp(
-      1,
-      visibleLineCount,
-    );
-    double sampledHeight = 0.0;
-    int measured = 0;
-
-    for (
-      int i = 0;
-      i < controller.lineCount && measured < sampleCount;
-      i += step
-    ) {
-      if (_hasActiveFolds && _isLineFolded(i)) continue;
-      sampledHeight += _getWrappedLineHeight(i);
-      measured++;
-    }
-
-    if (measured == 0) {
-      return visibleLineCount * _lineHeight;
-    }
-
-    final averageHeight = sampledHeight / measured;
-    if (!_wrappedHeightEstimateFromSamples ||
-        _wrappedHeightIndexLineCount != controller.lineCount) {
-      _ensureWrappedHeightIndex(estimate: averageHeight);
-      _wrappedHeightEstimateFromSamples = true;
-    }
-    return _wrappedContentHeight();
-  }
-
   double _rowTopForBox(ui.TextBox box) {
-    final center = (box.top + box.bottom) / 2.0;
-    final rowIndex = (center / _lineHeight).floor();
-    return (rowIndex < 0 ? 0 : rowIndex) * _lineHeight;
+    return box.top;
   }
 
   double _getLineYOffset(int targetLine, bool hasActiveFolds) {
@@ -8151,7 +8447,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         );
         if (lineWrap) {
           lineHeight = paragraph.height;
-          _lineHeightCache[i] = paragraph.height;
+          _cacheWrappedLineHeight(i, paragraph.height);
         }
       } else {
         if (_lineTextCache.containsKey(i)) {
@@ -8175,7 +8471,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           }
 
           if (lineWrap) {
-            _lineHeightCache[i] = paragraph.height;
+            _cacheWrappedLineHeight(i, paragraph.height);
             lineHeight = paragraph.height;
             if (isRTL) {
               lineHeight = paragraph.height;

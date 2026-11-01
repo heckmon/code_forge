@@ -40,28 +40,7 @@ class _MyAppState extends State<MyApp> {
       title: 'Flutter Demo',
       home: Scaffold(
         body: SafeArea(
-          child: FutureBuilder<LspConfig>(
-            future: getLsp(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    "Failed to load LSP: ${snapshot.error.toString()}",
-                  ),
-                );
-              }
-
-              final lspConfig = snapshot.data!;
-              if (codeController == null ||
-                  codeController!.lspConfig != lspConfig) {
-                codeController = CodeForgeController(lspConfig: lspConfig);
-              }
-
-              return CodeForge(
+          child:  CodeForge(
                 undoController: undoController,
                 language: langDart,
                 editorTheme: githubDarkTheme,
@@ -90,9 +69,7 @@ class _MyAppState extends State<MyApp> {
                     cursorLocations: {18, 31},
                   ),
                 ],
-              );
-            },
-          ),
+              )
         ),
       ),
     );
