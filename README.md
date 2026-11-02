@@ -52,14 +52,12 @@
 >flutter build web --wasm
 >```
 
-## What's new in 11.5.0:
-  - FIX: [#112](https://github.com/heckmon/code_forge/issues/112)
-  - FEATURE: Added VSCode like minimap
-    <p align="left">
-      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="400" width="400"/>
+## What's new in 11.6.0:
+  - ENHANCEMENT: Improved minimap scroll calcualtion.
+  - Minimap enabled by default.
+     <p align="left">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="600" width="600"/>
     </p>
-    
-    Minimap is disabled by default. Enable it using the parameter `enableMinimap: true`.
 
 
 ## Why CodeForge?
@@ -137,7 +135,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.4.0
+  code_forge: ^11.6.0
 ```
 - 2 . Then run:
 

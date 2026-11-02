@@ -6,7 +6,7 @@ import 'package:code_forge/code_forge.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
-import 'package:re_highlight/styles/github-dark.dart';
+import 'package:re_highlight/styles/base16/dracula.dart';
 
 void main() {
   runApp(const MyApp());
@@ -31,6 +31,9 @@ class _MyAppState extends State<MyApp> {
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
+      capabilities: LspClientCapabilities(
+        semanticHighlighting: false
+      )
     );
   }
 
@@ -62,9 +65,12 @@ class _MyAppState extends State<MyApp> {
               }
 
               return CodeForge(
+                minimapStyle: MinimapStyle(
+                  width: 100
+                ),
                 undoController: undoController,
                 language: langDart,
-                editorTheme: githubDarkTheme,
+                editorTheme: draculaTheme,
                 controller: codeController,
                 textStyle: GoogleFonts.jetBrainsMono(),
                 filePath: absFilePath,
