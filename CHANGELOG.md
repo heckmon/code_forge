@@ -525,7 +525,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     </p>
 
 ## 11.6.0
-  - ENHANCEMENT: Improved minimap scroll calcualtion.
+  - ENHANCEMENT: Improved minimap scroll calculation.
   - Minimap enabled by default.
      <p align="left">
       <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="400" width="400"/>
