@@ -19,6 +19,12 @@ class MiniMapPainter extends CustomPainter {
   final Listenable selectionRepaint;
   final Listenable diagnosticsRepaint;
 
+  List<(int, int)> _folds = const [];
+  List<(int, int)> _blocks = const [];
+  int _lineCount = 0;
+
+  final Paint _paint = Paint();
+
   MiniMapPainter({
     required this.bgColor,
     required this.controller,
@@ -44,27 +50,41 @@ class MiniMapPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (!scrollCtrl.hasClients) return;
 
-    canvas.drawPaint(Paint()..color = bgColor);
-
     final position = scrollCtrl.position;
-
     if (!position.hasViewportDimension || !position.hasContentDimensions) {
       return;
     }
 
-    final lineCount = controller.lineCount;
+    _paint.color = bgColor;
+    canvas.drawPaint(_paint);
+
+    _prepareLayout();
+    if (_lineCount <= 0) return;
+
     final viewTop = scrollCtrl.offset;
     final viewBottom = viewTop + position.viewportDimension;
-    final firstVisibleLine = _findVisibleLineByYPosition(viewTop, lineHeight);
-    final lastVisibleLine = _findVisibleLineByYPosition(viewBottom, lineHeight);
-    double yOffset = _lineTop(firstVisibleLine);
-    final diagnosticLines = _diagnosticLines();
+    final firstVisibleLine = _lineAtY(viewTop);
+    final lastVisibleLine = math.min(_lineAtY(viewBottom), _lineCount - 1);
 
-    for (int i = firstVisibleLine; i <= lastVisibleLine && i < lineCount; i++) {
+    double yOffset = _lineTop(firstVisibleLine);
+    final diagnosticLines = _diagnosticLines(firstVisibleLine, lastVisibleLine);
+
+    final selection = controller.selection;
+    final hasSelection = selection.isValid && !selection.isCollapsed;
+    final selStartLine = hasSelection
+        ? controller.getLineAtOffset(selection.start)
+        : -1;
+    final selEndLine = hasSelection
+        ? controller.getLineAtOffset(selection.end)
+        : -1;
+
+    for (int i = firstVisibleLine; i <= lastVisibleLine; i++) {
       if (_isFolded(i)) continue;
+
+      final lineText = controller.getLineText(i);
       final paragraph = highlighter.buildMiniMapHighlight(
         i,
-        controller.getLineText(i),
+        lineText,
         ParagraphStyle(
           fontFamily: fontFamily,
           fontSize: fontSize,
@@ -77,8 +97,20 @@ class MiniMapPainter extends CustomPainter {
         fontFamily,
       );
 
-      _paintDiagnostic(canvas, size, i, yOffset, diagnosticLines[i]);
-      _paintSelection(canvas, size, i, yOffset, paragraph);
+      _paintDiagnostic(canvas, size, yOffset, diagnosticLines[i]);
+      if (hasSelection && i >= selStartLine && i <= selEndLine) {
+        _paintSelection(
+          canvas,
+          size,
+          i,
+          yOffset,
+          paragraph,
+          lineText,
+          selection,
+          selStartLine,
+          selEndLine,
+        );
+      }
       canvas.drawParagraph(paragraph, Offset(8, yOffset));
       yOffset += _lineAdvance(i);
     }
@@ -90,12 +122,108 @@ class MiniMapPainter extends CustomPainter {
         oldDelegate.bgColor != bgColor ||
         oldDelegate.fontSize != fontSize ||
         oldDelegate.lineHeight != lineHeight ||
+        oldDelegate.lineWrap != lineWrap ||
+        oldDelegate.textDirection != textDirection ||
         oldDelegate.selectionColor != selectionColor ||
         oldDelegate.diagnosticsRepaint != diagnosticsRepaint ||
         oldDelegate.controller.selection != controller.selection;
   }
 
-  Map<int, int> _diagnosticLines() {
+  void _prepareLayout() {
+    _lineCount = controller.lineCount;
+
+    final ranges = <(int, int)>[];
+    for (final fold in controller.foldings.values) {
+      if (fold == null || !fold.isFolded) continue;
+      final s = fold.startIndex + 1;
+      final e = fold.endIndex;
+      if (e >= s) ranges.add((s, e));
+    }
+    ranges.sort((a, b) => a.$1.compareTo(b.$1));
+
+    final merged = <(int, int)>[];
+    for (final r in ranges) {
+      if (merged.isNotEmpty && r.$1 <= merged.last.$2 + 1) {
+        if (r.$2 > merged.last.$2) {
+          merged[merged.length - 1] = (merged.last.$1, r.$2);
+        }
+      } else {
+        merged.add(r);
+      }
+    }
+    _folds = merged;
+
+    final blocks = <(int, int)>[];
+    for (final b in controller.virtualRemovedBlocks) {
+      if (b.lineCount > 0) blocks.add((b.afterLine, b.lineCount));
+    }
+    blocks.sort((a, b) => a.$1.compareTo(b.$1));
+    _blocks = blocks;
+  }
+
+  int _hiddenBefore(int line) {
+    var n = 0;
+    for (final (s, e) in _folds) {
+      if (s >= line) break;
+      n += math.min(e, line - 1) - s + 1;
+    }
+    return n;
+  }
+
+  int _virtualBefore(int line) {
+    var n = 0;
+    for (final (after, count) in _blocks) {
+      if (after >= line) break;
+      n += count;
+    }
+    return n;
+  }
+
+  bool _isFolded(int line) {
+    for (final (s, e) in _folds) {
+      if (line < s) return false;
+      if (line <= e) return true;
+    }
+    return false;
+  }
+
+  double _lineTop(int line) {
+    if (line <= 0) return 0;
+    return (line - _hiddenBefore(line) + _virtualBefore(line)) * lineHeight;
+  }
+
+  double _lineAdvance(int line) {
+    var advance = _isFolded(line) ? 0.0 : lineHeight;
+    for (final (after, count) in _blocks) {
+      if (after > line) break;
+      if (after == line) advance += count * lineHeight;
+    }
+    return advance;
+  }
+
+  int _lineAtY(double y) {
+    final lineCount = _lineCount;
+    if (lineCount <= 0) return 0;
+    if (!y.isFinite || !lineHeight.isFinite || lineHeight <= 0) return 0;
+
+    if (_folds.isEmpty && _blocks.isEmpty) {
+      return (y / lineHeight).floor().clamp(0, lineCount - 1);
+    }
+
+    var lo = 0;
+    var hi = lineCount - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (_lineTop(mid) <= y) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  }
+
+  Map<int, int> _diagnosticLines(int first, int last) {
     final lines = <int, int>{};
     for (final diagnostic in controller.diagnostics) {
       final startLine = diagnostic.range['start']?['line'];
@@ -105,7 +233,12 @@ class MiniMapPainter extends CustomPainter {
       final lastLine = endLine is int && endLine >= startLine
           ? endLine
           : startLine;
-      for (var line = startLine; line <= lastLine; line++) {
+
+      if (lastLine < first || startLine > last) continue;
+      final from = math.max(startLine, first);
+      final to = math.min(lastLine, last);
+
+      for (var line = from; line <= to; line++) {
         final currentSeverity = lines[line];
         if (currentSeverity == null || diagnostic.severity < currentSeverity) {
           lines[line] = diagnostic.severity;
@@ -115,16 +248,10 @@ class MiniMapPainter extends CustomPainter {
     return lines;
   }
 
-  void _paintDiagnostic(
-    Canvas canvas,
-    Size size,
-    int line,
-    double y,
-    int? severity,
-  ) {
+  void _paintDiagnostic(Canvas canvas, Size size, double y, int? severity) {
     if (severity == null) return;
 
-    final color = switch (severity) {
+    _paint.color = switch (severity) {
       1 => Colors.red,
       2 => Colors.orange,
       3 => Colors.blue,
@@ -132,69 +259,8 @@ class MiniMapPainter extends CustomPainter {
     };
     canvas.drawRect(
       Rect.fromLTWH(math.max(size.width - 4, 0), y, 3, lineHeight),
-      Paint()..color = color,
+      _paint,
     );
-  }
-
-  int _findVisibleLineByYPosition(double y, double lineHeight) {
-    final lineCount = controller.lineCount;
-    if (lineCount <= 0) return 0;
-
-    if (!y.isFinite || !lineHeight.isFinite || lineHeight <= 0) {
-      return 0;
-    }
-
-    final hasActiveFolds = controller.foldings.values.any(
-      (item) => item?.isFolded ?? false,
-    );
-    final hasVirtualBlocks = controller.virtualRemovedBlocks.isNotEmpty;
-
-    if (!lineWrap && !hasActiveFolds && !hasVirtualBlocks) {
-      return (y / lineHeight).floor().clamp(0, lineCount - 1);
-    }
-
-    var currentY = 0.0;
-    for (int line = 0; line < lineCount; line++) {
-      if (!_isFolded(line)) {
-        if (currentY + lineHeight > y) return line;
-        currentY += lineHeight;
-      }
-
-      for (final block in controller.virtualRemovedBlocks) {
-        if (block.afterLine == line) {
-          if (currentY + block.lineCount * lineHeight > y) return line;
-          currentY += block.lineCount * lineHeight;
-        }
-      }
-    }
-    return lineCount - 1;
-  }
-
-  bool _isFolded(int line) {
-    return controller.foldings.values.any(
-      (fold) =>
-          fold?.isFolded == true &&
-          line > fold!.startIndex &&
-          line <= fold.endIndex,
-    );
-  }
-
-  double _lineTop(int lineIndex) {
-    var top = 0.0;
-    for (int line = 0; line < lineIndex; line++) {
-      top += _lineAdvance(line);
-    }
-    return top;
-  }
-
-  double _lineAdvance(int line) {
-    var advance = _isFolded(line) ? 0.0 : lineHeight;
-    for (final block in controller.virtualRemovedBlocks) {
-      if (block.afterLine == line) {
-        advance += block.lineCount * lineHeight;
-      }
-    }
-    return advance;
   }
 
   void _paintSelection(
@@ -203,16 +269,13 @@ class MiniMapPainter extends CustomPainter {
     int line,
     double y,
     Paragraph paragraph,
+    String lineText,
+    TextSelection selection,
+    int startLine,
+    int endLine,
   ) {
-    final selection = controller.selection;
-    if (!selection.isValid || selection.isCollapsed) return;
-
-    final startLine = controller.getLineAtOffset(selection.start);
-    final endLine = controller.getLineAtOffset(selection.end);
-    if (line < startLine || line > endLine) return;
-
     final lineStart = controller.getLineStartOffset(line);
-    final lineLength = controller.getLineText(line).length;
+    final lineLength = lineText.length;
     final startColumn = line == startLine ? selection.start - lineStart : 0;
     final endColumn = line == endLine ? selection.end - lineStart : lineLength;
     if (endColumn <= startColumn) return;
@@ -220,9 +283,11 @@ class MiniMapPainter extends CustomPainter {
     final width = (paragraph.maxIntrinsicWidth + 2).clamp(0.0, size.width - 8);
     final left = 8 + width * startColumn / math.max(lineLength, 1);
     final right = 8 + width * endColumn / math.max(lineLength, 1);
+
+    _paint.color = selectionColor;
     canvas.drawRect(
       Rect.fromLTRB(left, y, math.max(right, left + 1), y + lineHeight),
-      Paint()..color = selectionColor,
+      _paint,
     );
   }
 }

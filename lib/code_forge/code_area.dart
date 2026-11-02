@@ -338,7 +338,7 @@ class CodeForge extends StatefulWidget {
     this.readOnly = false,
     this.autoFocus = false,
     this.lineWrap = false,
-    this.enableMinimap = false,
+    this.enableMinimap = true,
     this.enableFolding = true,
     this.enableGuideLines = true,
     this.enableLocalSuggestions = false,
@@ -4540,8 +4540,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                       height: overlayHeight,
                                       child: GestureDetector(
                                         onVerticalDragUpdate: (details) {
-                                          if (!_vscrollController.hasClients)
+                                          if (!_vscrollController.hasClients) {
                                             return;
+                                          }
 
                                           final ed =
                                               _vscrollController.position;
