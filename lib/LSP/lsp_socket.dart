@@ -85,7 +85,7 @@ class LspSocketConfig extends LspConfig {
 
   @override
   Future<Map<String, dynamic>> sendResponse(
-    int id,
+    Object id,
     List<dynamic> result,
   ) async {
     final request = {'jsonrpc': '2.0', 'id': id, "result": result};

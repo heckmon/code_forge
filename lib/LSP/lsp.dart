@@ -120,7 +120,7 @@ sealed class LspConfig {
 
   /// Sends a response to a request from the LSP server.
   /// This is used to reply to server-initiated requests.
-  Future<Map<String, dynamic>> sendResponse(int id, List<dynamic> result);
+  Future<Map<String, dynamic>> sendResponse(Object id, List<dynamic> result);
 
   /// Whether this server should always use full-document didChange sync.
   /// ccls is handled in this mode for semantic highlight compatibility.
