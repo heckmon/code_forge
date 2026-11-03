@@ -31,9 +31,7 @@ class _MyAppState extends State<MyApp> {
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
-      capabilities: LspClientCapabilities(
-        semanticHighlighting: false
-      )
+      capabilities: LspClientCapabilities(semanticHighlighting: false),
     );
   }
 
@@ -65,9 +63,7 @@ class _MyAppState extends State<MyApp> {
               }
 
               return CodeForge(
-                minimapStyle: MinimapStyle(
-                  width: 100
-                ),
+                minimapStyle: MinimapStyle(width: 100),
                 undoController: undoController,
                 language: langDart,
                 editorTheme: draculaTheme,
