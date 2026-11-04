@@ -492,6 +492,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       languageId: _controller.lspConfig?.languageId,
       documentText: _controller.text,
     );
+
     _filePath = (() {
       if (widget.filePath != null) {
         if (widget.fileUrl != null) {
@@ -3078,8 +3079,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     widget.enableGutterDivider,
                                                 gutterStyle: _gutterStyle,
                                                 selectionStyle: _selectionStyle,
-                                                diagnostics:
-                                                    _diagnosticsNotifier.value,
+                                                diagnosticsNotifier:
+                                                    _diagnosticsNotifier,
                                                 isMobile: _isMobile,
                                                 selectionActiveNotifier:
                                                     _selectionActiveNotifier,
@@ -4736,7 +4737,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final bool enableFolding, enableGuideLines, enableGutter, enableGutterDivider;
   final GutterStyle gutterStyle;
   final CodeSelectionStyle selectionStyle;
-  final List<LspErrors> diagnostics;
+  final ValueNotifier<List<LspErrors>> diagnosticsNotifier;
   final ValueNotifier<bool> selectionActiveNotifier, isHoveringPopup;
   final ValueNotifier<Offset> contextMenuOffsetNotifier, offsetNotifier;
   final ValueNotifier<(Offset, Map<String, int>)?> hoverNotifier;
@@ -4773,7 +4774,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.gutterStyle,
     required this.gutterBuilder,
     required this.selectionStyle,
-    required this.diagnostics,
+    required this.diagnosticsNotifier,
     required this.isMobile,
     required this.selectionActiveNotifier,
     required this.contextMenuOffsetNotifier,
@@ -4829,7 +4830,7 @@ class _CodeField extends LeafRenderObjectWidget {
       gutterStyle: gutterStyle,
       gutterBuilder: gutterBuilder,
       selectionStyle: selectionStyle,
-      diagnostics: diagnostics,
+      diagnosticsNotifier: diagnosticsNotifier,
       isMobile: isMobile,
       selectionActiveNotifier: selectionActiveNotifier,
       contextMenuOffsetNotifier: contextMenuOffsetNotifier,
@@ -4865,7 +4866,6 @@ class _CodeField extends LeafRenderObjectWidget {
       });
     }
     renderObject
-      ..updateDiagnostics(diagnostics)
       ..updateScreenWidth()
       ..editorTheme = editorTheme
       ..language = language
@@ -4932,9 +4932,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final _dtap = DoubleTapGestureRecognizer();
   final _onetap = TapGestureRecognizer();
   final GutterBuilder? gutterBuilder;
+  final ValueNotifier<List<LspErrors>> diagnosticsNotifier;
   late double _gutterPadding;
-  late final Paint _caretPainter;
-  late final Paint _bracketHighlightPainter;
+  late final Paint _caretPainter, _bracketHighlightPainter;
   late final LayoutMap _layoutMap;
   late double _lineHeight;
   late ui.ParagraphStyle _paragraphStyle;
@@ -4950,7 +4950,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   TextStyle? _textStyle;
   GutterStyle _gutterStyle;
   CodeSelectionStyle _selectionStyle;
-  List<LspErrors> _diagnostics;
+  List<LspErrors> _diagnostics = [];
   int _cachedCaretOffset = -1, _cachedCaretLine = 0, _cachedCaretLineStart = 0;
   Rect? _lastImeCaretRect, _lastImeComposingRect;
   Size? _lastImeEditableSize;
@@ -5224,13 +5224,6 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     });
   }
 
-  void updateDiagnostics(List<LspErrors> diagnostics) {
-    if (_diagnostics != diagnostics) {
-      _diagnostics = diagnostics;
-      markNeedsPaint();
-    }
-  }
-
   ui.Paragraph _buildParagraph(String text, {double? width}) {
     final builder = ui.ParagraphBuilder(_paragraphStyle)
       ..pushStyle(_uiTextStyle)
@@ -5398,7 +5391,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required GutterStyle gutterStyle,
     required this.gutterBuilder,
     required this._selectionStyle,
-    required this._diagnostics,
+    required this.diagnosticsNotifier,
     this.languageId,
     this.lspConfig,
     this.filePath,
@@ -5545,6 +5538,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       }
 
       markNeedsPaint();
+    });
+
+    diagnosticsNotifier.addListener(() {
+      _diagnostics = diagnosticsNotifier.value;
     });
 
     caretBlinkController.addListener(markNeedsPaint);

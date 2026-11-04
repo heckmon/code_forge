@@ -37,6 +37,7 @@ class LspSocketConfig extends LspConfig {
     super.workspaceConfiguration,
     super.disableWarning,
     super.disableError,
+    super.enableDebugLogging,
   }) : _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
 
   /// This method is used to initialize the LSP server. and it's used internally by the [CodeCrafter] widget.
@@ -44,6 +45,9 @@ class LspSocketConfig extends LspConfig {
   Future<void> connect() async {
     _channel.stream.listen((data) {
       try {
+        if (enableDebugLogging) {
+          debugPrint(data);
+        }
         final json = jsonDecode(data as String);
         _responseController.add(json);
       } catch (e) {
@@ -67,10 +71,9 @@ class LspSocketConfig extends LspConfig {
 
     _channel.sink.add(jsonEncode(request));
 
-    return await _responseController.stream.firstWhere(
-      (response) => response['id'] == id,
-      orElse: () => throw TimeoutException('No response for request $id'),
-    );
+    return await _responseController.stream.firstWhere((response) {
+      return response['id'] == id;
+    }, orElse: () => throw TimeoutException('No response for request $id'));
   }
 
   @override
