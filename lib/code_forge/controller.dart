@@ -152,6 +152,10 @@ class CodeForgeController implements DeltaTextInputClient {
             ]);
           }
 
+          if (data['method'] == 'client/registerCapability') {
+            await lspConfig!.sendResponse(data['id'], []);
+          }
+
           if (data['method'] == 'textDocument/publishDiagnostics') {
             final List<dynamic> rawDiagnostics =
                 data['params']?['diagnostics'] ?? [];
