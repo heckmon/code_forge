@@ -53,7 +53,7 @@
 >```
 
 ## What's new in 11.7.0:
-  - FEARTURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
+  - FEATURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
   - FEATURE: Added a flag called `enableDebugLogging` in the  `LspConfig` class to print raw LSP server logs in console for debugging purpose.
     ```dart
     final lspConfig = await LspStdioConfig.start(
@@ -142,7 +142,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.7.0
+  code_forge: ^11.7.1
 ```
 - 2 . Then run:
 

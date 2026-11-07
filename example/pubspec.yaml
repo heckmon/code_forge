@@ -13,7 +13,7 @@ dependencies:
   code_forge: { path: ../ }
   cupertino_icons: ^1.0.8
   re_highlight: ^0.0.3
-  google_fonts: ^6.3.3
+  google_fonts: ^9.0.0
   path: ^1.9.1
 
 dev_dependencies:

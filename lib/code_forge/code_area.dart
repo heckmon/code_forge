@@ -230,7 +230,6 @@ class CodeForge extends StatefulWidget {
 
   /// Whether to enable the VSCode like minimap on the editor,
   /// which mirrors editor operations. <br>
-  /// Disabled by default.
   final bool enableMinimap;
 
   /// Whether to enable code folding functionality.

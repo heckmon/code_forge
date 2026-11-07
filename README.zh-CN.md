@@ -140,7 +140,7 @@ class _EditorState extends State<Editor> {
 
 ```yaml
 dependencies:
-  code_forge: ^11.7.0
+  code_forge: ^11.7.1
 ```
 
 ## 快速开始

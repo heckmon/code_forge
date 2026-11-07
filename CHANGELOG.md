@@ -535,7 +535,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - FIX: [#113](https://github.com/heckmon/code_forge/issues/113)
 
 ## 11.7.0
-  - FEARTURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
+  - FEATURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
   - FEATURE: Added a flag called `enableDebugLogging` in the  `LspConfig` class to print raw LSP server logs in console for debugging purpose.
     ```dart
     final lspConfig = await LspStdioConfig.start(
@@ -547,3 +547,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     );
     ```
   - ENHANCEMENT: Enhanced LSP diagnostics management.
+
+## 11.7.1
+  - FIX: [#116](https://github.com/heckmon/code_forge/issues/116)
+  - Typo fix in README
