@@ -128,21 +128,13 @@ class _EditorState extends State<Editor> {
 
 ---
 
-## Novedades de la version 11.0.0
-
-- Se elimino Rust y sus dependencias FFI; ahora el editor usa implementaciones
-  Dart puras.
-- Se agrego soporte web directo, sin necesidad del paquete
-  [code_forge_web](https://pub.dev/packages/code_forge_web).
-- Se mejoro el rendimiento y se redujo el tiempo de compilacion.
-
 ## Instalacion
 
 Agrega CodeForge a `pubspec.yaml` y ejecuta `flutter pub get`:
 
 ```yaml
 dependencies:
-  code_forge: ^11.7.1
+  code_forge: ^11.8.0
 ```
 
 ## Uso rapido

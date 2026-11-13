@@ -1,6 +1,6 @@
 name: code_forge
 description: "A powerful text editor widget, capable of handling 1M+ lines of text smoothly."
-version: 11.7.1
+version: 11.8.0
 homepage: https://github.com/heckmon/code_forge
 repository: https://github.com/heckmon/code_forge
 
@@ -12,18 +12,18 @@ topics:
   - ai-completion
   
 environment:
-  sdk: ^3.13.7
+  sdk: ^3.14.0
 
 dependencies:
-  flutter:
-    sdk: flutter  
+  flutter: { sdk: flutter }
+  flutter_colorpicker: ^1.1.0
+  http: ^1.6.0
+  material_ui: ^1.11.0
   markdown_widget: ^2.3.2+8
   re_highlight: ^0.0.3
-  web_socket_channel: ^3.0.3
-  flutter_colorpicker: ^1.1.0
-  vector_math: ^2.2.0
-  http: ^1.6.0
   universal_io: ^2.3.1
+  vector_math: ^2.2.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

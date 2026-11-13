@@ -127,20 +127,13 @@ class _EditorState extends State<Editor> {
 
 ---
 
-## 11.0.0 版本更新
-
-- 移除了 Rust 和 FFI 依赖，改为纯 Dart 实现。
-- 现在直接支持 Web，不再需要
-  [code_forge_web](https://pub.dev/packages/code_forge_web)。
-- 显著提升性能并缩短构建时间。
-
 ## 安装
 
 在 `pubspec.yaml` 中添加依赖，然后运行 `flutter pub get`：
 
 ```yaml
 dependencies:
-  code_forge: ^11.7.1
+  code_forge: ^11.8.0
 ```
 
 ## 快速开始

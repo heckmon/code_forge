@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_highlight/re_highlight.dart';
 
 /// This class provides both styling and functionality configuration for the scrollbar used in the [CodeForge].
@@ -613,17 +613,35 @@ class SearchHighlight {
 /// - The exact visual result depends on how the editor widget composes the
 ///   TextStyle with surrounding styles; typically only the differing properties
 ///   (for example backgroundColor) will have a visible effect.
-class MatchHighlightStyle {
+class MatchedWordStyle {
   /// Style for the currently selected match.
   final TextStyle currentMatchStyle;
 
   /// Style for all other matches.
   final TextStyle otherMatchStyle;
 
-  const MatchHighlightStyle({
+  const MatchedWordStyle({
     required this.currentMatchStyle,
     required this.otherMatchStyle,
   });
+}
+
+/// Pass an instance of this class to the [bracketPairStyle] parameter of [CodeForge],
+/// to style the pair of currently selected brackets.
+class BracketPairStyle {
+  /// The color of the highlighting appears above the selected bracket pair.
+  /// Defaults to the text color.
+  Color? color;
+
+  /// The painting style of the selected bracket.
+  /// Defaults to [PaintingStyle.stroke].
+  ///
+  /// - [PaintingStyle.fill] - The highlight color fills over the bracket.
+  /// - [PaintingStyle.stroke] - The highlight color is drawn as an outline
+  /// around each of the the bracket pair.
+  PaintingStyle style;
+
+  BracketPairStyle({this.color, this.style = .fill});
 }
 
 /// Defines decoration types for line decorations in the editor.

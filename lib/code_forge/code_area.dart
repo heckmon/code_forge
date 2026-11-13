@@ -5,7 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
@@ -184,7 +184,10 @@ class CodeForge extends StatefulWidget {
   final HoverDetailsStyle? hoverDetailsStyle;
 
   /// Styling options for search match highlighting.
-  final MatchHighlightStyle? matchHighlightStyle;
+  final MatchedWordStyle? matchedWordStyle;
+
+  /// The styling applied to the pair of brackets when selected.
+  final BracketPairStyle? bracketPairStyle;
 
   /// The file path for LSP features.
   ///
@@ -342,12 +345,12 @@ class CodeForge extends StatefulWidget {
     this.enableGuideLines = true,
     this.enableLocalSuggestions = false,
     this.enableKeyboardSuggestions = true,
-    this.keyboardType = TextInputType.multiline,
-    this.textDirection = TextDirection.ltr,
     this.tabSize,
     this.useSpaceAsTab = false,
     this.enableGutter = true,
     this.enableGutterDivider = false,
+    this.keyboardType = TextInputType.multiline,
+    this.textDirection = TextDirection.ltr,
     this.deleteFoldRangeOnDeletingFirstLine = false,
     this.minimapStyle,
     this.selectionStyle,
@@ -358,7 +361,8 @@ class CodeForge extends StatefulWidget {
     this.suggestionStyle,
     this.lspSuggestionBuilder,
     this.hoverDetailsStyle,
-    this.matchHighlightStyle,
+    this.matchedWordStyle,
+    this.bracketPairStyle,
     this.extraLanguages = const [],
     this.finderBuilder,
     this.findController,
@@ -374,12 +378,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final FocusNode _focusNode;
   late final AnimationController _caretBlinkController;
   late final AnimationController _lineHighlightController;
-  late Map<String, TextStyle> _editorTheme;
-  late Mode _language;
   late final CodeSelectionStyle _selectionStyle;
   late final GutterStyle _gutterStyle;
   late final SuggestionStyle _suggestionStyle;
   late final HoverDetailsStyle _hoverDetailsStyle;
+  late final BracketPairStyle _bracketPairStyle;
   late final ScrollbarDecoration _scrollbarDecoration;
   late final ValueNotifier<List<dynamic>?> _suggestionNotifier;
   late final ValueNotifier<(Offset, Map<String, int>)?> _hoverNotifier;
@@ -400,6 +403,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   late final VoidCallback _snippetSuggestionsListener, _snippetNotifierListener;
   late final bool _deleteFoldRangeOnDeletingFirstLine;
   late bool _readOnly;
+  late Map<String, TextStyle> _editorTheme;
+  late Mode _language;
   late SyntaxHighlighter _syntaxHighlighter;
   final ValueNotifier<Offset> _offsetNotifier = ValueNotifier(Offset(0, 0));
   final ValueNotifier<Offset?> _lspActionOffsetNotifier = ValueNotifier(null);
@@ -481,6 +486,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _isHoveringPopup = ValueNotifier<bool>(false);
     _controller.userCodeAction = _fetchCodeActionsForCurrentPosition;
     _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
+    _bracketPairStyle = widget.bracketPairStyle ?? BracketPairStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _fileUrl = widget.fileUrl;
     _syntaxHighlighter = SyntaxHighlighter(
@@ -3078,6 +3084,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     widget.enableGutterDivider,
                                                 gutterStyle: _gutterStyle,
                                                 selectionStyle: _selectionStyle,
+                                                bracketPairStyle:
+                                                    _bracketPairStyle,
                                                 diagnosticsNotifier:
                                                     _diagnosticsNotifier,
                                                 isMobile: _isMobile,
@@ -3099,8 +3107,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     _suggestionNotifier,
                                                 ghostTextStyle:
                                                     widget.ghostTextStyle,
-                                                matchHighlightStyle:
-                                                    widget.matchHighlightStyle,
+                                                matchedWordStyle:
+                                                    widget.matchedWordStyle,
                                                 lspActionNotifier:
                                                     _lspActionNotifier,
                                                 lspActionOffsetNotifier:
@@ -4736,6 +4744,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final bool enableFolding, enableGuideLines, enableGutter, enableGutterDivider;
   final GutterStyle gutterStyle;
   final CodeSelectionStyle selectionStyle;
+  final BracketPairStyle bracketPairStyle;
   final ValueNotifier<List<LspErrors>> diagnosticsNotifier;
   final ValueNotifier<bool> selectionActiveNotifier, isHoveringPopup;
   final ValueNotifier<Offset> contextMenuOffsetNotifier, offsetNotifier;
@@ -4748,7 +4757,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final BuildContext context;
   final TextStyle? ghostTextStyle;
   final String? filePath;
-  final MatchHighlightStyle? matchHighlightStyle;
+  final MatchedWordStyle? matchedWordStyle;
   final VoidCallback? onHoverSetByTap;
   final TextDirection textDirection;
   final GutterBuilder? gutterBuilder;
@@ -4773,6 +4782,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.gutterStyle,
     required this.gutterBuilder,
     required this.selectionStyle,
+    required this.bracketPairStyle,
     required this.diagnosticsNotifier,
     required this.isMobile,
     required this.selectionActiveNotifier,
@@ -4798,7 +4808,7 @@ class _CodeField extends LeafRenderObjectWidget {
     this.semanticTokensVersion = 0,
     this.innerPadding,
     this.ghostTextStyle,
-    this.matchHighlightStyle,
+    this.matchedWordStyle,
     this.onHoverSetByTap,
   });
 
@@ -4821,7 +4831,8 @@ class _CodeField extends LeafRenderObjectWidget {
       caretBlinkController: caretBlinkController,
       lineHighlightController: lineHighlightController,
       textStyle: textStyle,
-      matchHighlightStyle: matchHighlightStyle,
+      bracketPairStyle: bracketPairStyle,
+      matchedWordStyle: matchedWordStyle,
       enableFolding: enableFolding,
       enableGuideLines: enableGuideLines,
       enableGutter: enableGutter,
@@ -4926,8 +4937,9 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   >
   _caretInfoCache = {};
   final Map<int, int> _lineIndentCache = {};
-  final MatchHighlightStyle? _matchHighlightStyle;
-  final MatchHighlightStyle? matchHighlightStyle;
+  final MatchedWordStyle? _matchHighlightStyle;
+  final MatchedWordStyle? matchedWordStyle;
+  final BracketPairStyle bracketPairStyle;
   final _dtap = DoubleTapGestureRecognizer();
   final _onetap = TapGestureRecognizer();
   final GutterBuilder? gutterBuilder;
@@ -5369,6 +5381,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.contextMenuOffsetNotifier,
     required this.offsetNotifier,
     required this.hoverNotifier,
+    required this.bracketPairStyle,
     required this.hoverContentNotifier,
     required this.suggestionNotifier,
     required this.lspActionNotifier,
@@ -5394,7 +5407,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     this.languageId,
     this.lspConfig,
     this.filePath,
-    this.matchHighlightStyle,
+    this.matchedWordStyle,
     this.onHoverSetByTap,
     EdgeInsets? innerPadding,
     this._textStyle,
@@ -5404,7 +5417,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
        _gutterStyle = gutterStyle,
        _lineWrap = lineWrap,
        _innerPadding = innerPadding,
-       _matchHighlightStyle = matchHighlightStyle {
+       _matchHighlightStyle = matchedWordStyle {
     final fontSize = _textStyle?.fontSize ?? 14.0;
     final fontFamily = _textStyle?.fontFamily;
     final color =
@@ -9348,6 +9361,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
             ui.ParagraphStyle(
               fontSize: style.fontSize,
               fontFamily: style.fontFamily,
+              height: style.height,
             ),
           )
           ..pushStyle(
@@ -9811,7 +9825,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       Radius.circular(2),
     );
 
-    _bracketHighlightPainter.color = textColor;
+    _bracketHighlightPainter.color = bracketPairStyle.color ?? textColor;
+    _bracketHighlightPainter.style = bracketPairStyle.style;
     canvas.drawRRect(bracketRect, _bracketHighlightPainter);
   }
 

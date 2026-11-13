@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:example/finder.dart';
 import 'package:path/path.dart' as p;
 import 'package:code_forge/code_forge.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/tokyo-night-dark.dart';
@@ -27,7 +27,7 @@ class _MyAppState extends State<MyApp> {
   Future<LspConfig> getLsp() async {
     final absWorkspacePath = p.join(Directory.current.path, "lib");
     return await LspStdioConfig.start(
-      executable: "dart",
+      executable: "/home/athul/flutter/flutter/bin//dart",
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
@@ -62,14 +62,17 @@ class _MyAppState extends State<MyApp> {
               }
 
               return CodeForge(
-                minimapStyle: MinimapStyle(width: 100),
                 undoController: undoController,
+                bracketPairStyle: BracketPairStyle(
+                  style: .fill,
+                  color: Colors.yellow.withAlpha(100),
+                ),
                 language: langDart,
                 editorTheme: tokyoNightDarkTheme,
                 controller: codeController,
                 textStyle: GoogleFonts.jetBrainsMono(),
                 filePath: absFilePath,
-                matchHighlightStyle: const MatchHighlightStyle(
+                matchedWordStyle: const MatchedWordStyle(
                   currentMatchStyle: TextStyle(
                     backgroundColor: Color(0xFFFFA726),
                   ),

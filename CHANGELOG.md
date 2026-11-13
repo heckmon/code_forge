@@ -551,3 +551,23 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 11.7.1
   - FIX: [#116](https://github.com/heckmon/code_forge/issues/116)
   - Typo fix in README
+
+## 11.8.0
+  - FIX: [#119](https://github.com/heckmon/code_forge/issues/119)
+  - FIX: [#118](https://github.com/heckmon/code_forge/issues/118)
+  - FEATURE: 
+    - ### New API! - `bracketPairStyle`:
+      Change the color and styling of the matching bracket bracket pair.
+      ```dart
+      CodeForge(
+        bracketPairStyle: BracketPairStyle(
+          color: Colors.yellow.withAlpha(50),
+          style: PaintingStyle.fill
+        )
+      )
+      ```
+    - ### API Change - `matchHighlightStyle`:
+    The `MatchHighlightStyle? matchHighlightStyle` has been renamed to `MatchedWordStyle? matchedWordStyle`.
+    This API can be used to style the appearance of words matched in the `controller.findWord()`.
+    
+  - ENHANCEMENT: Migrated to material_ui as per the flutter 3.50.0 guide.
