@@ -86,6 +86,7 @@ class LspStdioConfig extends LspConfig {
     super.workspaceConfiguration,
     super.disableWarning,
     super.disableError,
+    super.enableDebugLogging,
   });
 
   static Future<LspStdioConfig> start({
@@ -99,6 +100,7 @@ class LspStdioConfig extends LspConfig {
     Map<String, String>? environment,
     bool disableWarning = false,
     bool disableError = false,
+    bool enableDebugLogging = false,
   }) async {
     if (kIsWeb) {
       throw UnsupportedError(
@@ -121,6 +123,7 @@ class LspStdioConfig extends LspConfig {
       capabilities: capabilities,
       initializationOptions: effectiveInitializationOptions,
       workspaceConfiguration: workspaceConfiguration,
+      enableDebugLogging: enableDebugLogging,
     );
     await config._startProcess();
     return config;
@@ -191,6 +194,9 @@ class LspStdioConfig extends LspConfig {
   Process get process => _process;
 
   void _handleStdoutData(List<int> data) {
+    if (enableDebugLogging) {
+      debugPrint("[CodeForge-LSP]: ${utf8.decode(data)}");
+    }
     _buffer.addAll(data);
     while (_buffer.isNotEmpty) {
       final headerEnd = _findHeaderEnd();

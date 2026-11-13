@@ -41,6 +41,10 @@ sealed class LspConfig {
   /// These are sent to the server via workspace/didChangeConfiguration notifications.
   final Map<String, dynamic> workspaceConfiguration;
 
+  /// Disabled by default.
+  /// Enable to print LSP server output in the console.
+  final bool enableDebugLogging;
+
   final StreamController<Map<String, dynamic>> _responseController =
       StreamController.broadcast();
   int _nextId = 1;
@@ -50,6 +54,10 @@ sealed class LspConfig {
   bool _serverSupportsSemanticTokensFull = false;
   final Map<String, dynamic> _initOptions = {};
 
+  /// true if the server supports `textDocument/diagnostics` or `pullDiagnostics`.
+  bool serverSupportsDiagnostics = false;
+
+  /// Flag that indicates whether the LSP server is initialized or not.
   bool isInitialized = false;
 
   /// Stream of responses from the LSP server.
@@ -82,6 +90,7 @@ sealed class LspConfig {
     this.workspaceConfiguration = const {},
     this.disableWarning = false,
     this.disableError = false,
+    this.enableDebugLogging = false,
   }) {
     _initOptions.addAll({
       "highlight": {'enabled': true, 'lsRanges': true},
@@ -151,9 +160,11 @@ sealed class LspConfig {
     }
 
     final capabilities = response['result']?['capabilities'];
+    serverSupportsDiagnostics = capabilities?['diagnosticProvider'] != null;
     _serverSupportsSemanticTokensRange = false;
     _serverSupportsSemanticTokensFull = false;
     final semanticTokensProvider = capabilities?['semanticTokensProvider'];
+
     if (semanticTokensProvider != null) {
       final rangeSupport = semanticTokensProvider['range'];
       _serverSupportsSemanticTokensRange =
@@ -788,6 +799,29 @@ sealed class LspConfig {
     final result = response['result'];
     if (result is! List) return [];
     return result;
+  }
+
+  /// Requests diagnostics for an entire document.
+  ///
+  /// Supports both FullDocumentDiagnosticReport and
+  /// UnchangedDocumentDiagnosticReport.
+  ///
+  /// Returns the raw diagnostic report.
+  Future<Map<String, dynamic>> getDiagnostics(String filePath) async {
+    final response = await sendRequest(
+      method: 'textDocument/diagnostic',
+      params: {
+        'textDocument': {'uri': toFileUri(filePath)},
+      },
+    );
+
+    final result = response['result'];
+
+    if (result is Map<String, dynamic>) {
+      return result;
+    }
+
+    return {};
   }
 
   /// Searches for symbols across the entire workspace.

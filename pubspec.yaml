@@ -1,9 +1,16 @@
 name: code_forge
 description: "A powerful text editor widget, capable of handling 1M+ lines of text smoothly."
-version: 11.6.1
+version: 11.7.1
 homepage: https://github.com/heckmon/code_forge
 repository: https://github.com/heckmon/code_forge
 
+topics:
+  - code-editor
+  - text-editor
+  - syntax-highlighting
+  - lsp
+  - ai-completion
+  
 environment:
   sdk: ^3.13.7
 
@@ -22,8 +29,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  integration_test:
-    sdk: flutter
 
 flutter:    
   fonts:

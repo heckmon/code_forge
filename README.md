@@ -52,12 +52,19 @@
 >flutter build web --wasm
 >```
 
-## What's new in 11.6.0:
-  - ENHANCEMENT: Improved minimap scroll calculation.
-  - Minimap enabled by default.
-     <p align="left">
-      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="600" width="600"/>
-    </p>
+## What's new in 11.7.0:
+  - FEATURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
+  - FEATURE: Added a flag called `enableDebugLogging` in the  `LspConfig` class to print raw LSP server logs in console for debugging purpose.
+    ```dart
+    final lspConfig = await LspStdioConfig.start(
+      executable: "tsc",
+      args: ['--lsp', '--stdio'],
+      workspacePath: absWorkspacePath,
+      languageId: "javascript",
+      enableDebugLogging: true // <-- Set this true to see lsp server logs.
+    );
+    ```
+  - ENHANCEMENT: Enhanced LSP diagnostics management.
 
 
 ## Why CodeForge?
@@ -135,7 +142,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.6.0
+  code_forge: ^11.7.1
 ```
 - 2 . Then run:
 
@@ -260,6 +267,7 @@ The class `LspSocketConfig` is used to connect to an LSP server using WebSocket.
 - `filePath`: A filePath is required by the LSP server to provide completions and diagnostics.
 - `workspacePath`: The workspace path is the current directory or the parent directory which holds the `filePath` file.
 - `languageId`: This is a server specific parameter. eg: `'python'` is the language ID used in basedpyright/pyright language server.
+- `enableDebugLogging`: Disabled by default. Enable to print LSP server output in the console.
 
 You can easily start any language server using websocket using the  [lsp-ws-proxy](https://github.com/qualified/lsp-ws-proxy) package. For example, to start the basedpyright language server, you can use the following command:<br>
 (On Android, you can use [Termux](https://github.com/termux/termux-app))
@@ -304,6 +312,7 @@ This method is easy to start—no terminal setup or extra packages are needed—
 - `filePath`: A filePath is required by the LSP server to provide completions and diagnostics.
 - `workspacePath`: The workspace path is the current directory or parent directory which holds the `filePath` file.
 - `languageId`: This is a server specific parameter. eg: `'python'` is the language ID used in pyright language server.
+- `enableDebugLogging`: Disabled by default. Enable to print LSP server output in the console.
 
 To get the `executable` path, you can use the `which` command in the terminal. For example, to get the path of the `basedpyright-langserver`, you can use the following command:
 

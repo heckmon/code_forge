@@ -53,7 +53,7 @@ class CodeForgeController implements DeltaTextInputClient {
   void Function(int line)? _scrollToLineCallback;
   Timer? _flushTimer, _codeActionTimer, _syncTimer;
   Timer? _documentColorTimer, _foldRangesTimer, _documentHighlightTimer;
-  Timer? _cclsRefreshTimer, _debounceTimer;
+  Timer? _cclsRefreshTimer, _debounceTimer, _diagnosticsTimer;
   Timer? _lspTypingTimer, _lspDocumentSyncTimer;
   String? _cachedText, _bufferLineText, _openedFile, _pendingLspFullText;
   String? _lastTypedCharacter;
@@ -88,6 +88,7 @@ class CodeForgeController implements DeltaTextInputClient {
   bool _inlayHintsVisible = false, documentHighlightsChanged = false;
   int _imeProjectionStartOffset = 0, _completionRequestId = 0;
   int _cachedTextVersion = -1, _currentVersion = 0, _semanticTokensVersion = 0;
+  int _diagnosticsVersion = -1;
   int _bufferLineRopeStart = 0, _bufferLineOriginalLength = 0;
   int? dirtyLine, _bufferLineIndex;
   List<String>? _cachedBufferLines;
@@ -131,6 +132,7 @@ class CodeForgeController implements DeltaTextInputClient {
           debugPrint('Error initializing LSP: $e');
         } finally {
           _listeners.add(_highlightListener);
+          _listeners.add(_diagnosticsListener);
         }
       })();
 
@@ -157,71 +159,8 @@ class CodeForgeController implements DeltaTextInputClient {
           }
 
           if (data['method'] == 'textDocument/publishDiagnostics') {
-            final List<dynamic> rawDiagnostics =
-                data['params']?['diagnostics'] ?? [];
-            if (rawDiagnostics.isNotEmpty) {
-              final List<LspErrors> errors = [];
-              for (final item in rawDiagnostics) {
-                if (item is! Map<String, dynamic>) continue;
-                int severity = item['severity'] ?? 0;
-                if (severity == 1 && lspConfig!.disableError) {
-                  severity = 0;
-                }
-                if (severity == 2 && lspConfig!.disableWarning) {
-                  severity = 0;
-                }
-                if (severity > 0) {
-                  errors.add(
-                    LspErrors(
-                      severity: severity,
-                      range: item['range'],
-                      message: item['message'] ?? '',
-                    ),
-                  );
-                }
-              }
-              if (!_isDisposed) diagnosticsNotifier.value = errors;
-
-              _codeActionTimer?.cancel();
-              _codeActionTimer = Timer(
-                const Duration(milliseconds: 250),
-                () async {
-                  if (errors.isEmpty) {
-                    if (!_isDisposed) codeActionsNotifier.value = null;
-                    return;
-                  }
-                  int minStartLine = errors
-                      .map((d) => d.range['start']?['line'] as int? ?? 0)
-                      .reduce((a, b) => a < b ? a : b);
-                  int minStartChar = errors
-                      .map((d) => d.range['start']?['character'] as int? ?? 0)
-                      .reduce((a, b) => a < b ? a : b);
-                  int maxEndLine = errors
-                      .map((d) => d.range['end']?['line'] as int? ?? 0)
-                      .reduce((a, b) => a > b ? a : b);
-                  int maxEndChar = errors
-                      .map((d) => d.range['end']?['character'] as int? ?? 0)
-                      .reduce((a, b) => a > b ? a : b);
-
-                  try {
-                    final actions = await lspConfig!.getCodeActions(
-                      filePath: openedFile!,
-                      startLine: minStartLine,
-                      startCharacter: minStartChar,
-                      endLine: maxEndLine,
-                      endCharacter: maxEndChar,
-                      diagnostics: rawDiagnostics.cast<Map<String, dynamic>>(),
-                    );
-                    if (!_isDisposed) codeActionsNotifier.value = actions;
-                  } catch (e) {
-                    debugPrint('Error fetching code actions: $e');
-                  }
-                },
-              );
-            } else {
-              if (!_isDisposed) diagnosticsNotifier.value = [];
-              if (!_isDisposed) codeActionsNotifier.value = null;
-            }
+            final List rawDiagnostics = data['params']?['diagnostics'] ?? [];
+            _handleLSPDiagnostics(rawDiagnostics);
           }
 
           if (data['method'] == r'$ccls/publishSemanticHighlight') {
@@ -343,6 +282,90 @@ class CodeForgeController implements DeltaTextInputClient {
     } catch (e) {
       debugPrint('Error opening LSP document: $e');
     }
+  }
+
+  void _handleLSPDiagnostics(List<dynamic> rawDiagnostics) {
+    if (rawDiagnostics.isNotEmpty) {
+      final List<LspErrors> errors = [];
+      for (final item in rawDiagnostics) {
+        if (item is! Map<String, dynamic>) continue;
+        int severity = item['severity'] ?? 0;
+        if (severity == 1 && lspConfig!.disableError) {
+          severity = 0;
+        }
+        if (severity == 2 && lspConfig!.disableWarning) {
+          severity = 0;
+        }
+        if (severity > 0) {
+          errors.add(
+            LspErrors(
+              severity: severity,
+              range: item['range'],
+              message: item['message'] ?? '',
+            ),
+          );
+        }
+      }
+      if (!_isDisposed) diagnosticsNotifier.value = errors;
+
+      _codeActionTimer?.cancel();
+      _codeActionTimer = Timer(const Duration(milliseconds: 250), () async {
+        if (errors.isEmpty) {
+          if (!_isDisposed) codeActionsNotifier.value = null;
+          return;
+        }
+        int minStartLine = errors
+            .map((d) => d.range['start']?['line'] as int? ?? 0)
+            .reduce((a, b) => a < b ? a : b);
+        int minStartChar = errors
+            .map((d) => d.range['start']?['character'] as int? ?? 0)
+            .reduce((a, b) => a < b ? a : b);
+        int maxEndLine = errors
+            .map((d) => d.range['end']?['line'] as int? ?? 0)
+            .reduce((a, b) => a > b ? a : b);
+        int maxEndChar = errors
+            .map((d) => d.range['end']?['character'] as int? ?? 0)
+            .reduce((a, b) => a > b ? a : b);
+
+        try {
+          final actions = await lspConfig!.getCodeActions(
+            filePath: openedFile!,
+            startLine: minStartLine,
+            startCharacter: minStartChar,
+            endLine: maxEndLine,
+            endCharacter: maxEndChar,
+            diagnostics: rawDiagnostics.cast<Map<String, dynamic>>(),
+          );
+          if (!_isDisposed) codeActionsNotifier.value = actions;
+        } catch (e) {
+          debugPrint('Error fetching code actions: $e');
+        }
+      });
+    } else {
+      if (!_isDisposed) diagnosticsNotifier.value = [];
+      if (!_isDisposed) codeActionsNotifier.value = null;
+    }
+  }
+
+  Future<void> _diagnosticsListener() async {
+    if (!_lspReady || _isDisposed || openedFile == null) return;
+    if (!lspConfig!.serverSupportsDiagnostics) return;
+    if (_currentVersion == _diagnosticsVersion) return;
+
+    _diagnosticsVersion = _currentVersion;
+    _diagnosticsTimer?.cancel();
+    _diagnosticsTimer = Timer(const Duration(milliseconds: 500), () async {
+      if (!_lspReady || _isDisposed || openedFile == null) return;
+      if (!lspConfig!.serverSupportsDiagnostics) return;
+      if (_currentVersion != _diagnosticsVersion) return;
+
+      final diagnostics = await lspConfig!.getDiagnostics(openedFile!);
+      final List? items = diagnostics['items'];
+
+      if (items != null) {
+        _handleLSPDiagnostics(items);
+      }
+    });
   }
 
   Future<void> _highlightListener() async {
@@ -4591,6 +4614,7 @@ class CodeForgeController implements DeltaTextInputClient {
   void dispose() {
     _isDisposed = true;
     _debounceTimer?.cancel();
+    _diagnosticsTimer?.cancel();
     _flushTimer?.cancel();
     _codeActionTimer?.cancel();
     _documentColorTimer?.cancel();
