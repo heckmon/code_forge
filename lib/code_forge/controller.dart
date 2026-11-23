@@ -1154,6 +1154,26 @@ class CodeForgeController implements DeltaTextInputClient {
     codeActionsNotifier.value = null;
   }
 
+  /// Requests completion suggestions for the current cursor position.
+  ///
+  /// Completions are normally requested automatically while typing. Call this
+  /// to show them on demand, for example from a toolbar button or from the
+  /// [CodeForgeKeyboardShortcuts.showCompletions] shortcut (`Ctrl + Space` by
+  /// default).
+  ///
+  /// Does nothing until the LSP document has been opened. The result is
+  /// delivered through [suggestionsNotifier].
+  void showCompletions() {
+    if (!_lspReady || openedFile == null) return;
+
+    final position = selection.extentOffset.clamp(0, length);
+    final line = getLineAtOffset(position);
+    final character = position - getLineStartOffset(line);
+    final prefix = getCurrentWordPrefix(text, position);
+
+    _requestCompletions(prefix: prefix, line: line, character: character);
+  }
+
   /// Accepts the currently selected suggestion and inserts it at the cursor position.
   ///
   /// For mobile devices, uses [currentlySelectedSuggestion] to determine which

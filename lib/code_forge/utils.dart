@@ -203,6 +203,7 @@ class GutterBuilder {
 ///   this.moveSelectionToPreviousWord = const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true, shift: true),
 ///   this.lspCodeActions = const SingleActivator(LogicalKeyboardKey.period, control: true),
 ///   this.lspSignature = const SingleActivator(LogicalKeyboardKey.space, control: true, shift: true),
+///   this.showCompletions = const SingleActivator(LogicalKeyboardKey.space, control: true),
 ///   this.showFindBar = const SingleActivator(LogicalKeyboardKey.keyF, control: true),
 ///   this.showSearchAndReplaceBar = const SingleActivator(LogicalKeyboardKey.keyH, control: true),
 /// });
@@ -288,6 +289,13 @@ class CodeForgeKeyboardShortcuts {
   /// Shows [LSP signature help](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_signatureHelp) if available.
   /// Defaults to `Ctrl + Shift + space`
   final ShortcutActivator lspSignatureHelp;
+
+  /// Shows the LSP completion suggestions at the cursor position.
+  ///
+  /// Completions are also requested automatically while typing. This shortcut
+  /// lets the user open the suggestion popup on demand.
+  /// Defaults to `Ctrl + space`
+  final ShortcutActivator showCompletions;
 
   /// Show the word finder bar if provided.
   /// Defaults to `Ctrl + F`
@@ -376,6 +384,10 @@ class CodeForgeKeyboardShortcuts {
       LogicalKeyboardKey.space,
       control: true,
       shift: true,
+    ),
+    this.showCompletions = const SingleActivator(
+      LogicalKeyboardKey.space,
+      control: true,
     ),
     this.showFindBar = const SingleActivator(
       LogicalKeyboardKey.keyF,
