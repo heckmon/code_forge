@@ -3,6 +3,73 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 import 'package:re_highlight/re_highlight.dart';
 
+/// All the styling options are organized into this single class.<br>
+/// override the `codeForgeStyling` parameter in the [CodeForge] class to customize various parts of the editor.
+/// ```dart
+/// CodeForge(
+///   codeForgeStyling: CodeForgeStyling(
+///     // Your styles
+///   )
+/// )
+/// ```
+class CodeForgeStyling {
+  /// The base text style for the editor content.
+  ///
+  /// Defines the font family, size, and other text properties.
+  final TextStyle? textStyle;
+
+  /// The text style for ghost text (inline suggestions).
+  ///
+  /// This style is applied to the semi-transparent suggestion text
+  /// that appears inline. Ghost text is set via the controller's
+  /// `setGhostText()` method. If not specified, defaults to the
+  /// editor's base text style with reduced opacity.
+  ///
+  /// Example:
+  /// ```dart
+  /// CodeForge(
+  ///   ghostTextStyle: TextStyle(
+  ///     color: Colors.grey.withOpacity(0.5),
+  ///     fontStyle: FontStyle.italic,
+  ///   ),
+  /// )
+  /// ```
+  final TextStyle? ghostTextStyle;
+
+  /// Styling options for the minimap.
+  final MinimapStyle? minimapStyle;
+
+  /// Styling options for text selection and cursor.
+  final CodeSelectionStyle? selectionStyle;
+
+  /// Styling options for the gutter (line numbers and fold icons).
+  final GutterStyle? gutterStyle;
+
+  /// Styling options for the autocomplete suggestion popup.
+  final SuggestionStyle? suggestionStyle;
+
+  /// Styling options for hover documentation popup.
+  final HoverDetailsStyle? hoverDetailsStyle;
+
+  /// Styling options for search match highlighting.
+  final MatchedWordStyle? matchedWordStyle;
+
+  /// The styling applied to the pair of brackets when selected.
+  final BracketPairStyle? bracketPairStyle;
+
+  const CodeForgeStyling({
+    this.textStyle,
+    this.minimapStyle,
+    this.selectionStyle,
+    this.gutterStyle,
+    this.ghostTextStyle,
+    this.suggestionStyle,
+    this.hoverDetailsStyle,
+    this.matchedWordStyle,
+    this.bracketPairStyle,
+  });
+}
+
 /// This class provides both styling and functionality configuration for the scrollbar used in the [CodeForge].
 /// Only vertical scrollbar can be tweaked using this class.
 class ScrollbarDecoration {

@@ -481,3 +481,87 @@ class DiagnosticLine extends LspErrors {
     required super.message,
   });
 }
+
+/// All the `bool` flags/attributes that can change the [CodeForge] behaviour are organized into this single class.<br>
+/// override the `codeForgeFeatures` parameter in the [CodeForge] class to toggle/override feature flags.
+/// /// ```dart
+/// CodeForge(
+///   codeForgeFeatures: CodeForgeFeatures(
+///     // Your overrides
+///   )
+/// )
+/// ```
+class CodeForgeFeatures {
+  /// Whether the editor is in read-only mode.
+  ///
+  /// When true, the user cannot modify the text content.
+  final bool readOnly;
+
+  /// Whether to wrap long lines.
+  ///
+  /// When true, lines wrap at the editor boundary. When false,
+  /// horizontal scrolling is enabled.
+  final bool lineWrap;
+
+  /// Whether to automatically focus the editor when mounted.
+  final bool autoFocus;
+
+  /// Whether to enable the VSCode like minimap on the editor,
+  /// which mirrors editor operations. <br>
+  final bool enableMinimap;
+
+  /// Whether to enable code folding functionality.
+  ///
+  /// When true, fold icons appear in the gutter and code blocks
+  /// can be collapsed.
+  final bool enableFolding;
+
+  /// Whether to highlight matching brackets on placing cursor on one of them.
+  final bool enableBracketPairMatching;
+
+  /// Whether to show indentation guide lines.
+  ///
+  /// Displays vertical lines at each indentation level to help
+  /// visualize code structure.
+  final bool enableGuideLines;
+
+  /// Whether to show the gutter with line numbers.
+  final bool enableGutter;
+
+  /// Whether to show a divider line between gutter and content.
+  final bool enableGutterDivider;
+
+  /// Whether to enable local and non LSP autocomplete suggestions.
+  /// To control LSP suggestions, use the [capabilities] field of the [LspConfig].
+  /// [false] by default because, this may cause delay or jitter in large files.
+  final bool enableLocalSuggestions;
+
+  /// Whether to show auto completions in the OS virtual keyboard.
+  ///
+  /// Defaults to true.
+  final bool enableKeyboardSuggestions;
+
+  /// Use space instead of the `\t` character for tab key press.
+  final bool useSpaceAsTab;
+
+  /// If set to true, deleting the first line of a folded block will delete the entire folded region,
+  /// else only the first line gets deleted and the rest of the block stays safe.
+  /// Defauts to false.
+  final bool deleteFoldRangeOnDeletingFirstLine;
+
+  const CodeForgeFeatures({
+    this.readOnly = false,
+    this.autoFocus = false,
+    this.lineWrap = false,
+    this.enableMinimap = true,
+    this.enableFolding = true,
+    this.enableGuideLines = true,
+    this.enableBracketPairMatching = true,
+    this.enableLocalSuggestions = false,
+    this.enableKeyboardSuggestions = true,
+    this.useSpaceAsTab = false,
+    this.enableGutter = true,
+    this.enableGutterDivider = false,
+    this.deleteFoldRangeOnDeletingFirstLine = false,
+  });
+}

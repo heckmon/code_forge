@@ -63,23 +63,25 @@ class _MyAppState extends State<MyApp> {
 
               return CodeForge(
                 undoController: undoController,
-                bracketPairStyle: BracketPairStyle(
-                  style: .fill,
-                  color: Colors.yellow.withAlpha(100),
+                codeForgeStyling: CodeForgeStyling(
+                  textStyle: GoogleFonts.jetBrainsMono(),
+                  bracketPairStyle: BracketPairStyle(
+                    style: .fill,
+                    color: Colors.yellow.withAlpha(100),
+                  ),
+                  matchedWordStyle: const MatchedWordStyle(
+                    currentMatchStyle: TextStyle(
+                      backgroundColor: Color(0xFFFFA726),
+                    ),
+                    otherMatchStyle: TextStyle(
+                      backgroundColor: Color(0x55FFFF00),
+                    ),
+                  ),
                 ),
+                filePath: absFilePath,
                 language: langDart,
                 editorTheme: tokyoNightDarkTheme,
                 controller: codeController,
-                textStyle: GoogleFonts.jetBrainsMono(),
-                filePath: absFilePath,
-                matchedWordStyle: const MatchedWordStyle(
-                  currentMatchStyle: TextStyle(
-                    backgroundColor: Color(0xFFFFA726),
-                  ),
-                  otherMatchStyle: TextStyle(
-                    backgroundColor: Color(0x55FFFF00),
-                  ),
-                ),
                 finderBuilder: (c, controller) =>
                     FindPanelView(controller: controller),
                 customCodeSnippets: [

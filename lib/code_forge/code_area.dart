@@ -68,6 +68,27 @@ class CodeForge extends StatefulWidget {
   /// If not provided, an internal controller will be created.
   final CodeForgeController? controller;
 
+  /// override the `codeForgeFeatures` parameter in the [CodeForge] class to toggle/override `bool` feature flags,
+  /// such as `readOnly`, `autoFocus`, `enableGutter`, etc.
+  ///```dart
+  /// CodeForge(
+  ///   codeForgeFeatures: CodeForgeFeatures(
+  ///     // Your overrides
+  ///   )
+  /// )
+  ///```
+  final CodeForgeFeatures codeForgeFeatures;
+
+  /// override the `codeForgeStyling` parameter in the [CodeForge] class to customize various parts of the editor.
+  ///```dart
+  /// CodeForge(
+  ///   codeForgeStyling: CodeForgeStyling(
+  ///     // Your styles
+  ///   )
+  /// )
+  /// ```
+  final CodeForgeStyling codeForgeStyling;
+
   /// The finder controller for managing search functionality.
   ///
   /// If not provided, an internal finder controller will be created.
@@ -83,10 +104,8 @@ class CodeForge extends StatefulWidget {
   /// Uses VS2015 dark theme by default if not specified.
   final Map<String, TextStyle>? editorTheme;
 
-  /// The programming language mode for syntax highlighting.
-  ///
-  /// Determines which language syntax rules to apply. Uses Python mode
-  /// by default if not specified.
+  /// The programming language mode for syntax highlighting.<br>
+  /// Determines which language syntax rules to apply.
   final Mode? language;
 
   /// Additional language modes registered in the same highlighter instance.
@@ -99,29 +118,6 @@ class CodeForge extends StatefulWidget {
   ///
   /// If not provided, an internal focus node will be created.
   final FocusNode? focusNode;
-
-  /// The base text style for the editor content.
-  ///
-  /// Defines the font family, size, and other text properties.
-  final TextStyle? textStyle;
-
-  /// The text style for ghost text (inline suggestions).
-  ///
-  /// This style is applied to the semi-transparent suggestion text
-  /// that appears inline. Ghost text is set via the controller's
-  /// `setGhostText()` method. If not specified, defaults to the
-  /// editor's base text style with reduced opacity.
-  ///
-  /// Example:
-  /// ```dart
-  /// CodeForge(
-  ///   ghostTextStyle: TextStyle(
-  ///     color: Colors.grey.withOpacity(0.5),
-  ///     fontStyle: FontStyle.italic,
-  ///   ),
-  /// )
-  /// ```
-  final TextStyle? ghostTextStyle;
 
   /// Customize the scroll appearance.
   /// Currently included vertical scrollbar only.
@@ -160,36 +156,6 @@ class CodeForge extends StatefulWidget {
   /// Using the same shortcut on multiple operations may causes undefined behaviour.**
   final CodeForgeKeyboardShortcuts keyboardShotcuts;
 
-  /// Styling options for the minimap.
-  final MinimapStyle? minimapStyle;
-
-  /// Styling options for text selection and cursor.
-  final CodeSelectionStyle? selectionStyle;
-
-  /// Can be used to build gutter with custom content instead of line numbers.
-  final GutterBuilder? gutterBuilder;
-
-  /// Styling options for the gutter (line numbers and fold icons).
-  final GutterStyle? gutterStyle;
-
-  /// Styling options for the autocomplete suggestion popup.
-  final SuggestionStyle? suggestionStyle;
-
-  /// Builds custom content for each LSP completion suggestion.
-  ///
-  /// When null, the default completion row is used, including the built-in
-  /// type icons backed by the icon fonts declared in `pubspec.yaml`.
-  final LspSuggestionBuilder? lspSuggestionBuilder;
-
-  /// Styling options for hover documentation popup.
-  final HoverDetailsStyle? hoverDetailsStyle;
-
-  /// Styling options for search match highlighting.
-  final MatchedWordStyle? matchedWordStyle;
-
-  /// The styling applied to the pair of brackets when selected.
-  final BracketPairStyle? bracketPairStyle;
-
   /// The file path for LSP features.
   ///
   /// Required when using LSP integration to identify the document.
@@ -218,52 +184,6 @@ class CodeForge extends StatefulWidget {
   /// the controller.
   final String? initialText;
 
-  /// Whether the editor is in read-only mode.
-  ///
-  /// When true, the user cannot modify the text content.
-  final bool readOnly;
-
-  /// Whether to wrap long lines.
-  ///
-  /// When true, lines wrap at the editor boundary. When false,
-  /// horizontal scrolling is enabled.
-  final bool lineWrap;
-
-  /// Whether to automatically focus the editor when mounted.
-  final bool autoFocus;
-
-  /// Whether to enable the VSCode like minimap on the editor,
-  /// which mirrors editor operations. <br>
-  final bool enableMinimap;
-
-  /// Whether to enable code folding functionality.
-  ///
-  /// When true, fold icons appear in the gutter and code blocks
-  /// can be collapsed.
-  final bool enableFolding;
-
-  /// Whether to show indentation guide lines.
-  ///
-  /// Displays vertical lines at each indentation level to help
-  /// visualize code structure.
-  final bool enableGuideLines;
-
-  /// Whether to show the gutter with line numbers.
-  final bool enableGutter;
-
-  /// Whether to show a divider line between gutter and content.
-  final bool enableGutterDivider;
-
-  /// Whether to enable local and non LSP autocomplete suggestions.
-  /// To control LSP suggestions, use the [capabilities] field of the [LspConfig].
-  /// [false] by default because, this may cause delay or jitter in large files.
-  final bool enableLocalSuggestions;
-
-  /// Whether to show auto completions in the OS virtual keyboard.
-  ///
-  /// Defaults to true.
-  final bool enableKeyboardSuggestions;
-
   /// The type of the virtual keyboard that will used by the [CodeForge].
   ///
   /// Defaults to [TextInputType.multiline]
@@ -283,9 +203,6 @@ class CodeForge extends StatefulWidget {
   /// or 2 if using space, by setting the [useSpaceAsTab] to `true`
   final int? tabSize;
 
-  /// Use space instead of the `\t` character for tab key press.
-  final bool useSpaceAsTab;
-
   /// A list of custom code snippets that appear in the suggestion popup.
   ///
   /// Each [CustomCodeSnippet] defines a label (shown in the popup), the code
@@ -300,10 +217,14 @@ class CodeForge extends StatefulWidget {
   /// Include custom items in the context menu (The menu appearson right click).
   final List<CustomContextMenu>? customContextMenuItems;
 
-  /// If set to true, deleting the first line of a folded block will delete the entire folded region,
-  /// else only the first line gets deleted and the rest of the block stays safe.
-  /// Defauts to false.
-  final bool deleteFoldRangeOnDeletingFirstLine;
+  /// Can be used to build gutter with custom content instead of line numbers.
+  final GutterBuilder? gutterBuilder;
+
+  /// Builds custom content for each LSP completion suggestion.
+  ///
+  /// When null, the default completion row is used, including the built-in
+  /// type icons backed by the icon fonts declared in `pubspec.yaml`.
+  final LspSuggestionBuilder? lspSuggestionBuilder;
 
   /// Builder for a custom Finder widget.
   ///
@@ -319,12 +240,14 @@ class CodeForge extends StatefulWidget {
   final int _tabSize;
 
   /// Creates a [CodeForge] code editor widget.
-  const CodeForge({
+  CodeForge({
     super.key,
     this.controller,
     this.undoController,
     this.editorTheme,
     this.language,
+    this.codeForgeFeatures = const CodeForgeFeatures(),
+    this.codeForgeStyling = const CodeForgeStyling(),
     this.filePath,
     this.fileUrl,
     this.initialText,
@@ -333,41 +256,58 @@ class CodeForge extends StatefulWidget {
     this.verticalScrollController,
     this.horizontalScrollController,
     this.verticalScrollPhysics = const ClampingScrollPhysics(),
-    this.textStyle,
     this.innerPadding,
     this.keyboardShotcuts = const CodeForgeKeyboardShortcuts(),
     this.customCodeSnippets,
     this.customContextMenuItems,
-    this.readOnly = false,
-    this.autoFocus = false,
-    this.lineWrap = false,
-    this.enableMinimap = true,
-    this.enableFolding = true,
-    this.enableGuideLines = true,
-    this.enableLocalSuggestions = false,
-    this.enableKeyboardSuggestions = true,
     this.tabSize,
-    this.useSpaceAsTab = false,
-    this.enableGutter = true,
-    this.enableGutterDivider = false,
     this.keyboardType = TextInputType.multiline,
     this.textDirection = TextDirection.ltr,
-    this.deleteFoldRangeOnDeletingFirstLine = false,
-    this.minimapStyle,
-    this.selectionStyle,
-    this.gutterStyle,
-    this.gutterBuilder,
     this.scrollbarDecoration,
-    this.ghostTextStyle,
-    this.suggestionStyle,
+    this.gutterBuilder,
     this.lspSuggestionBuilder,
-    this.hoverDetailsStyle,
-    this.matchedWordStyle,
-    this.bracketPairStyle,
     this.extraLanguages = const [],
     this.finderBuilder,
     this.findController,
-  }) : _tabSize = tabSize ?? (useSpaceAsTab ? 2 : 1);
+  }) : _tabSize = tabSize ?? (codeForgeFeatures.useSpaceAsTab ? 2 : 1);
+
+  /// Use [CodeForge] as a powerful alternative to the default[TextField], without any IDE features.
+  CodeForge.plainTextField({
+    super.key,
+    this.controller,
+    this.undoController,
+    this.editorTheme,
+    this.language,
+    this.codeForgeFeatures = const CodeForgeFeatures(
+      enableGutter: false,
+      enableGuideLines: false,
+      enableFolding: false,
+      enableMinimap: false,
+      enableBracketPairMatching: false
+    ),
+    this.codeForgeStyling = const CodeForgeStyling(),
+    this.filePath,
+    this.fileUrl,
+    this.initialText,
+    this.fileUri,
+    this.focusNode,
+    this.verticalScrollController,
+    this.horizontalScrollController,
+    this.verticalScrollPhysics = const ClampingScrollPhysics(),
+    this.innerPadding,
+    this.keyboardShotcuts = const CodeForgeKeyboardShortcuts(),
+    this.customCodeSnippets,
+    this.customContextMenuItems,
+    this.tabSize,
+    this.keyboardType = TextInputType.multiline,
+    this.textDirection = TextDirection.ltr,
+    this.scrollbarDecoration,
+    this.gutterBuilder,
+    this.lspSuggestionBuilder,
+    this.extraLanguages = const [],
+    this.finderBuilder,
+    this.findController,
+  }) : _tabSize = tabSize ?? (codeForgeFeatures.useSpaceAsTab ? 2 : 1);
 
   @override
   State<CodeForge> createState() => _CodeForgeState();
@@ -491,15 +431,15 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _selectionActiveNotifier = ValueNotifier(false);
     _isHoveringPopup = ValueNotifier<bool>(false);
     _controller.userCodeAction = _fetchCodeActionsForCurrentPosition;
-    _selectionStyle = widget.selectionStyle ?? CodeSelectionStyle();
-    _bracketPairStyle = widget.bracketPairStyle ?? BracketPairStyle();
+    _selectionStyle = widget.codeForgeStyling.selectionStyle ?? CodeSelectionStyle();
+    _bracketPairStyle = widget.codeForgeStyling.bracketPairStyle ?? BracketPairStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _fileUrl = widget.fileUrl;
     _syntaxHighlighter = SyntaxHighlighter(
       language: _language,
       extraLanguages: widget.extraLanguages,
       editorTheme: _editorTheme,
-      baseTextStyle: widget.textStyle,
+      baseTextStyle: widget.codeForgeStyling.textStyle,
       languageId: _controller.lspConfig?.languageId,
       documentText: _controller.text,
     );
@@ -547,17 +487,17 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       return filePath;
     })();
 
-    _readOnly = widget.readOnly;
+    _readOnly = widget.codeForgeFeatures.readOnly;
     _deleteFoldRangeOnDeletingFirstLine =
-        widget.deleteFoldRangeOnDeletingFirstLine;
+        widget.codeForgeFeatures.deleteFoldRangeOnDeletingFirstLine;
     _controller.setUndoController(_undoRedoController);
-    _controller.enableLocalSuggestions = widget.enableLocalSuggestions;
+    _controller.enableLocalSuggestions = widget.codeForgeFeatures.enableLocalSuggestions;
     _controller.deleteFoldRangeOnDeletingFirstLine =
         _deleteFoldRangeOnDeletingFirstLine;
 
-    if (widget.readOnly && !_controller.readOnly) {
+    if (widget.codeForgeFeatures.readOnly && !_controller.readOnly) {
       _controller.readOnly = true;
-    } else if (_controller.readOnly && !widget.readOnly) {
+    } else if (_controller.readOnly && !widget.codeForgeFeatures.readOnly) {
       _readOnly = true;
     }
 
@@ -565,8 +505,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       _controller.tabSize = widget._tabSize;
     }
 
-    if (widget.useSpaceAsTab != _controller.useSpaceAsTab) {
-      _controller.useSpaceAsTab = widget.useSpaceAsTab;
+    if (widget.codeForgeFeatures.useSpaceAsTab != _controller.useSpaceAsTab) {
+      _controller.useSpaceAsTab = widget.codeForgeFeatures.useSpaceAsTab;
     }
 
     _scrollbarDecoration =
@@ -576,14 +516,14 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           thickness: 15,
           lineNumberStyle: TextStyle(
             color: _editorTheme['root']?.backgroundColor ?? Colors.black,
-            fontSize: widget.textStyle?.fontSize ?? 14,
-            fontFamily: widget.textStyle?.fontFamily,
-            fontWeight: widget.textStyle?.fontWeight ?? FontWeight.bold,
+            fontSize: widget.codeForgeStyling.textStyle?.fontSize ?? 14,
+            fontFamily: widget.codeForgeStyling.textStyle?.fontFamily,
+            fontWeight: widget.codeForgeStyling.textStyle?.fontWeight ?? FontWeight.bold,
           ),
         );
 
     _gutterStyle =
-        widget.gutterStyle ??
+        widget.codeForgeStyling.gutterStyle ??
         GutterStyle(
           lineNumberStyle: null,
           foldedIconColor: _editorTheme['root']?.color,
@@ -592,11 +532,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         );
 
     _suggestionStyle =
-        widget.suggestionStyle ??
+        widget.codeForgeStyling.suggestionStyle ??
         SuggestionStyle(
           elevation: 8,
           textStyle: (() {
-            TextStyle style = widget.textStyle ?? TextStyle();
+            TextStyle style = widget.codeForgeStyling.textStyle ?? TextStyle();
             if (style.color == null) {
               style = style.copyWith(color: _editorTheme['root']!.color);
             }
@@ -627,16 +567,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           variableIconColor: Color(0xFF61AFEF),
           keywordIconColor: Color(0xFFC678DD),
           labelTextStyle: TextStyle(
-            fontSize: widget.textStyle?.fontSize ?? 14,
+            fontSize: widget.codeForgeStyling.textStyle?.fontSize ?? 14,
             fontWeight: FontWeight.w500,
             color: _editorTheme['root']!.color,
           ),
           detailTextStyle: TextStyle(
-            fontSize: (widget.textStyle?.fontSize ?? 14) * 0.85,
+            fontSize: (widget.codeForgeStyling.textStyle?.fontSize ?? 14) * 0.85,
             color: _editorTheme['root']!.color?.withAlpha(150),
           ),
           typeTextStyle: TextStyle(
-            fontSize: (widget.textStyle?.fontSize ?? 14) * 0.9,
+            fontSize: (widget.codeForgeStyling.textStyle?.fontSize ?? 14) * 0.9,
             fontStyle: FontStyle.italic,
             color: _editorTheme['root']!.color?.withAlpha(180),
           ),
@@ -652,7 +592,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
         );
 
     _hoverDetailsStyle =
-        widget.hoverDetailsStyle ??
+        widget.codeForgeStyling.hoverDetailsStyle ??
         HoverDetailsStyle(
           shape: BeveledRectangleBorder(
             side: BorderSide(
@@ -912,7 +852,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _updateScrollbarLineNumberIndicator();
-      if (widget.autoFocus) {
+      if (widget.codeForgeFeatures.autoFocus) {
         _focusNode.requestFocus();
       } else {
         _connection = _attachImeConnection();
@@ -934,9 +874,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     return TextInput.attach(
       _controller,
       TextInputConfiguration(
-        readOnly: widget.readOnly,
+        readOnly: widget.codeForgeFeatures.readOnly,
         enableDeltaModel: true,
-        enableSuggestions: widget.enableKeyboardSuggestions,
+        enableSuggestions: widget.codeForgeFeatures.enableKeyboardSuggestions,
         inputType: widget.keyboardType,
         inputAction: TextInputAction.newline,
         autocorrect: false,
@@ -1340,8 +1280,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   void didUpdateWidget(covariant CodeForge oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    final newTabSize = widget.tabSize ?? (widget.useSpaceAsTab ? 2 : 1);
-    _controller.useSpaceAsTab = widget.useSpaceAsTab;
+    final newTabSize = widget.tabSize ?? (widget.codeForgeFeatures.useSpaceAsTab ? 2 : 1);
+    _controller.useSpaceAsTab = widget.codeForgeFeatures.useSpaceAsTab;
     _controller.tabSize = newTabSize;
 
     if (widget.language != oldWidget.language) {
@@ -1350,8 +1290,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     if (widget.editorTheme != oldWidget.editorTheme) {
       _editorTheme = widget.editorTheme ?? lightfairTheme;
     }
-    if (widget.readOnly != oldWidget.readOnly) {
-      _readOnly = widget.readOnly;
+    if (widget.codeForgeFeatures.readOnly != oldWidget.codeForgeFeatures.readOnly) {
+      _readOnly = widget.codeForgeFeatures.readOnly;
     }
   }
 
@@ -1467,7 +1407,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
 
     final renderer = _codeFieldKey.currentContext?.findRenderObject();
-    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+    if (widget.codeForgeFeatures.lineWrap && renderer is _CodeFieldRenderer) {
       renderer.moveToWrappedLineStart(isShiftPressed: withShift);
     } else {
       _controller.pressHomeKey(isShiftPressed: withShift);
@@ -1480,7 +1420,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
 
     final renderer = _codeFieldKey.currentContext?.findRenderObject();
-    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+    if (widget.codeForgeFeatures.lineWrap && renderer is _CodeFieldRenderer) {
       renderer.moveToWrappedLineEnd(isShiftPressed: withShift);
     } else {
       _controller.pressEndKey(isShiftPressed: withShift);
@@ -1489,7 +1429,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
 
   void _moveVertical(bool down, bool withShift) {
     final renderer = _codeFieldKey.currentContext?.findRenderObject();
-    if (widget.lineWrap && renderer is _CodeFieldRenderer) {
+    if (widget.codeForgeFeatures.lineWrap && renderer is _CodeFieldRenderer) {
       renderer.moveVerticallyInWrappedText(
         down: down,
         isShiftPressed: withShift,
@@ -1962,7 +1902,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
               adjustedLeft = viewportRect.left;
             }
 
-            final fontSize = widget.textStyle?.fontSize ?? 14;
+            final fontSize = widget.codeForgeStyling.textStyle?.fontSize ?? 14;
             final spaceBelow = screenHeight - caret.dy - fontSize - 10;
             final spaceAbove = caret.dy - 10;
             final shouldPositionAbove =
@@ -2084,7 +2024,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     }
                                   }
                                 } else if ((item is! LspCompletion &&
-                                        widget.enableLocalSuggestions) &&
+                                        widget.codeForgeFeatures.enableLocalSuggestions) &&
                                     (indx == _sugSelIndex ||
                                         (_isMobile && _isMobileSuggActive))) {
                                   if (_selectedSuggestionMd != null) {
@@ -2711,8 +2651,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             color:
                                 _editorTheme['root']?.backgroundColor ??
                                 Colors.black,
-                            fontSize: widget.textStyle?.fontSize ?? 14,
-                            fontFamily: widget.textStyle?.fontFamily,
+                            fontSize: widget.codeForgeStyling.textStyle?.fontSize ?? 14,
+                            fontFamily: widget.codeForgeStyling.textStyle?.fontFamily,
                           ),
                       child: Transform(
                         alignment: Alignment.center,
@@ -2781,7 +2721,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                             ? AxisDirection.left
                                             : AxisDirection.right,
                                         mainAxis: Axis.vertical,
-                                        lineWrap: widget.lineWrap,
+                                        lineWrap: widget.codeForgeFeatures.lineWrap,
                                         delegate: TwoDimensionalChildBuilderDelegate(
                                           maxXIndex: 0,
                                           maxYIndex: 0,
@@ -3856,15 +3796,16 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     _caretBlinkController,
                                                 lineHighlightController:
                                                     _lineHighlightController,
-                                                textStyle: widget.textStyle,
+                                                textStyle: widget.codeForgeStyling.textStyle,
                                                 enableFolding:
-                                                    widget.enableFolding,
+                                                    widget.codeForgeFeatures.enableFolding,
+                                                enableBracketMatching: widget.codeForgeFeatures.enableBracketPairMatching,
                                                 enableGuideLines:
-                                                    widget.enableGuideLines,
+                                                    widget.codeForgeFeatures.enableGuideLines,
                                                 enableGutter:
-                                                    widget.enableGutter,
+                                                    widget.codeForgeFeatures.enableGutter,
                                                 enableGutterDivider:
-                                                    widget.enableGutterDivider,
+                                                    widget.codeForgeFeatures.enableGutterDivider,
                                                 gutterStyle: _gutterStyle,
                                                 selectionStyle: _selectionStyle,
                                                 bracketPairStyle:
@@ -3879,7 +3820,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 hoverNotifier: _hoverNotifier,
                                                 hoverContentNotifier:
                                                     _hoverContentNotifier,
-                                                lineWrap: widget.lineWrap,
+                                                lineWrap: widget.codeForgeFeatures.lineWrap,
                                                 offsetNotifier: _offsetNotifier,
                                                 aiNotifier: _aiNotifier,
                                                 aiOffsetNotifier:
@@ -3889,9 +3830,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 suggestionNotifier:
                                                     _suggestionNotifier,
                                                 ghostTextStyle:
-                                                    widget.ghostTextStyle,
+                                                    widget.codeForgeStyling.ghostTextStyle,
                                                 matchedWordStyle:
-                                                    widget.matchedWordStyle,
+                                                    widget.codeForgeStyling.matchedWordStyle,
                                                 lspActionNotifier:
                                                     _lspActionNotifier,
                                                 lspActionOffsetNotifier:
@@ -3941,7 +3882,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                               ? screenWidth * 0.63
                               : 420.0;
                           final maxBoxHeight = 400.0;
-                          final fontSize = widget.textStyle?.fontSize ?? 14;
+                          final fontSize = widget.codeForgeStyling.textStyle?.fontSize ?? 14;
 
                           double adjustedLeft = offset.dx;
                           if (adjustedLeft + desiredWidth > screenWidth) {
@@ -4033,7 +3974,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                   style: TextStyle(
                                                     fontSize:
                                                         (widget
-                                                                .textStyle
+                                                                .codeForgeStyling.textStyle
                                                                 ?.fontSize ??
                                                             15) +
                                                         1.75,
@@ -4073,7 +4014,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     style: TextStyle(
                                                       fontSize:
                                                           (widget
-                                                                  .textStyle
+                                                                  .codeForgeStyling.textStyle
                                                                   ?.fontSize ??
                                                               15) +
                                                           1.75,
@@ -4102,7 +4043,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 style: TextStyle(
                                                   fontSize:
                                                       (widget
-                                                              .textStyle
+                                                             .codeForgeStyling.textStyle
                                                               ?.fontSize ??
                                                           15) +
                                                       1.75,
@@ -4211,13 +4152,13 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                           ? Positioned(
                               top:
                                   offvalue.dy +
-                                  (widget.textStyle?.fontSize ?? 14) *
+                                  (widget.codeForgeStyling.textStyle?.fontSize ?? 14) *
                                       _aiNotifier.value!.split('\n').length +
                                   15,
                               left:
                                   offvalue.dx +
                                   (_aiNotifier.value!.split('\n')[0].length *
-                                      (widget.textStyle?.fontSize ?? 14) /
+                                      (widget.codeForgeStyling.textStyle?.fontSize ?? 14) /
                                       2),
                               child: Row(
                                 children: [
@@ -4295,7 +4236,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             ? screenWidth * 0.63
                             : screenWidth * 0.3,
                         top:
-                            offset.dy + (widget.textStyle?.fontSize ?? 14) + 10,
+                            offset.dy + (widget.codeForgeStyling.textStyle?.fontSize ?? 14) + 10,
                         left: offset.dx,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
@@ -4421,7 +4362,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       );
                     },
                   ),
-                  if (widget.enableMinimap)
+                  if (widget.codeForgeFeatures.enableMinimap)
                     Positioned(
                       right: widget.textDirection == .ltr
                           ? _scrollbarDecoration.thickness
@@ -4486,28 +4427,28 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                   physics: NeverScrollableScrollPhysics(),
                                   child: CustomPaint(
                                     size: Size(
-                                      widget.minimapStyle?.width ??
+                                      widget.codeForgeStyling.minimapStyle?.width ??
                                           constraints.maxWidth *
                                               (_isMobile ? 0.15 : 0.065),
                                       _controller.lineCount *
-                                          (widget.minimapStyle?.lineHeight ??
+                                          (widget.codeForgeStyling.minimapStyle?.lineHeight ??
                                               3),
                                     ),
                                     painter: MiniMapPainter(
                                       fontSize:
-                                          widget.minimapStyle?.fontSize ?? 2.5,
+                                          widget.codeForgeStyling.minimapStyle?.fontSize ?? 2.5,
                                       lineHeight:
-                                          widget.minimapStyle?.lineHeight ?? 3,
+                                          widget.codeForgeStyling.minimapStyle?.lineHeight ?? 3,
                                       controller: _controller,
                                       bgColor:
                                           widget
-                                              .minimapStyle
+                                              .codeForgeStyling.minimapStyle
                                               ?.backgroundColor ??
                                           (_editorTheme['root']!.color ??
                                                   Colors.grey[400]!)
                                               .withAlpha(6),
                                       scrollCtrl: _minimapScrollCtrl,
-                                      lineWrap: widget.lineWrap,
+                                      lineWrap: widget.codeForgeFeatures.lineWrap,
                                       highlighter: _syntaxHighlighter,
                                       textDirection: widget.textDirection,
                                       selectionColor:
@@ -4538,7 +4479,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     return Positioned(
                                       top: miniMapVal.$1 * track,
                                       width:
-                                          widget.minimapStyle?.width ??
+                                          widget.codeForgeStyling.minimapStyle?.width ??
                                           constraints.maxWidth *
                                               (_isMobile ? 0.15 : 0.065),
                                       height: overlayHeight,
@@ -4586,10 +4527,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                               color:
                                                   (_minimapOverlayHover
                                                       ? widget
-                                                            .minimapStyle
+                                                            .codeForgeStyling.minimapStyle
                                                             ?.overlayHoverColor
                                                       : widget
-                                                            .minimapStyle
+                                                            .codeForgeStyling.minimapStyle
                                                             ?.overlayColor) ??
                                                   (_editorTheme['root']!
                                                               .color ??
@@ -4738,6 +4679,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final AnimationController lineHighlightController;
   final TextStyle? textStyle;
   final bool enableFolding, enableGuideLines, enableGutter, enableGutterDivider;
+  final bool enableBracketMatching;
   final GutterStyle gutterStyle;
   final CodeSelectionStyle selectionStyle;
   final BracketPairStyle bracketPairStyle;
@@ -4774,6 +4716,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.enableFolding,
     required this.enableGuideLines,
     required this.enableGutter,
+    required this.enableBracketMatching,
     required this.enableGutterDivider,
     required this.gutterStyle,
     required this.gutterBuilder,
@@ -4832,6 +4775,7 @@ class _CodeField extends LeafRenderObjectWidget {
       enableFolding: enableFolding,
       enableGuideLines: enableGuideLines,
       enableGutter: enableGutter,
+      enableBracketMatching: enableBracketMatching,
       enableGutterDivider: enableGutterDivider,
       gutterStyle: gutterStyle,
       gutterBuilder: gutterBuilder,
@@ -4968,7 +4912,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   Offset? _pointerDownPosition;
   Offset _currentPosition = Offset.zero;
   bool _enableFolding, _enableGuideLines, _enableGutter, _enableGutterDivider;
-  bool _isFoldToggleInProgress = false, _lineWrap;
+  bool _isFoldToggleInProgress = false, _lineWrap, _enableBracketMatching;
   bool _foldRangesNeedsClear = false;
   Set<int> _foldedLineIndices = {};
   List<int> _sortedFoldedLines = [];
@@ -5395,6 +5339,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required bool enableFolding,
     required this._enableGuideLines,
     required this._enableGutter,
+    required this._enableBracketMatching,
     required this._enableGutterDivider,
     required GutterStyle gutterStyle,
     required this.gutterBuilder,
@@ -5608,6 +5553,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   bool get enableFolding => _enableFolding;
   bool get enableGuideLines => _enableGuideLines;
   bool get enableGutter => _enableGutter;
+  bool get enableBracketMatching => _enableBracketMatching;
   bool get enableGutterDivider => _enableGutterDivider;
   GutterStyle get gutterStyle => _gutterStyle;
   TextStyle? get ghostTextStyle => _ghostTextStyle;
@@ -8651,7 +8597,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       );
     }
 
-    if (focusNode.hasFocus) {
+    if (focusNode.hasFocus && enableBracketMatching) {
       _drawBracketHighlight(
         canvas,
         offset,
