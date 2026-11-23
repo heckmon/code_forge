@@ -5,7 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
@@ -418,16 +418,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   final Map<String, String> _suggestionDetailsCache = {};
   final _isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final GlobalKey _codeFieldKey = GlobalKey();
-
-  /// The viewport that the caret offset (and therefore the suggestion popup)
-  /// is measured against. Used to translate the popup into overlay space.
   final GlobalKey _editorViewportKey = GlobalKey();
-
-  /// Hosts the completion popup in the root overlay so it is not clipped by the
-  /// editor or the surrounding panels.
   final OverlayPortalController _suggestionPortal = OverlayPortalController();
-
-  /// Hosts the hover documentation in the root overlay for the same reason.
   final OverlayPortalController _hoverPortal = OverlayPortalController();
   final ScrollController _minimapScrollCtrl = ScrollController();
   TextInputConnection? _connection;
@@ -675,13 +667,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           focusColor: Colors.blueAccent.withAlpha(50),
           hoverColor: Colors.grey.withAlpha(15),
           splashColor: Colors.blueAccent.withAlpha(50),
-          textStyle: (() {
-            TextStyle style = widget.textStyle ?? _editorTheme['root']!;
-            if (style.color == null) {
-              style = style.copyWith(color: _editorTheme['root']!.color);
-            }
-            return style;
-          })(),
+          textStyle: _editorTheme['root']!.copyWith(
+            backgroundColor: Colors.transparent,
+            fontWeight: .w500
+          ),
         );
 
     _caretBlinkController = AnimationController(
@@ -720,10 +709,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
               ),
         );
       } else if (!_focusNode.hasFocus) {
-        // Focus moved to another panel or window. Drop the popups so they
-        // cannot linger in the overlay while the editor is unfocused.
         _suggestionNotifier.value = null;
-        _hoverNotifier.value = null;
       }
     });
 
@@ -1922,8 +1908,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _syncPortal(_hoverPortal, _hoverNotifier.value != null);
   }
 
-  /// Builds the completion popup in the root [Overlay] so it is not
-  /// clipped by the editor viewport or the surrounding panels.
   Widget _buildSuggestionOverlay(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: _offsetNotifier,
@@ -1964,10 +1948,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             final itemExtent = _suggestionStyle.itemHeight ?? 24.0;
             final estimatedHeight = min(sugg.length * itemExtent, 400.0);
 
-            // The popup lives in the root overlay so it can
-            // escape the editor's clip rect. Keep it inside the
-            // editor horizontally so it never covers the
-            // neighbouring panels.
             double adjustedLeft = caret.dx;
             if (adjustedLeft + suggestionWidth > viewportRect.right) {
               adjustedLeft = viewportRect.right - suggestionWidth;
@@ -1988,11 +1968,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             } else {
               top = caret.dy + fontSize + 10;
             }
-            // Never let the popup leave the window. The list
-            // scrolls when there is less room than
-            // [estimatedHeight].
-            top = top.clamp(0.0, max(0.0, screenHeight - estimatedHeight));
-
+            
             return ValueListenableBuilder(
               valueListenable: _controller.selectedSuggestionNotifier,
               builder: (context, selected, child) {
@@ -2358,41 +2334,51 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     .withAlpha(100),
                                 child: SingleChildScrollView(
                                   controller: completionScrlCtrl,
-                                  child: MarkdownBlock(
-                                    data: _selectedSuggestionMd!,
-                                    config: MarkdownConfig.darkConfig.copy(
-                                      configs: [
-                                        PConfig(
-                                          textStyle:
-                                              _hoverDetailsStyle.textStyle,
-                                        ),
-                                        PreConfig(
-                                          language:
-                                              _controller.lspConfig?.languageId
-                                                  .toLowerCase() ??
-                                              'dart',
-                                          theme: _editorTheme,
-                                          textStyle: TextStyle(
-                                            fontSize: _hoverDetailsStyle
-                                                .textStyle
-                                                .fontSize,
+                                  child: SelectableRegion(
+                                    selectionControls: materialTextSelectionControls,
+                                    contextMenuBuilder: (context, state) {
+                                      return AdaptiveTextSelectionToolbar(
+                                        anchors: state.contextMenuAnchors,
+                                        children: [],
+                                      );
+                                    },
+                                    child: MarkdownBlock(
+                                      selectable: false,
+                                      data: _selectedSuggestionMd!,
+                                      config: MarkdownConfig.darkConfig.copy(
+                                        configs: [
+                                          PConfig(
+                                            textStyle:
+                                                _hoverDetailsStyle.textStyle,
                                           ),
-                                          styleNotMatched: TextStyle(
-                                            color: _editorTheme['root']!.color,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: _editorTheme['root']!
-                                                .backgroundColor!,
-                                            borderRadius: BorderRadius.zero,
-                                            border: Border.all(
-                                              width: 0.2,
-                                              color:
-                                                  _editorTheme['root']!.color ??
-                                                  Colors.grey,
+                                          PreConfig(
+                                            language:
+                                                _controller.lspConfig?.languageId
+                                                    .toLowerCase() ??
+                                                'dart',
+                                            theme: _editorTheme,
+                                            textStyle: TextStyle(
+                                              fontSize: _hoverDetailsStyle
+                                                  .textStyle
+                                                  .fontSize,
+                                            ),
+                                            styleNotMatched: TextStyle(
+                                              color: _editorTheme['root']!.color,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _editorTheme['root']!
+                                                  .backgroundColor!,
+                                              borderRadius: BorderRadius.zero,
+                                              border: Border.all(
+                                                width: 0.2,
+                                                color:
+                                                    _editorTheme['root']!.color ??
+                                                    Colors.grey,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -2411,8 +2397,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     );
   }
 
-  /// Builds the hover documentation in the root [Overlay] so it is not
-  /// clipped by the editor viewport or the panels beside it.
   Widget _buildHoverOverlay(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: _hoverNotifier,
@@ -2490,9 +2474,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                       );
                     }
 
-                    final diagnosticMessage = data['diagnostic'] ?? '';
-                    final severity = data['severity'] ?? 0;
-                    final hoverMessage = data['hover'] ?? '';
+                    final String diagnosticMessage = data['diagnostic'] ?? '';
+                    final int severity = data['severity'] ?? 0;
+                    final String hoverMessage = data['hover'] ?? '';
 
                     if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
                       return SizedBox.shrink();
@@ -2594,45 +2578,56 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                         .withAlpha(100),
                                     child: SingleChildScrollView(
                                       controller: hoverScrollController,
-                                      child: MarkdownBlock(
-                                        data: hoverMessage,
-                                        config: MarkdownConfig.darkConfig.copy(
-                                          configs: [
-                                            PConfig(
-                                              textStyle:
-                                                  _hoverDetailsStyle.textStyle,
-                                            ),
-                                            PreConfig(
-                                              language:
-                                                  _controller
-                                                      .lspConfig
-                                                      ?.languageId
-                                                      .toLowerCase() ??
-                                                  "dart",
-                                              theme: _editorTheme,
-                                              textStyle: TextStyle(
-                                                fontSize: _hoverDetailsStyle
-                                                    .textStyle
-                                                    .fontSize,
+                                      child: SelectableRegion(
+                                        selectionControls: materialTextSelectionControls,
+                                        contextMenuBuilder: (context, state) {
+                                          return AdaptiveTextSelectionToolbar(
+                                            anchors: state.contextMenuAnchors,
+                                            children: [],
+                                          );
+                                        },
+                                        child: MarkdownBlock(
+                                          selectable: false,
+                                          data: hoverMessage,
+                                          config: MarkdownConfig.darkConfig.copy(
+                                            configs: [
+                                              PConfig(
+                                                textStyle:
+                                                    _hoverDetailsStyle.textStyle,
                                               ),
-                                              styleNotMatched: TextStyle(
-                                                color:
-                                                    _editorTheme['root']!.color,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: _editorTheme['root']!
-                                                    .backgroundColor!,
-                                                borderRadius: BorderRadius.zero,
-                                                border: Border.all(
-                                                  width: 0.2,
+                                              PreConfig(
+                                                language:
+                                                    _controller
+                                                        .lspConfig
+                                                        ?.languageId
+                                                        .toLowerCase() ??
+                                                    "dart",
+                                                theme: _editorTheme,
+                                                textStyle: TextStyle(
+                                                  fontFamily: 'monospace',
+                                                  fontSize: _hoverDetailsStyle
+                                                      .textStyle
+                                                      .fontSize,
+                                                ),
+                                                styleNotMatched: TextStyle(
                                                   color:
-                                                      _editorTheme['root']!
-                                                          .color ??
-                                                      Colors.grey,
+                                                      _editorTheme['root']!.color,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: _editorTheme['root']!
+                                                      .backgroundColor!,
+                                                  borderRadius: BorderRadius.zero,
+                                                  border: Border.all(
+                                                    width: 0.2,
+                                                    color:
+                                                        _editorTheme['root']!
+                                                            .color ??
+                                                        Colors.grey,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -4121,46 +4116,57 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                           padding: const EdgeInsets.only(
                                             left: 6.5,
                                           ),
-                                          child: MarkdownBlock(
-                                            data: signature.documentation,
-                                            config: MarkdownConfig.darkConfig.copy(
-                                              configs: [
-                                                PConfig(
-                                                  textStyle: _hoverDetailsStyle
-                                                      .textStyle,
-                                                ),
-                                                PreConfig(
-                                                  language:
-                                                      _controller
-                                                          .lspConfig
-                                                          ?.languageId
-                                                          .toLowerCase() ??
-                                                      'dart',
-                                                  theme: _editorTheme,
-                                                  textStyle: TextStyle(
-                                                    fontSize: _hoverDetailsStyle
-                                                        .textStyle
-                                                        .fontSize,
+                                          child: SelectableRegion(
+                                            selectionControls: materialTextSelectionControls,
+                                            contextMenuBuilder: (context, state) {
+                                              return AdaptiveTextSelectionToolbar(
+                                                anchors: state.contextMenuAnchors,
+                                                children: [],
+                                              );
+                                            },
+                                            child: MarkdownBlock(
+                                              selectable: false,
+                                              data: signature.documentation,
+                                              config: MarkdownConfig.darkConfig.copy(
+                                                configs: [
+                                                  PConfig(
+                                                    textStyle: _hoverDetailsStyle
+                                                        .textStyle,
                                                   ),
-                                                  styleNotMatched: TextStyle(
-                                                    color: _editorTheme['root']!
-                                                        .color,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: _editorTheme['root']!
-                                                        .backgroundColor!,
-                                                    borderRadius:
-                                                        BorderRadius.zero,
-                                                    border: Border.all(
-                                                      width: 0.2,
-                                                      color:
-                                                          _editorTheme['root']!
-                                                              .color ??
-                                                          Colors.grey,
+                                                  PreConfig(
+                                                    language:
+                                                        _controller
+                                                            .lspConfig
+                                                            ?.languageId
+                                                            .toLowerCase() ??
+                                                        'dart',
+                                                    theme: _editorTheme,
+                                                    textStyle: TextStyle(
+                                                      fontFamily: 'monospace',
+                                                      fontSize: _hoverDetailsStyle
+                                                          .textStyle
+                                                          .fontSize,
+                                                    ),
+                                                    styleNotMatched: TextStyle(
+                                                      color: _editorTheme['root']!
+                                                          .color,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: _editorTheme['root']!
+                                                          .backgroundColor!,
+                                                      borderRadius:
+                                                          BorderRadius.zero,
+                                                      border: Border.all(
+                                                        width: 0.2,
+                                                        color:
+                                                            _editorTheme['root']!
+                                                                .color ??
+                                                            Colors.grey,
+                                                      ),
                                                     ),
                                                   ),
-                                                ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ),

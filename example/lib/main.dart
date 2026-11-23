@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:example/finder.dart';
 import 'package:path/path.dart' as p;
 import 'package:code_forge/code_forge.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/tokyo-night-dark.dart';

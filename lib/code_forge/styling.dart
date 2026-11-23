@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_highlight/re_highlight.dart';
 
 /// This class provides both styling and functionality configuration for the scrollbar used in the [CodeForge].

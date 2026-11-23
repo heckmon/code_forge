@@ -24,6 +24,7 @@ dependencies:
   vector_math: ^2.2.0
   http: ^1.6.0
   universal_io: ^2.3.1
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:
