@@ -52,19 +52,25 @@
 >flutter build web --wasm
 >```
 
-## What's new in 11.7.0:
-  - FEATURE: Implemented LSP dynamic capability registration in [#115](https://github.com/heckmon/code_forge/pull/115).
-  - FEATURE: Added a flag called `enableDebugLogging` in the  `LspConfig` class to print raw LSP server logs in console for debugging purpose.
-    ```dart
-    final lspConfig = await LspStdioConfig.start(
-      executable: "tsc",
-      args: ['--lsp', '--stdio'],
-      workspacePath: absWorkspacePath,
-      languageId: "javascript",
-      enableDebugLogging: true // <-- Set this true to see lsp server logs.
-    );
-    ```
-  - ENHANCEMENT: Enhanced LSP diagnostics management.
+## What's new in 11.8.0:
+  - FIX: [#119](https://github.com/heckmon/code_forge/issues/119)
+  - FIX: [#118](https://github.com/heckmon/code_forge/issues/118)
+  - FEATURE: 
+    - ### New API! - `bracketPairStyle`:
+      Change the color and styling of the matching bracket bracket pair.
+      ```dart
+      CodeForge(
+        bracketPairStyle: BracketPairStyle(
+          color: Colors.yellow.withAlpha(50),
+          style: PaintingStyle.fill
+        )
+      )
+      ```
+    - ### API Change - `matchHighlightStyle`:
+    The `MatchHighlightStyle? matchHighlightStyle` has been renamed to `MatchedWordStyle? matchedWordStyle`.
+    This API can be used to style the appearance of words matched in the `controller.findWord()`.
+    
+  - ENHANCEMENT: Migrated to material_ui as per the flutter 3.50.0 guide.
 
 
 ## Why CodeForge?
@@ -73,15 +79,15 @@
 
 | Feature | CodeForge | Others |
 |---------|:---------:|:------:|
-| Syntax Highlighting | 180+ languages<br>[Availabe languages](https://github.com/reqable/re-highlight/tree/main/lib/languages) | ✅ |
+| Syntax Highlighting | 180+ languages<br>[Availabe languages](https://github.com/reqable/re-highlight/tree/main/lib/languages) | ✔ |
 | Code Folding | Smart detection |  Limited |
-| Multi cursor | Spawn without limit <br> (Alt + Click) | ❌ |
-| LSP Integration | Full support | ❌ |
-| Indent guide lines | VScode like guide lines | ❌ |
-| RTL Support | For Arabic like langauges| ❌ |
-| Git diff UI | Show additions and deletions | ❌ |
-| AI Completion | Ghost text support | ❌ |
-| Diagnostics | Inline errors | ❌ |
+| Multi cursor | Spawn without limit <br> (Alt + Click) | ✘ |
+| LSP Integration | Full support | ✘ |
+| Indent guide lines | VScode like guide lines | ✘ |
+| RTL Support | For Arabic like langauges| ✘ |
+| Git diff UI | Show additions and deletions | ✘ |
+| AI Completion | Ghost text support | ✘ |
+| Diagnostics | Inline errors | ✘ |
 | Undo/Redo | Smart grouping | Basic |
 | Full Theming |[Available themes](https://github.com/reqable/re-highlight/tree/main/lib/styles) | Limited |
 
@@ -142,7 +148,7 @@ To see working examples of all CodeForge features including AI Code Completion, 
 
 ```yaml
 dependencies:
-  code_forge: ^11.7.1
+  code_forge: ^11.8.0
 ```
 - 2 . Then run:
 
