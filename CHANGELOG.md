@@ -571,3 +571,8 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     This API can be used to style the appearance of words matched in the `controller.findWord()`.
     
   - ENHANCEMENT: Migrated to material_ui as per the flutter 3.50.0 guide.
+
+## 12.0.0
+  - FIX: Block quotes closing issue.
+  - FEATURE: Add background opacity parameter
+  TODO: Resizable overlay

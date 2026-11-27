@@ -5307,17 +5307,28 @@ class CodeForgeController implements DeltaTextInputClient {
 
     if (insertedText.length == 1) {
       final char = insertedText[0];
-      const pairs = {'(': ')', '{': '}', '[': ']', '"': '"', "'": "'"};
+      const pairs = {'(': ')', '{': '}', '[': ']'};
       final openers = pairs.keys.toSet();
       final closers = pairs.values.toSet();
 
-      if (openers.contains(char)) {
+      if(char == "'" || char == '"'){
+        if(
+          offset < _rope.length &&
+          _rope.substring(offset - 1, offset + 1) == '$char$char'
+        ) {
+          _selection = TextSelection.collapsed(offset: offset + 1);
+          notifyListeners();
+          return;
+        } else {
+          actualInsertedText = '$char$char';
+          actualSelection = TextSelection.collapsed(offset: offset + 1);
+        }
+      } else if (openers.contains(char)) {
         final closing = pairs[char]!;
         actualInsertedText = '$char$closing';
         actualSelection = TextSelection.collapsed(offset: offset + 1);
       } else if (closers.contains(char)) {
-        if (offset < _rope.length &&
-            _rope.substring(offset, offset + 1) == char) {
+        if (offset < _rope.length && _rope.substring(offset, offset + 1) == char) {
           _selection = TextSelection.collapsed(offset: offset + 1);
           notifyListeners();
           return;

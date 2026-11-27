@@ -89,6 +89,15 @@ class CodeForge extends StatefulWidget {
   /// ```
   final CodeForgeStyling codeForgeStyling;
 
+  /// The opacity of the background color.<br>
+  /// Falls in the range [0-255].<br>
+  /// 
+  /// - 0 - Fully transparent<br>
+  /// - 255 - Fully opaque<br>
+  /// 
+  /// Defaults to 255.
+  final int backgroundOpacity;
+
   /// The finder controller for managing search functionality.
   ///
   /// If not provided, an internal finder controller will be created.
@@ -257,6 +266,7 @@ class CodeForge extends StatefulWidget {
     this.horizontalScrollController,
     this.verticalScrollPhysics = const ClampingScrollPhysics(),
     this.innerPadding,
+    this.backgroundOpacity = 255,
     this.keyboardShotcuts = const CodeForgeKeyboardShortcuts(),
     this.customCodeSnippets,
     this.customContextMenuItems,
@@ -295,6 +305,7 @@ class CodeForge extends StatefulWidget {
     this.horizontalScrollController,
     this.verticalScrollPhysics = const ClampingScrollPhysics(),
     this.innerPadding,
+    this.backgroundOpacity = 255,
     this.keyboardShotcuts = const CodeForgeKeyboardShortcuts(),
     this.customCodeSnippets,
     this.customContextMenuItems,
@@ -654,8 +665,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                 selection: _controller.selection,
               ),
         );
-      } else if (!_focusNode.hasFocus) {
-        _suggestionNotifier.value = null;
       }
     });
 
@@ -2386,209 +2395,204 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           adjustedTop = position.dy;
         }
 
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned(
-              top: adjustedTop,
-              bottom: adjustedBottom,
-              left: adjustedLeft,
-              width: width,
-              child: MouseRegion(
-                onEnter: (_) => _isHoveringPopup.value = true,
-                onExit: (_) => _isHoveringPopup.value = false,
-                child: ValueListenableBuilder<Map<String, dynamic>?>(
-                  valueListenable: _hoverContentNotifier,
-                  builder: (_, data, _) {
-                    if (data == null) {
-                      return ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: width,
-                          maxHeight: maxHeight,
+        return Positioned(
+          top: adjustedTop,
+          bottom: adjustedBottom,
+          left: adjustedLeft,
+          width: width,
+          child: MouseRegion(
+            onEnter: (_) => _isHoveringPopup.value = true,
+            onExit: (_) => _isHoveringPopup.value = false,
+            child: ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: _hoverContentNotifier,
+              builder: (_, data, _) {
+                if (data == null) {
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: width,
+                      maxHeight: maxHeight,
+                    ),
+                    child: Card(
+                      color: _hoverDetailsStyle.backgroundColor,
+                      shape: _hoverDetailsStyle.shape,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          "Loading...",
+                          style: _hoverDetailsStyle.textStyle,
                         ),
-                        child: Card(
+                      ),
+                    ),
+                  );
+                }
+        
+                final String diagnosticMessage = data['diagnostic'] ?? '';
+                final int severity = data['severity'] ?? 0;
+                final String hoverMessage = data['hover'] ?? '';
+        
+                if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
+                  return SizedBox.shrink();
+                }
+        
+                IconData diagnosticIcon;
+                Color diagnosticColor;
+        
+                switch (severity) {
+                  case 1:
+                    diagnosticIcon = Icons.error_outline;
+                    diagnosticColor = Colors.red;
+                    break;
+                  case 2:
+                    diagnosticIcon = Icons.warning_amber_outlined;
+                    diagnosticColor = Colors.orange;
+                    break;
+                  case 3:
+                    diagnosticIcon = Icons.info_outline;
+                    diagnosticColor = Colors.blue;
+                    break;
+                  case 4:
+                    diagnosticIcon = Icons.lightbulb_outline;
+                    diagnosticColor = Colors.grey;
+                    break;
+                  default:
+                    diagnosticIcon = Icons.info_outline;
+                    diagnosticColor = Colors.grey;
+                }
+        
+                final hoverScrollController = ScrollController();
+                final errorSCrollController = ScrollController();
+        
+                return ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: width,
+                    maxHeight: maxHeight,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (diagnosticMessage.isNotEmpty)
+                        Card(
+                          surfaceTintColor: diagnosticColor,
                           color: _hoverDetailsStyle.backgroundColor,
-                          shape: _hoverDetailsStyle.shape,
+                          shape: BeveledRectangleBorder(
+                            side: BorderSide(
+                              color: diagnosticColor,
+                              width: 0.2,
+                            ),
+                          ),
+                          margin: EdgeInsets.only(
+                            bottom: hoverMessage.isNotEmpty ? 4 : 0,
+                          ),
                           child: Padding(
                             padding: const EdgeInsets.all(8.0),
-                            child: Text(
-                              "Loading...",
-                              style: _hoverDetailsStyle.textStyle,
+                            child: RawScrollbar(
+                              controller: errorSCrollController,
+                              thumbVisibility: true,
+                              thumbColor: _editorTheme['root']!.color!
+                                  .withAlpha(100),
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                controller: errorSCrollController,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      diagnosticIcon,
+                                      color: diagnosticColor,
+                                      size: 16,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      diagnosticMessage,
+                                      style: _hoverDetailsStyle.textStyle,
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      );
-                    }
-
-                    final String diagnosticMessage = data['diagnostic'] ?? '';
-                    final int severity = data['severity'] ?? 0;
-                    final String hoverMessage = data['hover'] ?? '';
-
-                    if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
-                      return SizedBox.shrink();
-                    }
-
-                    IconData diagnosticIcon;
-                    Color diagnosticColor;
-
-                    switch (severity) {
-                      case 1:
-                        diagnosticIcon = Icons.error_outline;
-                        diagnosticColor = Colors.red;
-                        break;
-                      case 2:
-                        diagnosticIcon = Icons.warning_amber_outlined;
-                        diagnosticColor = Colors.orange;
-                        break;
-                      case 3:
-                        diagnosticIcon = Icons.info_outline;
-                        diagnosticColor = Colors.blue;
-                        break;
-                      case 4:
-                        diagnosticIcon = Icons.lightbulb_outline;
-                        diagnosticColor = Colors.grey;
-                        break;
-                      default:
-                        diagnosticIcon = Icons.info_outline;
-                        diagnosticColor = Colors.grey;
-                    }
-
-                    final hoverScrollController = ScrollController();
-                    final errorSCrollController = ScrollController();
-
-                    return ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: width,
-                        maxHeight: maxHeight,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (diagnosticMessage.isNotEmpty)
-                            Card(
-                              surfaceTintColor: diagnosticColor,
-                              color: _hoverDetailsStyle.backgroundColor,
-                              shape: BeveledRectangleBorder(
-                                side: BorderSide(
-                                  color: diagnosticColor,
-                                  width: 0.2,
-                                ),
-                              ),
-                              margin: EdgeInsets.only(
-                                bottom: hoverMessage.isNotEmpty ? 4 : 0,
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: RawScrollbar(
-                                  controller: errorSCrollController,
-                                  thumbVisibility: true,
-                                  thumbColor: _editorTheme['root']!.color!
-                                      .withAlpha(100),
-                                  child: SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    controller: errorSCrollController,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Icon(
-                                          diagnosticIcon,
-                                          color: diagnosticColor,
-                                          size: 16,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          diagnosticMessage,
-                                          style: _hoverDetailsStyle.textStyle,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                          if (hoverMessage.isNotEmpty)
-                            Flexible(
-                              child: Card(
-                                color: _hoverDetailsStyle.backgroundColor,
-                                shape: _hoverDetailsStyle.shape,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: RawScrollbar(
-                                    controller: hoverScrollController,
-                                    thumbVisibility: true,
-                                    thumbColor: _editorTheme['root']!.color!
-                                        .withAlpha(100),
-                                    child: SingleChildScrollView(
-                                      controller: hoverScrollController,
-                                      child: SelectableRegion(
-                                        selectionControls: materialTextSelectionControls,
-                                        contextMenuBuilder: (context, state) {
-                                          return AdaptiveTextSelectionToolbar(
-                                            anchors: state.contextMenuAnchors,
-                                            children: [],
-                                          );
-                                        },
-                                        child: MarkdownBlock(
-                                          selectable: false,
-                                          data: hoverMessage,
-                                          config: MarkdownConfig.darkConfig.copy(
-                                            configs: [
-                                              PConfig(
-                                                textStyle:
-                                                    _hoverDetailsStyle.textStyle,
-                                              ),
-                                              PreConfig(
-                                                language:
-                                                    _controller
-                                                        .lspConfig
-                                                        ?.languageId
-                                                        .toLowerCase() ??
-                                                    "dart",
-                                                theme: _editorTheme,
-                                                textStyle: TextStyle(
-                                                  fontFamily: 'monospace',
-                                                  fontSize: _hoverDetailsStyle
-                                                      .textStyle
-                                                      .fontSize,
-                                                ),
-                                                styleNotMatched: TextStyle(
-                                                  color:
-                                                      _editorTheme['root']!.color,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: _editorTheme['root']!
-                                                      .backgroundColor!,
-                                                  borderRadius: BorderRadius.zero,
-                                                  border: Border.all(
-                                                    width: 0.2,
-                                                    color:
-                                                        _editorTheme['root']!
-                                                            .color ??
-                                                        Colors.grey,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
+        
+                      if (hoverMessage.isNotEmpty)
+                        Flexible(
+                          child: Card(
+                            color: _hoverDetailsStyle.backgroundColor,
+                            shape: _hoverDetailsStyle.shape,
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: RawScrollbar(
+                                controller: hoverScrollController,
+                                thumbVisibility: true,
+                                thumbColor: _editorTheme['root']!.color!
+                                    .withAlpha(100),
+                                child: SingleChildScrollView(
+                                  controller: hoverScrollController,
+                                  child: SelectableRegion(
+                                    selectionControls: materialTextSelectionControls,
+                                    contextMenuBuilder: (context, state) {
+                                      return AdaptiveTextSelectionToolbar(
+                                        anchors: state.contextMenuAnchors,
+                                        children: [],
+                                      );
+                                    },
+                                    child: MarkdownBlock(
+                                      selectable: false,
+                                      data: hoverMessage,
+                                      config: MarkdownConfig.darkConfig.copy(
+                                        configs: [
+                                          PConfig(
+                                            textStyle:
+                                                _hoverDetailsStyle.textStyle,
                                           ),
-                                        ),
+                                          PreConfig(
+                                            language:
+                                                _controller
+                                                    .lspConfig
+                                                    ?.languageId
+                                                    .toLowerCase() ??
+                                                "dart",
+                                            theme: _editorTheme,
+                                            textStyle: TextStyle(
+                                              fontFamily: 'monospace',
+                                              fontSize: _hoverDetailsStyle
+                                                  .textStyle
+                                                  .fontSize,
+                                            ),
+                                            styleNotMatched: TextStyle(
+                                              color:
+                                                  _editorTheme['root']!.color,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _editorTheme['root']!
+                                                  .backgroundColor!,
+                                              borderRadius: BorderRadius.zero,
+                                              border: Border.all(
+                                                width: 0.2,
+                                                color:
+                                                    _editorTheme['root']!
+                                                        .color ??
+                                                    Colors.grey,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
             ),
-          ],
+          ),
         );
       },
     );
@@ -3813,6 +3817,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 diagnosticsNotifier:
                                                     _diagnosticsNotifier,
                                                 isMobile: _isMobile,
+                                                bgOpacity: widget.backgroundOpacity,
                                                 selectionActiveNotifier:
                                                     _selectionActiveNotifier,
                                                 contextMenuOffsetNotifier:
@@ -4680,6 +4685,7 @@ class _CodeField extends LeafRenderObjectWidget {
   final TextStyle? textStyle;
   final bool enableFolding, enableGuideLines, enableGutter, enableGutterDivider;
   final bool enableBracketMatching;
+  final int bgOpacity;
   final GutterStyle gutterStyle;
   final CodeSelectionStyle selectionStyle;
   final BracketPairStyle bracketPairStyle;
@@ -4711,6 +4717,7 @@ class _CodeField extends LeafRenderObjectWidget {
     required this.hscrollController,
     required this.focusNode,
     required this.readOnly,
+    required this.bgOpacity,
     required this.caretBlinkController,
     required this.lineHighlightController,
     required this.enableFolding,
@@ -4767,6 +4774,7 @@ class _CodeField extends LeafRenderObjectWidget {
       hscrollController: hscrollController,
       focusNode: focusNode,
       readOnly: readOnly,
+      bgOpacity: bgOpacity,
       caretBlinkController: caretBlinkController,
       lineHighlightController: lineHighlightController,
       textStyle: textStyle,
@@ -4843,6 +4851,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
   final AnimationController caretBlinkController;
   final AnimationController lineHighlightController;
   final bool isMobile;
+  final int bgOpacity;
   final ValueNotifier<bool> selectionActiveNotifier, isHoveringPopup;
   final ValueNotifier<Offset> contextMenuOffsetNotifier, offsetNotifier;
   final ValueNotifier<(Offset, Map<String, int>)?> hoverNotifier;
@@ -5317,6 +5326,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     required this.caretBlinkController,
     required this.lineHighlightController,
     required this.isMobile,
+    required this.bgOpacity,
     required this.selectionActiveNotifier,
     required this.contextMenuOffsetNotifier,
     required this.offsetNotifier,
@@ -8175,12 +8185,20 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final bufferLineText = controller.bufferLineText;
     final bgColor = editorTheme['root']?.backgroundColor ?? Colors.white;
     final textColor = textStyle?.color ?? editorTheme['root']!.color!;
+    final viewportHeight = vscrollController.position.viewportDimension;
+    final gutterX = isRTL ? offset.dx + size.width - _gutterWidth : offset.dx;
+    final gutterRect = Rect.fromLTWH(
+      gutterX,
+      offset.dy,
+      _gutterWidth,
+      viewportHeight
+    );
 
     canvas.save();
 
     canvas.drawPaint(
       Paint()
-        ..color = bgColor
+        ..color = bgColor.withAlpha(bgOpacity)
         ..style = PaintingStyle.fill,
     );
 
@@ -8370,7 +8388,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       hasActiveFolds,
     );
 
-    if (enableGuideLines && (lastVisibleLine - firstVisibleLine) < 200) {
+    if (enableGuideLines && (lastVisibleLine - firstVisibleLine) < 500) {
       _drawIndentGuides(
         canvas,
         offset,
@@ -8447,51 +8465,49 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           foldRange != null && foldRange.endIndex > foldRange.startIndex;
 
       final textX = isRTL
-          ? (lineWrap
-                ? (innerPadding?.left ?? 0)
-                : (innerPadding?.left ?? 0) +
-                      contentWidth -
-                      (paragraphWidth ?? 0) -
-                      _effectiveHScroll)
-          : _gutterWidth +
-                (innerPadding?.left ?? 0) -
-                (lineWrap ? 0 : _effectiveHScroll);
+        ? (lineWrap
+            ? (innerPadding?.left ?? 0)
+            : (innerPadding?.left ?? 0) +
+                contentWidth -
+                (paragraphWidth ?? 0) -
+                _effectiveHScroll)
+        : _gutterWidth +
+            (innerPadding?.left ?? 0) -
+            (lineWrap ? 0 : _effectiveHScroll);
+
+      Offset textOffset = offset + Offset(
+        textX,
+        (innerPadding?.top ?? 0) +
+          contentTop +
+          visualYOffset -
+          vscrollController.offset,
+      );
 
       canvas.drawParagraph(
         paragraph,
-        offset +
-            Offset(
-              textX,
-              (innerPadding?.top ?? 0) +
-                  contentTop +
-                  visualYOffset -
-                  vscrollController.offset,
-            ),
+        textOffset,
       );
 
       if (isFoldStart && foldRange.isFolded) {
         final foldIndicator = _buildParagraph(' ...');
         final paraWidth = paragraph.longestLine;
         final foldX = isRTL
-            ? (innerPadding?.left ?? 0) +
-                  contentWidth -
-                  paraWidth -
-                  foldIndicator.longestLine -
-                  (lineWrap ? 0 : _effectiveHScroll)
-            : _gutterWidth +
-                  (innerPadding?.left ?? 0) +
-                  paraWidth -
-                  (lineWrap ? 0 : _effectiveHScroll);
+          ? (innerPadding?.left ?? 0) +
+              contentWidth -
+              paraWidth -
+              foldIndicator.longestLine -
+              (lineWrap ? 0 : _effectiveHScroll)
+          : _gutterWidth +
+              (innerPadding?.left ?? 0) +
+              paraWidth -
+              (lineWrap ? 0 : _effectiveHScroll);
+
         canvas.drawParagraph(
           foldIndicator,
-          offset +
-              Offset(
-                foldX,
-                (innerPadding?.top ?? 0) +
-                    contentTop +
-                    visualYOffset -
-                    vscrollController.offset,
-              ),
+          offset + Offset(
+            foldX,
+            textOffset.dy,
+          ),
         );
       }
 
@@ -8569,7 +8585,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         viewBottom,
         lineCount,
         bgColor,
-        textStyle,
+        viewportHeight,
+        gutterX,
+        gutterRect,
+        textStyle
       );
     }
 
@@ -9001,14 +9020,14 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     double viewBottom,
     int lineCount,
     Color bgColor,
+    double viewportHeight,
+    double gutterX,
+    Rect gutterRect,
     TextStyle? gutterTextStyle,
   ) {
-    final viewportHeight = vscrollController.position.viewportDimension;
-
     final gutterBgColor = gutterStyle.backgroundColor ?? bgColor;
-    final gutterX = isRTL ? offset.dx + size.width - _gutterWidth : offset.dx;
     canvas.drawRect(
-      Rect.fromLTWH(gutterX, offset.dy, _gutterWidth, viewportHeight),
+      gutterRect,
       Paint()..color = gutterBgColor,
     );
 
