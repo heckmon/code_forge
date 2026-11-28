@@ -2425,11 +2425,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             return ValueListenableBuilder(
               valueListenable: hoverHeightNotifier,
               builder: (context, hoverHeight, child) {
+                final targetWidth = hoverWidth.$1 ?? width;
                 return Positioned(
                   top: adjustedTop,
                   bottom: adjustedBottom,
                   left: adjustedLeft,
-                  width: (hoverWidth.$1 ?? width).clamp(60, screenWidth - 20),
+                  width: targetWidth.clamp(60, screenWidth - 20),
                   child: MouseRegion(
                     onEnter: (_) => _isHoveringPopup.value = true,
                     onExit: (_) => _isHoveringPopup.value = false,
@@ -2488,10 +2489,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             diagnosticIcon = Icons.info_outline;
                             diagnosticColor = Colors.grey;
                         }
-                
+
+                        final double targetHeight = hoverHeight.$1.clamp(80, maxHeight);
                         return ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxHeight: hoverHeight.$1.clamp(80, maxHeight),
+                            maxHeight: targetHeight,
                           ),
                           child: NotificationListener<ScrollMetricsNotification>(
                             onNotification:(notification) {
@@ -2504,84 +2506,6 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             },
                             child: Stack(
                               children: [
-                                Positioned(
-                                  top: 0,
-                                  bottom: 0,
-                                  right: 0,
-                                  width: 7,
-                                  child: MouseRegion(
-                                    cursor: SystemMouseCursors.resizeLeftRight,
-                                    child: GestureDetector(
-                                      onHorizontalDragUpdate: (details) {
-                                        hoverWidthNotifier.value =  (
-                                          (hoverWidthNotifier.value.$1 ?? width)
-                                          + details.delta.dx,
-                                          true
-                                        );
-                                      },
-                                      onHorizontalDragEnd: (_) {
-                                        hoverWidthNotifier.value = (
-                                          hoverWidthNotifier.value.$1,
-                                          false
-                                        );
-                                      },
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 3),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            borderRadius: .circular(5),
-                                            color: hoverWidth.$2 
-                                              ? Colors.blue
-                                              : Colors.transparent
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                ValueListenableBuilder(
-                                  valueListenable: _hoverScrollNotifier,
-                                  builder: (_, hasScroll, _) {
-                                    if(hasScroll){
-                                      return Positioned(
-                                        bottom: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: 7,
-                                        child: MouseRegion(
-                                          cursor: SystemMouseCursors.resizeUpDown,
-                                          child: GestureDetector(
-                                            onVerticalDragUpdate: (details) {
-                                              hoverHeightNotifier.value =  (
-                                                hoverHeightNotifier.value.$1
-                                                + details.delta.dy,
-                                                true
-                                              );
-                                            },
-                                            onVerticalDragEnd: (_) {
-                                              hoverHeightNotifier.value = (
-                                                hoverHeightNotifier.value.$1,
-                                                false
-                                              );
-                                            },
-                                            child: Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 3),
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  borderRadius: .circular(5),
-                                                  color: hoverHeight.$2
-                                                    ? Colors.blue
-                                                    : Colors.transparent
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                      );
-                                    }
-                                    return SizedBox.shrink();
-                                  }
-                                ),
                                 Column(
                                   mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2704,6 +2628,100 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                         ),
                                       ),
                                   ],
+                                ),
+                                ValueListenableBuilder(
+                                  valueListenable: _hoverScrollNotifier,
+                                  builder: (_, hasScroll, _) {
+                                    if(hasScroll){
+                                      return Positioned(
+                                        bottom: 0,
+                                        left: _isMobile ? 3 * targetWidth / 8 : 0,
+                                        right: _isMobile ? null : 0,
+                                        height: 7,
+                                        width: _isMobile ? targetWidth / 4: null,
+                                        child: MouseRegion(
+                                          cursor: SystemMouseCursors.resizeUpDown,
+                                          child: GestureDetector(
+                                            onVerticalDragUpdate: (details) {
+                                              hoverHeightNotifier.value =  (
+                                                hoverHeightNotifier.value.$1
+                                                + details.delta.dy,
+                                                true
+                                              );
+                                            },
+                                            onVerticalDragEnd: (_) {
+                                              hoverHeightNotifier.value = (
+                                                hoverHeightNotifier.value.$1,
+                                                false
+                                              );
+                                            },
+                                            child: _isMobile ? Container(
+                                              decoration: BoxDecoration(
+                                                  color: _editorTheme['root']?.color ?? Colors.grey,
+                                                  borderRadius: .circular(5)
+                                                )
+                                              ) : Padding(
+                                              padding: const .symmetric(horizontal: 3),
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius: .circular(5),
+                                                  color: hoverHeight.$2
+                                                    ? Colors.blue
+                                                    : Colors.transparent
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      );
+                                    }
+                                    return SizedBox.shrink();
+                                  }
+                                ),
+                                Positioned(
+                                  top: _isMobile
+                                    ? _hoverScrollNotifier.value
+                                      ? 3 * targetHeight / 8
+                                      : 70
+                                    : 0,
+                                  bottom: _isMobile? null : 0,
+                                  right: 0,
+                                  width: 7,
+                                  height: _isMobile ? targetHeight / 4 : null,
+                                  child: MouseRegion(
+                                    cursor: SystemMouseCursors.resizeLeftRight,
+                                    child: GestureDetector(
+                                      onHorizontalDragUpdate: (details) {
+                                        hoverWidthNotifier.value =  (
+                                          (hoverWidthNotifier.value.$1 ?? width)
+                                          + details.delta.dx,
+                                          true
+                                        );
+                                      },
+                                      onHorizontalDragEnd: (_) {
+                                        hoverWidthNotifier.value = (
+                                          hoverWidthNotifier.value.$1,
+                                          false
+                                        );
+                                      },
+                                      child: _isMobile ? Container(
+                                        decoration: BoxDecoration(
+                                          color: _editorTheme['root']?.color ?? Colors.grey,
+                                          borderRadius: .circular(5)
+                                        )
+                                      ) : Padding(
+                                        padding: const .symmetric(vertical: 3),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: .circular(5),
+                                            color: hoverWidth.$2 
+                                              ? Colors.blue
+                                              : Colors.transparent
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),

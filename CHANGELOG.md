@@ -521,14 +521,14 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - FIX: [#112](https://github.com/heckmon/code_forge/issues/112)
   - FEATURE: Added VSCode like minimap
     <p align="left">
-      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="400" width="400"/>
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" height="400" width="400"/>
     </p>
 
 ## 11.6.0
   - ENHANCEMENT: Improved minimap scroll calculation.
   - Minimap enabled by default.
      <p align="left">
-      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" heihght="400" width="400"/>
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/minimap.png" alt="Git diff" height="400" width="400"/>
     </p>
 
 ## 11.6.1
@@ -558,7 +558,7 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - FEATURE: 
     - ### New API! - `bracketPairStyle`:
       Change the color and styling of the matching bracket bracket pair.
-      ```dart
+      ```ts
       CodeForge(
         bracketPairStyle: BracketPairStyle(
           color: Colors.yellow.withAlpha(50),
@@ -573,6 +573,89 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
   - ENHANCEMENT: Migrated to material_ui as per the flutter 3.50.0 guide.
 
 ## 12.0.0
-  - FIX: Block quotes closing issue.
-  - FEATURE: Add background opacity parameter
-  TODO: Resizable hover overlay on mobile
+  - API Changes - To reduce complexity, some similar parameters are grouped together:
+    - All toggle flags are oraganized to a single class called `CodeForgeFeatures`:
+      ```ts
+        // eg:
+        CodeForge(
+          codeForgeFeatures: CodeForgeFeatures(
+            autoFocus: true,
+            lineWrap: false
+          )
+        )
+      ```
+
+      All available flags:
+      ```ts
+      const CodeForgeFeatures({
+        this.readOnly = false,
+        this.autoFocus = false,
+        this.lineWrap = false,
+        this.enableMinimap = true,
+        this.enableFolding = true,
+        this.enableGuideLines = true,
+        this.enableBracketPairMatching = true,
+        this.enableLocalSuggestions = false,
+        this.enableKeyboardSuggestions = true,
+        this.useSpaceAsTab = false,
+        this.enableGutter = true,
+        this.enableGutterDivider = false,
+        this.deleteFoldRangeOnDeletingFirstLine = false,
+      });
+      ```
+    - All styling options are oraganized to a single class called `CodeForgeStyling`:
+      ```ts
+      // eg: 
+      CodeForge(
+        codeForgeStyling: CodeForgeStyling(
+          textStyle: GoogleFonts.jetBrainsMono(),
+
+          bracketPairStyle: BracketPairStyle(
+            style: .fill,
+            color: Colors.yellow.withAlpha(100),
+          ),
+
+          matchedWordStyle: const MatchedWordStyle(
+            currentMatchStyle: TextStyle(
+              backgroundColor: Color(0xFFFFA726),
+            ),
+            otherMatchStyle: TextStyle(
+              backgroundColor: Color(0x55FFFF00),
+            ),
+          ),
+        ),
+      )
+      ```
+
+      All available styling options:
+      ```ts
+        const CodeForgeStyling({
+          this.textStyle,
+          this.minimapStyle,
+          this.selectionStyle,
+          this.gutterStyle,
+          this.ghostTextStyle,
+          this.suggestionStyle,
+          this.hoverDetailsStyle,
+          this.matchedWordStyle,
+          this.bracketPairStyle,
+        });
+      ```
+  - FIX: Block quote pair closing issue.
+  - FIX: [#120](https://github.com/heckmon/code_forge/issues/120)
+  - FEATURE: New `backgroundOpacity` parameter.
+    
+    Set a value between [0 - 255] to set the opacity.<br>
+    - 0: fully transparent
+    - 255: fully opaque.
+    <br>
+    <br>
+     ```ts
+      CodeForge(
+        backgroundOpacity: 200
+      )
+      ```
+  - FEATURE: Resizable hover panel.
+    <p align="left">
+      <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/resize.png" alt="Git diff" height="400" width="400"/>
+    </p>

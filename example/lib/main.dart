@@ -62,6 +62,7 @@ class _MyAppState extends State<MyApp> {
               }
 
               return CodeForge(
+                
                 undoController: undoController,
                 codeForgeStyling: CodeForgeStyling(
                   textStyle: GoogleFonts.jetBrainsMono(),
