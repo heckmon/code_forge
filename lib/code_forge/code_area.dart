@@ -28,12 +28,11 @@ const String _wordCharPattern =
 /// selected. Return the complete custom row content, including any icons,
 /// labels, and details you want to display. The surrounding editor still
 /// provides selection, hover, splash, and tap behavior.
-typedef LspSuggestionBuilder =
-    Widget Function(
-      BuildContext context,
-      LspCompletion suggestion,
-      bool isSelected,
-    );
+typedef LspSuggestionBuilder = Widget Function(
+  BuildContext context,
+  LspCompletion suggestion,
+  bool isSelected,
+);
 
 /// A highly customizable code editor widget for Flutter.
 ///
@@ -91,10 +90,10 @@ class CodeForge extends StatefulWidget {
 
   /// The opacity of the background color.<br>
   /// Falls in the range [0-255].<br>
-  /// 
+  ///
   /// - 0 - Fully transparent<br>
   /// - 255 - Fully opaque<br>
-  /// 
+  ///
   /// Defaults to 255.
   final int backgroundOpacity;
 
@@ -293,7 +292,7 @@ class CodeForge extends StatefulWidget {
       enableGuideLines: false,
       enableFolding: false,
       enableMinimap: false,
-      enableBracketPairMatching: false
+      enableBracketPairMatching: false,
     ),
     this.codeForgeStyling = const CodeForgeStyling(),
     this.filePath,
@@ -443,8 +442,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _selectionActiveNotifier = ValueNotifier(false);
     _isHoveringPopup = ValueNotifier<bool>(false);
     _controller.userCodeAction = _fetchCodeActionsForCurrentPosition;
-    _selectionStyle = widget.codeForgeStyling.selectionStyle ?? CodeSelectionStyle();
-    _bracketPairStyle = widget.codeForgeStyling.bracketPairStyle ?? BracketPairStyle();
+    _selectionStyle =
+        widget.codeForgeStyling.selectionStyle ?? CodeSelectionStyle();
+    _bracketPairStyle =
+        widget.codeForgeStyling.bracketPairStyle ?? BracketPairStyle();
     _undoRedoController = widget.undoController ?? UndoRedoController();
     _fileUrl = widget.fileUrl;
     _syntaxHighlighter = SyntaxHighlighter(
@@ -503,7 +504,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _deleteFoldRangeOnDeletingFirstLine =
         widget.codeForgeFeatures.deleteFoldRangeOnDeletingFirstLine;
     _controller.setUndoController(_undoRedoController);
-    _controller.enableLocalSuggestions = widget.codeForgeFeatures.enableLocalSuggestions;
+    _controller.enableLocalSuggestions =
+        widget.codeForgeFeatures.enableLocalSuggestions;
     _controller.deleteFoldRangeOnDeletingFirstLine =
         _deleteFoldRangeOnDeletingFirstLine;
 
@@ -530,7 +532,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             color: _editorTheme['root']?.backgroundColor ?? Colors.black,
             fontSize: widget.codeForgeStyling.textStyle?.fontSize ?? 14,
             fontFamily: widget.codeForgeStyling.textStyle?.fontFamily,
-            fontWeight: widget.codeForgeStyling.textStyle?.fontWeight ?? FontWeight.bold,
+            fontWeight:
+                widget.codeForgeStyling.textStyle?.fontWeight ??
+                FontWeight.bold,
           ),
         );
 
@@ -584,7 +588,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             color: _editorTheme['root']!.color,
           ),
           detailTextStyle: TextStyle(
-            fontSize: (widget.codeForgeStyling.textStyle?.fontSize ?? 14) * 0.85,
+            fontSize:
+                (widget.codeForgeStyling.textStyle?.fontSize ?? 14) * 0.85,
             color: _editorTheme['root']!.color?.withAlpha(150),
           ),
           typeTextStyle: TextStyle(
@@ -627,7 +632,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           splashColor: Colors.blueAccent.withAlpha(50),
           textStyle: _editorTheme['root']!.copyWith(
             backgroundColor: Colors.transparent,
-            fontWeight: .w500
+            fontWeight: .w500,
           ),
         );
 
@@ -771,17 +776,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       }
     };
     _hoverNotifier.addListener(_hoverListener);
-    _hoverNotifier.addListener((){
+    _hoverNotifier.addListener(() {
       final hoverWidthNotifier = _controller.hoverWidthNotifier;
       final hoverHeightNotifier = _controller.hoverHeightNotifier;
-      hoverWidthNotifier.value = (
-        hoverWidthNotifier.value.$1,
-        false
-      );
-      hoverHeightNotifier.value = (
-        hoverHeightNotifier.value.$1,
-        false
-      );
+      hoverWidthNotifier.value = (hoverWidthNotifier.value.$1, false);
+      hoverHeightNotifier.value = (hoverHeightNotifier.value.$1, false);
     });
 
     _signatureListener = () {
@@ -799,12 +798,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _lspSignatureNotifier.addListener(_signatureListener);
 
     _isHoveringPopupListener = () {
-      if (
-        !_isHoveringPopup.value &&
-        _hoverNotifier.value != null &&
-        !_controller.hoverWidthNotifier.value.$2 &&
-        !_controller.hoverHeightNotifier.value.$2
-      ) {
+      if (!_isHoveringPopup.value &&
+          _hoverNotifier.value != null &&
+          !_controller.hoverWidthNotifier.value.$2 &&
+          !_controller.hoverHeightNotifier.value.$2) {
         _hoverNotifier.value = null;
       }
     };
@@ -1307,7 +1304,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   void didUpdateWidget(covariant CodeForge oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    final newTabSize = widget.tabSize ?? (widget.codeForgeFeatures.useSpaceAsTab ? 2 : 1);
+    final newTabSize =
+        widget.tabSize ?? (widget.codeForgeFeatures.useSpaceAsTab ? 2 : 1);
     _controller.useSpaceAsTab = widget.codeForgeFeatures.useSpaceAsTab;
     _controller.tabSize = newTabSize;
 
@@ -1317,7 +1315,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     if (widget.editorTheme != oldWidget.editorTheme) {
       _editorTheme = widget.editorTheme ?? lightfairTheme;
     }
-    if (widget.codeForgeFeatures.readOnly != oldWidget.codeForgeFeatures.readOnly) {
+    if (widget.codeForgeFeatures.readOnly !=
+        oldWidget.codeForgeFeatures.readOnly) {
       _readOnly = widget.codeForgeFeatures.readOnly;
     }
   }
@@ -1793,9 +1792,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     }
 
     final lineText = text.substring(lineStart, caret);
-    final wordMatches = RegExp(
-      '$_wordCharPattern+|[^$_wordCharPattern\\s]+',
-    ).allMatches(lineText).toList();
+    final wordMatches = RegExp('$_wordCharPattern+|[^$_wordCharPattern\\s]+')
+        .allMatches(lineText)
+        .toList();
 
     int newOffset = lineStart;
     for (final match in wordMatches) {
@@ -1941,7 +1940,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
             } else {
               top = caret.dy + fontSize + 10;
             }
-            
+
             return ValueListenableBuilder(
               valueListenable: _controller.selectedSuggestionNotifier,
               builder: (context, selected, child) {
@@ -2051,7 +2050,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     }
                                   }
                                 } else if ((item is! LspCompletion &&
-                                        widget.codeForgeFeatures.enableLocalSuggestions) &&
+                                        widget
+                                            .codeForgeFeatures
+                                            .enableLocalSuggestions) &&
                                     (indx == _sugSelIndex ||
                                         (_isMobile && _isMobileSuggActive))) {
                                   if (_selectedSuggestionMd != null) {
@@ -2308,7 +2309,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                 child: SingleChildScrollView(
                                   controller: completionScrlCtrl,
                                   child: SelectableRegion(
-                                    selectionControls: materialTextSelectionControls,
+                                    selectionControls:
+                                        materialTextSelectionControls,
                                     contextMenuBuilder: (context, state) {
                                       return AdaptiveTextSelectionToolbar(
                                         anchors: state.contextMenuAnchors,
@@ -2326,7 +2328,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                           ),
                                           PreConfig(
                                             language:
-                                                _controller.lspConfig?.languageId
+                                                _controller
+                                                    .lspConfig
+                                                    ?.languageId
                                                     .toLowerCase() ??
                                                 'dart',
                                             theme: _editorTheme,
@@ -2336,7 +2340,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                   .fontSize,
                                             ),
                                             styleNotMatched: TextStyle(
-                                              color: _editorTheme['root']!.color,
+                                              color:
+                                                  _editorTheme['root']!.color,
                                             ),
                                             decoration: BoxDecoration(
                                               color: _editorTheme['root']!
@@ -2345,7 +2350,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                               border: Border.all(
                                                 width: 0.2,
                                                 color:
-                                                    _editorTheme['root']!.color ??
+                                                    _editorTheme['root']!
+                                                        .color ??
                                                     Colors.grey,
                                               ),
                                             ),
@@ -2456,18 +2462,19 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             ),
                           );
                         }
-                
-                        final String diagnosticMessage = data['diagnostic'] ?? '';
+
+                        final String diagnosticMessage =
+                            data['diagnostic'] ?? '';
                         final int severity = data['severity'] ?? 0;
                         final String hoverMessage = data['hover'] ?? '';
-                
+
                         if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
                           return SizedBox.shrink();
                         }
-                
+
                         IconData diagnosticIcon;
                         Color diagnosticColor;
-                
+
                         switch (severity) {
                           case 1:
                             diagnosticIcon = Icons.error_outline;
@@ -2490,16 +2497,18 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             diagnosticColor = Colors.grey;
                         }
 
-                        final double targetHeight = hoverHeight.$1.clamp(80, maxHeight);
+                        final double targetHeight = hoverHeight.$1.clamp(
+                          80,
+                          maxHeight,
+                        );
                         return ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight: targetHeight,
-                          ),
+                          constraints: BoxConstraints(maxHeight: targetHeight),
                           child: NotificationListener<ScrollMetricsNotification>(
-                            onNotification:(notification) {
-                              final extent = notification.metrics.maxScrollExtent;
-                              if(_hoverScrollNotifier.value) return false;
-                              if(extent > 0) {
+                            onNotification: (notification) {
+                              final extent =
+                                  notification.metrics.maxScrollExtent;
+                              if (_hoverScrollNotifier.value) return false;
+                              if (extent > 0) {
                                 _hoverScrollNotifier.value = true;
                               }
                               return false;
@@ -2513,7 +2522,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     if (diagnosticMessage.isNotEmpty)
                                       Card(
                                         surfaceTintColor: diagnosticColor,
-                                        color: _hoverDetailsStyle.backgroundColor,
+                                        color:
+                                            _hoverDetailsStyle.backgroundColor,
                                         shape: BeveledRectangleBorder(
                                           side: BorderSide(
                                             color: diagnosticColor,
@@ -2521,14 +2531,17 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                           ),
                                         ),
                                         margin: EdgeInsets.only(
-                                          bottom: hoverMessage.isNotEmpty ? 4 : 0,
+                                          bottom: hoverMessage.isNotEmpty
+                                              ? 4
+                                              : 0,
                                         ),
                                         child: Padding(
                                           padding: const EdgeInsets.all(8.0),
                                           child: RawScrollbar(
                                             controller: errorSCrollController,
                                             thumbVisibility: true,
-                                            thumbColor: _editorTheme['root']!.color!
+                                            thumbColor: _editorTheme['root']!
+                                                .color!
                                                 .withAlpha(100),
                                             child: SingleChildScrollView(
                                               scrollDirection: Axis.horizontal,
@@ -2546,7 +2559,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                   SizedBox(width: 8),
                                                   Text(
                                                     diagnosticMessage,
-                                                    style: _hoverDetailsStyle.textStyle,
+                                                    style: _hoverDetailsStyle
+                                                        .textStyle,
                                                   ),
                                                 ],
                                               ),
@@ -2554,26 +2568,31 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                           ),
                                         ),
                                       ),
-                                        
+
                                     if (hoverMessage.isNotEmpty)
                                       Flexible(
                                         child: Card(
-                                          color: _hoverDetailsStyle.backgroundColor,
+                                          color: _hoverDetailsStyle
+                                              .backgroundColor,
                                           shape: _hoverDetailsStyle.shape,
                                           child: Padding(
                                             padding: const EdgeInsets.all(8.0),
                                             child: RawScrollbar(
                                               controller: hoverScrollController,
                                               thumbVisibility: true,
-                                              thumbColor: _editorTheme['root']!.color!
+                                              thumbColor: _editorTheme['root']!
+                                                  .color!
                                                   .withAlpha(100),
                                               child: SingleChildScrollView(
-                                                controller: hoverScrollController,
+                                                controller:
+                                                    hoverScrollController,
                                                 child: SelectableRegion(
-                                                  selectionControls: materialTextSelectionControls,
+                                                  selectionControls:
+                                                      materialTextSelectionControls,
                                                   contextMenuBuilder: (_, state) {
                                                     return AdaptiveTextSelectionToolbar(
-                                                      anchors: state.contextMenuAnchors,
+                                                      anchors: state
+                                                          .contextMenuAnchors,
                                                       children: [],
                                                     );
                                                   },
@@ -2584,7 +2603,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                       configs: [
                                                         PConfig(
                                                           textStyle:
-                                                              _hoverDetailsStyle.textStyle,
+                                                              _hoverDetailsStyle
+                                                                  .textStyle,
                                                         ),
                                                         PreConfig(
                                                           language:
@@ -2596,19 +2616,25 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                           theme: _editorTheme,
                                                           textStyle: TextStyle(
                                                             fontWeight: .w600,
-                                                            fontFamily: 'monospace',
-                                                            fontSize: _hoverDetailsStyle
-                                                                .textStyle
-                                                                .fontSize,
+                                                            fontFamily:
+                                                                'monospace',
+                                                            fontSize:
+                                                                _hoverDetailsStyle
+                                                                    .textStyle
+                                                                    .fontSize,
                                                           ),
-                                                          styleNotMatched: TextStyle(
-                                                            color:
-                                                                _editorTheme['root']!.color,
-                                                          ),
+                                                          styleNotMatched:
+                                                              TextStyle(
+                                                                color:
+                                                                    _editorTheme['root']!
+                                                                        .color,
+                                                              ),
                                                           decoration: BoxDecoration(
                                                             color: _editorTheme['root']!
                                                                 .backgroundColor!,
-                                                            borderRadius: BorderRadius.zero,
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .zero,
                                                             border: Border.all(
                                                               width: 0.2,
                                                               color:
@@ -2632,59 +2658,76 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                 ValueListenableBuilder(
                                   valueListenable: _hoverScrollNotifier,
                                   builder: (_, hasScroll, _) {
-                                    if(hasScroll){
+                                    if (hasScroll) {
                                       return Positioned(
                                         bottom: 0,
-                                        left: _isMobile ? 3 * targetWidth / 8 : 0,
+                                        left: _isMobile
+                                            ? 3 * targetWidth / 8
+                                            : 0,
                                         right: _isMobile ? null : 0,
                                         height: 7,
-                                        width: _isMobile ? targetWidth / 4: null,
+                                        width: _isMobile
+                                            ? targetWidth / 4
+                                            : null,
                                         child: MouseRegion(
-                                          cursor: SystemMouseCursors.resizeUpDown,
+                                          cursor:
+                                              SystemMouseCursors.resizeUpDown,
                                           child: GestureDetector(
                                             onVerticalDragUpdate: (details) {
-                                              hoverHeightNotifier.value =  (
-                                                hoverHeightNotifier.value.$1
-                                                + details.delta.dy,
-                                                true
+                                              hoverHeightNotifier.value = (
+                                                hoverHeightNotifier.value.$1 +
+                                                    details.delta.dy,
+                                                true,
                                               );
                                             },
                                             onVerticalDragEnd: (_) {
                                               hoverHeightNotifier.value = (
                                                 hoverHeightNotifier.value.$1,
-                                                false
+                                                false,
                                               );
                                             },
-                                            child: _isMobile ? Container(
-                                              decoration: BoxDecoration(
-                                                  color: _editorTheme['root']?.color ?? Colors.grey,
-                                                  borderRadius: .circular(5)
-                                                )
-                                              ) : Padding(
-                                              padding: const .symmetric(horizontal: 3),
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  borderRadius: .circular(5),
-                                                  color: hoverHeight.$2
-                                                    ? Colors.blue
-                                                    : Colors.transparent
-                                                ),
-                                              ),
-                                            ),
+                                            child: _isMobile
+                                                ? Container(
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          _editorTheme['root']
+                                                              ?.color ??
+                                                          Colors.grey,
+                                                      borderRadius: .circular(
+                                                        5,
+                                                      ),
+                                                    ),
+                                                  )
+                                                : Padding(
+                                                    padding: const .symmetric(
+                                                      horizontal: 3,
+                                                    ),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        borderRadius: .circular(
+                                                          5,
+                                                        ),
+                                                        color: hoverHeight.$2
+                                                            ? Colors.blue
+                                                            : Colors
+                                                                  .transparent,
+                                                      ),
+                                                    ),
+                                                  ),
                                           ),
-                                        )
+                                        ),
                                       );
                                     }
                                     return SizedBox.shrink();
-                                  }
+                                  },
                                 ),
                                 Positioned(
                                   top: _isMobile
-                                    ? _hoverScrollNotifier.value
-                                      ? 3 * targetHeight / 8
-                                      : 70
-                                    : 0,
-                                  bottom: _isMobile? null : 0,
+                                      ? _hoverScrollNotifier.value
+                                            ? 3 * targetHeight / 8
+                                            : 70
+                                      : 0,
+                                  bottom: _isMobile ? null : 0,
                                   right: 0,
                                   width: 7,
                                   height: _isMobile ? targetHeight / 4 : null,
@@ -2692,34 +2735,42 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     cursor: SystemMouseCursors.resizeLeftRight,
                                     child: GestureDetector(
                                       onHorizontalDragUpdate: (details) {
-                                        hoverWidthNotifier.value =  (
-                                          (hoverWidthNotifier.value.$1 ?? width)
-                                          + details.delta.dx,
-                                          true
+                                        hoverWidthNotifier.value = (
+                                          (hoverWidthNotifier.value.$1 ??
+                                                  width) +
+                                              details.delta.dx,
+                                          true,
                                         );
                                       },
                                       onHorizontalDragEnd: (_) {
                                         hoverWidthNotifier.value = (
                                           hoverWidthNotifier.value.$1,
-                                          false
+                                          false,
                                         );
                                       },
-                                      child: _isMobile ? Container(
-                                        decoration: BoxDecoration(
-                                          color: _editorTheme['root']?.color ?? Colors.grey,
-                                          borderRadius: .circular(5)
-                                        )
-                                      ) : Padding(
-                                        padding: const .symmetric(vertical: 3),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            borderRadius: .circular(5),
-                                            color: hoverWidth.$2 
-                                              ? Colors.blue
-                                              : Colors.transparent
-                                          ),
-                                        ),
-                                      ),
+                                      child: _isMobile
+                                          ? Container(
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    _editorTheme['root']
+                                                        ?.color ??
+                                                    Colors.grey,
+                                                borderRadius: .circular(5),
+                                              ),
+                                            )
+                                          : Padding(
+                                              padding: const .symmetric(
+                                                vertical: 3,
+                                              ),
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius: .circular(5),
+                                                  color: hoverWidth.$2
+                                                      ? Colors.blue
+                                                      : Colors.transparent,
+                                                ),
+                                              ),
+                                            ),
                                     ),
                                   ),
                                 ),
@@ -2731,9 +2782,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                     ),
                   ),
                 );
-              }
+              },
             );
-          }
+          },
         );
       },
     );
@@ -2796,8 +2847,11 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             color:
                                 _editorTheme['root']?.backgroundColor ??
                                 Colors.black,
-                            fontSize: widget.codeForgeStyling.textStyle?.fontSize ?? 14,
-                            fontFamily: widget.codeForgeStyling.textStyle?.fontFamily,
+                            fontSize:
+                                widget.codeForgeStyling.textStyle?.fontSize ??
+                                14,
+                            fontFamily:
+                                widget.codeForgeStyling.textStyle?.fontFamily,
                           ),
                       child: Transform(
                         alignment: Alignment.center,
@@ -2866,7 +2920,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                             ? AxisDirection.left
                                             : AxisDirection.right,
                                         mainAxis: Axis.vertical,
-                                        lineWrap: widget.codeForgeFeatures.lineWrap,
+                                        lineWrap:
+                                            widget.codeForgeFeatures.lineWrap,
                                         delegate: TwoDimensionalChildBuilderDelegate(
                                           maxXIndex: 0,
                                           maxYIndex: 0,
@@ -3941,16 +3996,24 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     _caretBlinkController,
                                                 lineHighlightController:
                                                     _lineHighlightController,
-                                                textStyle: widget.codeForgeStyling.textStyle,
-                                                enableFolding:
-                                                    widget.codeForgeFeatures.enableFolding,
-                                                enableBracketMatching: widget.codeForgeFeatures.enableBracketPairMatching,
-                                                enableGuideLines:
-                                                    widget.codeForgeFeatures.enableGuideLines,
-                                                enableGutter:
-                                                    widget.codeForgeFeatures.enableGutter,
-                                                enableGutterDivider:
-                                                    widget.codeForgeFeatures.enableGutterDivider,
+                                                textStyle: widget
+                                                    .codeForgeStyling
+                                                    .textStyle,
+                                                enableFolding: widget
+                                                    .codeForgeFeatures
+                                                    .enableFolding,
+                                                enableBracketMatching: widget
+                                                    .codeForgeFeatures
+                                                    .enableBracketPairMatching,
+                                                enableGuideLines: widget
+                                                    .codeForgeFeatures
+                                                    .enableGuideLines,
+                                                enableGutter: widget
+                                                    .codeForgeFeatures
+                                                    .enableGutter,
+                                                enableGutterDivider: widget
+                                                    .codeForgeFeatures
+                                                    .enableGutterDivider,
                                                 gutterStyle: _gutterStyle,
                                                 selectionStyle: _selectionStyle,
                                                 bracketPairStyle:
@@ -3958,7 +4021,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 diagnosticsNotifier:
                                                     _diagnosticsNotifier,
                                                 isMobile: _isMobile,
-                                                bgOpacity: widget.backgroundOpacity,
+                                                bgOpacity:
+                                                    widget.backgroundOpacity,
                                                 selectionActiveNotifier:
                                                     _selectionActiveNotifier,
                                                 contextMenuOffsetNotifier:
@@ -3966,7 +4030,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 hoverNotifier: _hoverNotifier,
                                                 hoverContentNotifier:
                                                     _hoverContentNotifier,
-                                                lineWrap: widget.codeForgeFeatures.lineWrap,
+                                                lineWrap: widget
+                                                    .codeForgeFeatures
+                                                    .lineWrap,
                                                 offsetNotifier: _offsetNotifier,
                                                 aiNotifier: _aiNotifier,
                                                 aiOffsetNotifier:
@@ -3975,10 +4041,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     _isHoveringPopup,
                                                 suggestionNotifier:
                                                     _suggestionNotifier,
-                                                ghostTextStyle:
-                                                    widget.codeForgeStyling.ghostTextStyle,
-                                                matchedWordStyle:
-                                                    widget.codeForgeStyling.matchedWordStyle,
+                                                ghostTextStyle: widget
+                                                    .codeForgeStyling
+                                                    .ghostTextStyle,
+                                                matchedWordStyle: widget
+                                                    .codeForgeStyling
+                                                    .matchedWordStyle,
                                                 lspActionNotifier:
                                                     _lspActionNotifier,
                                                 lspActionOffsetNotifier:
@@ -4028,7 +4096,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                               ? screenWidth * 0.63
                               : 420.0;
                           final maxBoxHeight = 400.0;
-                          final fontSize = widget.codeForgeStyling.textStyle?.fontSize ?? 14;
+                          final fontSize =
+                              widget.codeForgeStyling.textStyle?.fontSize ?? 14;
 
                           double adjustedLeft = offset.dx;
                           if (adjustedLeft + desiredWidth > screenWidth) {
@@ -4120,7 +4189,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                   style: TextStyle(
                                                     fontSize:
                                                         (widget
-                                                                .codeForgeStyling.textStyle
+                                                                .codeForgeStyling
+                                                                .textStyle
                                                                 ?.fontSize ??
                                                             15) +
                                                         1.75,
@@ -4160,7 +4230,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     style: TextStyle(
                                                       fontSize:
                                                           (widget
-                                                                  .codeForgeStyling.textStyle
+                                                                  .codeForgeStyling
+                                                                  .textStyle
                                                                   ?.fontSize ??
                                                               15) +
                                                           1.75,
@@ -4189,7 +4260,8 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                 style: TextStyle(
                                                   fontSize:
                                                       (widget
-                                                             .codeForgeStyling.textStyle
+                                                              .codeForgeStyling
+                                                              .textStyle
                                                               ?.fontSize ??
                                                           15) +
                                                       1.75,
@@ -4212,10 +4284,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                             left: 6.5,
                                           ),
                                           child: SelectableRegion(
-                                            selectionControls: materialTextSelectionControls,
+                                            selectionControls:
+                                                materialTextSelectionControls,
                                             contextMenuBuilder: (context, state) {
                                               return AdaptiveTextSelectionToolbar(
-                                                anchors: state.contextMenuAnchors,
+                                                anchors:
+                                                    state.contextMenuAnchors,
                                                 children: [],
                                               );
                                             },
@@ -4225,8 +4299,9 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                               config: MarkdownConfig.darkConfig.copy(
                                                 configs: [
                                                   PConfig(
-                                                    textStyle: _hoverDetailsStyle
-                                                        .textStyle,
+                                                    textStyle:
+                                                        _hoverDetailsStyle
+                                                            .textStyle,
                                                   ),
                                                   PreConfig(
                                                     language:
@@ -4238,17 +4313,20 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                                     theme: _editorTheme,
                                                     textStyle: TextStyle(
                                                       fontFamily: 'monospace',
-                                                      fontSize: _hoverDetailsStyle
-                                                          .textStyle
-                                                          .fontSize,
+                                                      fontSize:
+                                                          _hoverDetailsStyle
+                                                              .textStyle
+                                                              .fontSize,
                                                     ),
                                                     styleNotMatched: TextStyle(
-                                                      color: _editorTheme['root']!
-                                                          .color,
+                                                      color:
+                                                          _editorTheme['root']!
+                                                              .color,
                                                     ),
                                                     decoration: BoxDecoration(
-                                                      color: _editorTheme['root']!
-                                                          .backgroundColor!,
+                                                      color:
+                                                          _editorTheme['root']!
+                                                              .backgroundColor!,
                                                       borderRadius:
                                                           BorderRadius.zero,
                                                       border: Border.all(
@@ -4298,13 +4376,21 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                           ? Positioned(
                               top:
                                   offvalue.dy +
-                                  (widget.codeForgeStyling.textStyle?.fontSize ?? 14) *
+                                  (widget
+                                              .codeForgeStyling
+                                              .textStyle
+                                              ?.fontSize ??
+                                          14) *
                                       _aiNotifier.value!.split('\n').length +
                                   15,
                               left:
                                   offvalue.dx +
                                   (_aiNotifier.value!.split('\n')[0].length *
-                                      (widget.codeForgeStyling.textStyle?.fontSize ?? 14) /
+                                      (widget
+                                              .codeForgeStyling
+                                              .textStyle
+                                              ?.fontSize ??
+                                          14) /
                                       2),
                               child: Row(
                                 children: [
@@ -4382,7 +4468,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                             ? screenWidth * 0.63
                             : screenWidth * 0.3,
                         top:
-                            offset.dy + (widget.codeForgeStyling.textStyle?.fontSize ?? 14) + 10,
+                            offset.dy +
+                            (widget.codeForgeStyling.textStyle?.fontSize ??
+                                14) +
+                            10,
                         left: offset.dx,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
@@ -4573,28 +4662,44 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                   physics: NeverScrollableScrollPhysics(),
                                   child: CustomPaint(
                                     size: Size(
-                                      widget.codeForgeStyling.minimapStyle?.width ??
+                                      widget
+                                              .codeForgeStyling
+                                              .minimapStyle
+                                              ?.width ??
                                           constraints.maxWidth *
                                               (_isMobile ? 0.15 : 0.065),
                                       _controller.lineCount *
-                                          (widget.codeForgeStyling.minimapStyle?.lineHeight ??
+                                          (widget
+                                                  .codeForgeStyling
+                                                  .minimapStyle
+                                                  ?.lineHeight ??
                                               3),
                                     ),
                                     painter: MiniMapPainter(
                                       fontSize:
-                                          widget.codeForgeStyling.minimapStyle?.fontSize ?? 2.5,
+                                          widget
+                                              .codeForgeStyling
+                                              .minimapStyle
+                                              ?.fontSize ??
+                                          2.5,
                                       lineHeight:
-                                          widget.codeForgeStyling.minimapStyle?.lineHeight ?? 3,
+                                          widget
+                                              .codeForgeStyling
+                                              .minimapStyle
+                                              ?.lineHeight ??
+                                          3,
                                       controller: _controller,
                                       bgColor:
                                           widget
-                                              .codeForgeStyling.minimapStyle
+                                              .codeForgeStyling
+                                              .minimapStyle
                                               ?.backgroundColor ??
                                           (_editorTheme['root']!.color ??
                                                   Colors.grey[400]!)
                                               .withAlpha(6),
                                       scrollCtrl: _minimapScrollCtrl,
-                                      lineWrap: widget.codeForgeFeatures.lineWrap,
+                                      lineWrap:
+                                          widget.codeForgeFeatures.lineWrap,
                                       highlighter: _syntaxHighlighter,
                                       textDirection: widget.textDirection,
                                       selectionColor:
@@ -4625,7 +4730,10 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                     return Positioned(
                                       top: miniMapVal.$1 * track,
                                       width:
-                                          widget.codeForgeStyling.minimapStyle?.width ??
+                                          widget
+                                              .codeForgeStyling
+                                              .minimapStyle
+                                              ?.width ??
                                           constraints.maxWidth *
                                               (_isMobile ? 0.15 : 0.065),
                                       height: overlayHeight,
@@ -4673,10 +4781,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                                               color:
                                                   (_minimapOverlayHover
                                                       ? widget
-                                                            .codeForgeStyling.minimapStyle
+                                                            .codeForgeStyling
+                                                            .minimapStyle
                                                             ?.overlayHoverColor
                                                       : widget
-                                                            .codeForgeStyling.minimapStyle
+                                                            .codeForgeStyling
+                                                            .minimapStyle
                                                             ?.overlayColor) ??
                                                   (_editorTheme['root']!
                                                               .color ??
@@ -7039,9 +7149,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
   String? _extractOpeningTagName(String lineText) {
     final trimmed = lineText.trimRight();
-    final openTagMatch = RegExp(
-      r'<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>$',
-    ).firstMatch(trimmed);
+    final openTagMatch = RegExp(r'<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>$')
+        .firstMatch(trimmed);
     if (openTagMatch != null) {
       final tagName = openTagMatch.group(1);
       if (!trimmed.endsWith('/>') && !trimmed.endsWith('-->')) {
@@ -8004,9 +8113,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       return 1;
     }
 
-    final lineIndex = _findVisibleLineByYPosition(
-      scrollOffset,
-    ).clamp(0, controller.lineCount - 1);
+    final lineIndex = _findVisibleLineByYPosition(scrollOffset)
+        .clamp(0, controller.lineCount - 1);
     return lineIndex + 1;
   }
 
@@ -8332,7 +8440,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
       gutterX,
       offset.dy,
       _gutterWidth,
-      viewportHeight
+      viewportHeight,
     );
 
     canvas.save();
@@ -8351,12 +8459,10 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
 
     if (!lineWrap && !hasActiveFolds) {
       if (_virtualRemovedTotalLineCount > 0) {
-        firstVisibleLine = _findVisibleLineByYPosition(
-          viewTop,
-        ).clamp(0, lineCount - 1);
-        lastVisibleLine = _findVisibleLineByYPosition(
-          viewBottom,
-        ).clamp(0, lineCount - 1);
+        firstVisibleLine = _findVisibleLineByYPosition(viewTop)
+            .clamp(0, lineCount - 1);
+        lastVisibleLine = _findVisibleLineByYPosition(viewBottom)
+            .clamp(0, lineCount - 1);
         firstVisibleLineY = firstVisibleLine * _lineHeight;
       } else {
         final frame = _layoutMap.buildViewportFrame(
@@ -8606,49 +8712,45 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
           foldRange != null && foldRange.endIndex > foldRange.startIndex;
 
       final textX = isRTL
-        ? (lineWrap
-            ? (innerPadding?.left ?? 0)
-            : (innerPadding?.left ?? 0) +
-                contentWidth -
-                (paragraphWidth ?? 0) -
-                _effectiveHScroll)
-        : _gutterWidth +
-            (innerPadding?.left ?? 0) -
-            (lineWrap ? 0 : _effectiveHScroll);
+          ? (lineWrap
+                ? (innerPadding?.left ?? 0)
+                : (innerPadding?.left ?? 0) +
+                      contentWidth -
+                      (paragraphWidth ?? 0) -
+                      _effectiveHScroll)
+          : _gutterWidth +
+                (innerPadding?.left ?? 0) -
+                (lineWrap ? 0 : _effectiveHScroll);
 
-      Offset textOffset = offset + Offset(
-        textX,
-        (innerPadding?.top ?? 0) +
-          contentTop +
-          visualYOffset -
-          vscrollController.offset,
-      );
+      Offset textOffset =
+          offset +
+          Offset(
+            textX,
+            (innerPadding?.top ?? 0) +
+                contentTop +
+                visualYOffset -
+                vscrollController.offset,
+          );
 
-      canvas.drawParagraph(
-        paragraph,
-        textOffset,
-      );
+      canvas.drawParagraph(paragraph, textOffset);
 
       if (isFoldStart && foldRange.isFolded) {
         final foldIndicator = _buildParagraph(' ...');
         final paraWidth = paragraph.longestLine;
         final foldX = isRTL
-          ? (innerPadding?.left ?? 0) +
-              contentWidth -
-              paraWidth -
-              foldIndicator.longestLine -
-              (lineWrap ? 0 : _effectiveHScroll)
-          : _gutterWidth +
-              (innerPadding?.left ?? 0) +
-              paraWidth -
-              (lineWrap ? 0 : _effectiveHScroll);
+            ? (innerPadding?.left ?? 0) +
+                  contentWidth -
+                  paraWidth -
+                  foldIndicator.longestLine -
+                  (lineWrap ? 0 : _effectiveHScroll)
+            : _gutterWidth +
+                  (innerPadding?.left ?? 0) +
+                  paraWidth -
+                  (lineWrap ? 0 : _effectiveHScroll);
 
         canvas.drawParagraph(
           foldIndicator,
-          offset + Offset(
-            foldX,
-            textOffset.dy,
-          ),
+          offset + Offset(foldX, textOffset.dy),
         );
       }
 
@@ -8729,7 +8831,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
         viewportHeight,
         gutterX,
         gutterRect,
-        textStyle
+        textStyle,
       );
     }
 
@@ -9167,10 +9269,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     TextStyle? gutterTextStyle,
   ) {
     final gutterBgColor = gutterStyle.backgroundColor ?? bgColor;
-    canvas.drawRect(
-      gutterRect,
-      Paint()..color = gutterBgColor,
-    );
+    canvas.drawRect(gutterRect, Paint()..color = gutterBgColor);
 
     if (enableGutterDivider) {
       final dividerPaint = Paint()
@@ -9246,9 +9345,8 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     final errorColor = gutterStyle.errorLineNumberColor;
     final warningColor = gutterStyle.warningLineNumberColor;
 
-    final firstVisibleLine = _findVisibleLineByYPosition(
-      viewTop,
-    ).clamp(0, lineCount - 1);
+    final firstVisibleLine = _findVisibleLineByYPosition(viewTop)
+        .clamp(0, lineCount - 1);
     final firstVisibleLineY = _getLineYOffset(
       firstVisibleLine,
       _hasActiveFolds,

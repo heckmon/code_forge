@@ -27,7 +27,7 @@ class _MyAppState extends State<MyApp> {
   Future<LspConfig> getLsp() async {
     final absWorkspacePath = p.join(Directory.current.path, "lib");
     return await LspStdioConfig.start(
-      executable: "/home/athul/flutter/flutter/bin//dart",
+      executable: "dart",
       args: ["language-server", "--protocol=lsp"],
       workspacePath: absWorkspacePath,
       languageId: "dart",
@@ -62,7 +62,6 @@ class _MyAppState extends State<MyApp> {
               }
 
               return CodeForge(
-                
                 undoController: undoController,
                 codeForgeStyling: CodeForgeStyling(
                   textStyle: GoogleFonts.jetBrainsMono(),

@@ -587,11 +587,17 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Used internally by the [CodeForge] widget. Use the `controller.hoverPanelWidth`
   /// getter to access the hover panel width.
-  final ValueNotifier<(double?, bool)> hoverWidthNotifier = ValueNotifier((null, false));
+  final ValueNotifier<(double?, bool)> hoverWidthNotifier = ValueNotifier((
+    null,
+    false,
+  ));
 
   /// Used internally by the [CodeForge] widget. Use the `controller.hoverPanelHeight`
   /// getter to access the hover panel height.
-  final ValueNotifier<(double, bool)> hoverHeightNotifier = ValueNotifier((300, false));
+  final ValueNotifier<(double, bool)> hoverHeightNotifier = ValueNotifier((
+    300,
+    false,
+  ));
 
   /// Whether the suggestions/completions are enabled or not.
   /// Includes both LSP and local word match suggestions.
@@ -649,17 +655,17 @@ class CodeForgeController implements DeltaTextInputClient {
   String? get openedFile => _openedFile;
 
   /// The current width of the LSP hover panel. Changes if the user resizes the hover panel.
-  /// 
+  ///
   /// if this getter returns `null`, which means the user hasn't changed the width. In that case,
   /// width falls back to default value and which is calculated using the below method:
-  /// 
+  ///
   /// `width = _isMobile ? screenWidth * 0.63 : screenWidth * 0.3;`
-  /// 
+  ///
   /// /// Use the setter with the same name to set custom width.
   double? get hoverPanelWidth => hoverWidthNotifier.value.$1;
 
   /// The current height of the LSP hover panel. Changes if the user resizes the hover panel.
-  /// 
+  ///
   /// Use the setter with the same name to set custom height.
   double get hoverPanelHeight => hoverHeightNotifier.value.$1;
 
@@ -2392,18 +2398,12 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Set custom height to the LSP hover overlay panel.
   set hoverPanelHeight(double height) {
-    hoverHeightNotifier.value = (
-      height,
-      hoverHeightNotifier.value.$2
-    );
+    hoverHeightNotifier.value = (height, hoverHeightNotifier.value.$2);
   }
 
   /// Set custom width to the LSP hover overlay panel.
   set hoverPanelWidth(double width) {
-    hoverWidthNotifier.value = (
-      width,
-      hoverWidthNotifier.value.$2
-    );
+    hoverWidthNotifier.value = (width, hoverWidthNotifier.value.$2);
   }
 
   /// Updates selection and syncs to text input connection for keyboard navigation.
@@ -5350,11 +5350,9 @@ class CodeForgeController implements DeltaTextInputClient {
       final openers = pairs.keys.toSet();
       final closers = pairs.values.toSet();
 
-      if(char == "'" || char == '"'){
-        if(
-          offset < _rope.length &&
-          _rope.substring(offset - 1, offset + 1) == '$char$char'
-        ) {
+      if (char == "'" || char == '"') {
+        if (offset < _rope.length &&
+            _rope.substring(offset - 1, offset + 1) == '$char$char') {
           _selection = TextSelection.collapsed(offset: offset + 1);
           notifyListeners();
           return;
@@ -5367,7 +5365,8 @@ class CodeForgeController implements DeltaTextInputClient {
         actualInsertedText = '$char$closing';
         actualSelection = TextSelection.collapsed(offset: offset + 1);
       } else if (closers.contains(char)) {
-        if (offset < _rope.length && _rope.substring(offset, offset + 1) == char) {
+        if (offset < _rope.length &&
+            _rope.substring(offset, offset + 1) == char) {
           _selection = TextSelection.collapsed(offset: offset + 1);
           notifyListeners();
           return;
