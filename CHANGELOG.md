@@ -650,11 +650,12 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
     - 255: fully opaque.
     <br>
     <br>
-     ```ts
+    
+    ```ts
       CodeForge(
         backgroundOpacity: 200
       )
-      ```
+    ```
   - FEATURE: Resizable hover panel.
     <p align="left">
       <img src="https://raw.githubusercontent.com/heckmon/code_forge/refs/heads/main/gifs/resize.png" alt="Git diff" height="400" width="400"/>
