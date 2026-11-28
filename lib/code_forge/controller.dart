@@ -585,6 +585,14 @@ class CodeForgeController implements DeltaTextInputClient {
     null,
   );
 
+  /// Used internally by the [CodeForge] widget. Use the `controller.hoverPanelWidth`
+  /// getter to access the hover panel width.
+  final ValueNotifier<(double?, bool)> hoverWidthNotifier = ValueNotifier((null, false));
+
+  /// Used internally by the [CodeForge] widget. Use the `controller.hoverPanelHeight`
+  /// getter to access the hover panel height.
+  final ValueNotifier<(double, bool)> hoverHeightNotifier = ValueNotifier((300, false));
+
   /// Whether the suggestions/completions are enabled or not.
   /// Includes both LSP and local word match suggestions.
   bool enableLocalSuggestions = false;
@@ -639,6 +647,21 @@ class CodeForgeController implements DeltaTextInputClient {
 
   /// Currently opened file.
   String? get openedFile => _openedFile;
+
+  /// The current width of the LSP hover panel. Changes if the user resizes the hover panel.
+  /// 
+  /// if this getter returns `null`, which means the user hasn't changed the width. In that case,
+  /// width falls back to default value and which is calculated using the below method:
+  /// 
+  /// `width = _isMobile ? screenWidth * 0.63 : screenWidth * 0.3;`
+  /// 
+  /// /// Use the setter with the same name to set custom width.
+  double? get hoverPanelWidth => hoverWidthNotifier.value.$1;
+
+  /// The current height of the LSP hover panel. Changes if the user resizes the hover panel.
+  /// 
+  /// Use the setter with the same name to set custom height.
+  double get hoverPanelHeight => hoverHeightNotifier.value.$1;
 
   VoidCallback? userCodeAction;
 
@@ -2365,6 +2388,22 @@ class CodeForgeController implements DeltaTextInputClient {
     _syncToConnection();
 
     notifyListeners();
+  }
+
+  /// Set custom height to the LSP hover overlay panel.
+  set hoverPanelHeight(double height) {
+    hoverHeightNotifier.value = (
+      height,
+      hoverHeightNotifier.value.$2
+    );
+  }
+
+  /// Set custom width to the LSP hover overlay panel.
+  set hoverPanelWidth(double width) {
+    hoverWidthNotifier.value = (
+      width,
+      hoverWidthNotifier.value.$2
+    );
   }
 
   /// Updates selection and syncs to text input connection for keyboard navigation.

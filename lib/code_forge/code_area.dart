@@ -366,6 +366,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   ));
   final ValueNotifier<int> _scrollbarLineNumberIndicator = ValueNotifier(1);
   final ValueNotifier<int> _minimapSelectionRevision = ValueNotifier(0);
+  final ValueNotifier<bool> _hoverScrollNotifier = ValueNotifier(false);
   final _isMobile =
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
@@ -770,6 +771,18 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
       }
     };
     _hoverNotifier.addListener(_hoverListener);
+    _hoverNotifier.addListener((){
+      final hoverWidthNotifier = _controller.hoverWidthNotifier;
+      final hoverHeightNotifier = _controller.hoverHeightNotifier;
+      hoverWidthNotifier.value = (
+        hoverWidthNotifier.value.$1,
+        false
+      );
+      hoverHeightNotifier.value = (
+        hoverHeightNotifier.value.$1,
+        false
+      );
+    });
 
     _signatureListener = () {
       if (!mounted) return;
@@ -786,7 +799,12 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
     _lspSignatureNotifier.addListener(_signatureListener);
 
     _isHoveringPopupListener = () {
-      if (!_isHoveringPopup.value && _hoverNotifier.value != null) {
+      if (
+        !_isHoveringPopup.value &&
+        _hoverNotifier.value != null &&
+        !_controller.hoverWidthNotifier.value.$2 &&
+        !_controller.hoverHeightNotifier.value.$2
+      ) {
         _hoverNotifier.value = null;
       }
     };
@@ -2355,7 +2373,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
   Widget _buildHoverOverlay(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: _hoverNotifier,
-      builder: (_, hov, c) {
+      builder: (_, hov, _) {
         if (hov == null || _controller.lspConfig == null) {
           return SizedBox.shrink();
         }
@@ -2395,204 +2413,309 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
           adjustedTop = position.dy;
         }
 
-        return Positioned(
-          top: adjustedTop,
-          bottom: adjustedBottom,
-          left: adjustedLeft,
-          width: width,
-          child: MouseRegion(
-            onEnter: (_) => _isHoveringPopup.value = true,
-            onExit: (_) => _isHoveringPopup.value = false,
-            child: ValueListenableBuilder<Map<String, dynamic>?>(
-              valueListenable: _hoverContentNotifier,
-              builder: (_, data, _) {
-                if (data == null) {
-                  return ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: width,
-                      maxHeight: maxHeight,
-                    ),
-                    child: Card(
-                      color: _hoverDetailsStyle.backgroundColor,
-                      shape: _hoverDetailsStyle.shape,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(
-                          "Loading...",
-                          style: _hoverDetailsStyle.textStyle,
-                        ),
-                      ),
-                    ),
-                  );
-                }
-        
-                final String diagnosticMessage = data['diagnostic'] ?? '';
-                final int severity = data['severity'] ?? 0;
-                final String hoverMessage = data['hover'] ?? '';
-        
-                if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
-                  return SizedBox.shrink();
-                }
-        
-                IconData diagnosticIcon;
-                Color diagnosticColor;
-        
-                switch (severity) {
-                  case 1:
-                    diagnosticIcon = Icons.error_outline;
-                    diagnosticColor = Colors.red;
-                    break;
-                  case 2:
-                    diagnosticIcon = Icons.warning_amber_outlined;
-                    diagnosticColor = Colors.orange;
-                    break;
-                  case 3:
-                    diagnosticIcon = Icons.info_outline;
-                    diagnosticColor = Colors.blue;
-                    break;
-                  case 4:
-                    diagnosticIcon = Icons.lightbulb_outline;
-                    diagnosticColor = Colors.grey;
-                    break;
-                  default:
-                    diagnosticIcon = Icons.info_outline;
-                    diagnosticColor = Colors.grey;
-                }
-        
-                final hoverScrollController = ScrollController();
-                final errorSCrollController = ScrollController();
-        
-                return ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: width,
-                    maxHeight: maxHeight,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (diagnosticMessage.isNotEmpty)
-                        Card(
-                          surfaceTintColor: diagnosticColor,
-                          color: _hoverDetailsStyle.backgroundColor,
-                          shape: BeveledRectangleBorder(
-                            side: BorderSide(
-                              color: diagnosticColor,
-                              width: 0.2,
+        final hoverScrollController = ScrollController();
+        final errorSCrollController = ScrollController();
+
+        final hoverWidthNotifier = _controller.hoverWidthNotifier;
+        final hoverHeightNotifier = _controller.hoverHeightNotifier;
+
+        return ValueListenableBuilder(
+          valueListenable: hoverWidthNotifier,
+          builder: (_, hoverWidth, _) {
+            return ValueListenableBuilder(
+              valueListenable: hoverHeightNotifier,
+              builder: (context, hoverHeight, child) {
+                return Positioned(
+                  top: adjustedTop,
+                  bottom: adjustedBottom,
+                  left: adjustedLeft,
+                  width: (hoverWidth.$1 ?? width).clamp(60, screenWidth - 20),
+                  child: MouseRegion(
+                    onEnter: (_) => _isHoveringPopup.value = true,
+                    onExit: (_) => _isHoveringPopup.value = false,
+                    child: ValueListenableBuilder<Map<String, dynamic>?>(
+                      valueListenable: _hoverContentNotifier,
+                      builder: (_, data, _) {
+                        if (data == null) {
+                          return ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: width,
+                              maxHeight: maxHeight,
                             ),
-                          ),
-                          margin: EdgeInsets.only(
-                            bottom: hoverMessage.isNotEmpty ? 4 : 0,
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: RawScrollbar(
-                              controller: errorSCrollController,
-                              thumbVisibility: true,
-                              thumbColor: _editorTheme['root']!.color!
-                                  .withAlpha(100),
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                controller: errorSCrollController,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      diagnosticIcon,
-                                      color: diagnosticColor,
-                                      size: 16,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      diagnosticMessage,
-                                      style: _hoverDetailsStyle.textStyle,
-                                    ),
-                                  ],
+                            child: Card(
+                              color: _hoverDetailsStyle.backgroundColor,
+                              shape: _hoverDetailsStyle.shape,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(
+                                  "Loading...",
+                                  style: _hoverDetailsStyle.textStyle,
                                 ),
                               ),
                             ),
+                          );
+                        }
+                
+                        final String diagnosticMessage = data['diagnostic'] ?? '';
+                        final int severity = data['severity'] ?? 0;
+                        final String hoverMessage = data['hover'] ?? '';
+                
+                        if (diagnosticMessage.isEmpty && hoverMessage.isEmpty) {
+                          return SizedBox.shrink();
+                        }
+                
+                        IconData diagnosticIcon;
+                        Color diagnosticColor;
+                
+                        switch (severity) {
+                          case 1:
+                            diagnosticIcon = Icons.error_outline;
+                            diagnosticColor = Colors.red;
+                            break;
+                          case 2:
+                            diagnosticIcon = Icons.warning_amber_outlined;
+                            diagnosticColor = Colors.orange;
+                            break;
+                          case 3:
+                            diagnosticIcon = Icons.info_outline;
+                            diagnosticColor = Colors.blue;
+                            break;
+                          case 4:
+                            diagnosticIcon = Icons.lightbulb_outline;
+                            diagnosticColor = Colors.grey;
+                            break;
+                          default:
+                            diagnosticIcon = Icons.info_outline;
+                            diagnosticColor = Colors.grey;
+                        }
+                
+                        return ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: hoverHeight.$1.clamp(80, maxHeight),
                           ),
-                        ),
-        
-                      if (hoverMessage.isNotEmpty)
-                        Flexible(
-                          child: Card(
-                            color: _hoverDetailsStyle.backgroundColor,
-                            shape: _hoverDetailsStyle.shape,
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: RawScrollbar(
-                                controller: hoverScrollController,
-                                thumbVisibility: true,
-                                thumbColor: _editorTheme['root']!.color!
-                                    .withAlpha(100),
-                                child: SingleChildScrollView(
-                                  controller: hoverScrollController,
-                                  child: SelectableRegion(
-                                    selectionControls: materialTextSelectionControls,
-                                    contextMenuBuilder: (context, state) {
-                                      return AdaptiveTextSelectionToolbar(
-                                        anchors: state.contextMenuAnchors,
-                                        children: [],
-                                      );
-                                    },
-                                    child: MarkdownBlock(
-                                      selectable: false,
-                                      data: hoverMessage,
-                                      config: MarkdownConfig.darkConfig.copy(
-                                        configs: [
-                                          PConfig(
-                                            textStyle:
-                                                _hoverDetailsStyle.textStyle,
+                          child: NotificationListener<ScrollMetricsNotification>(
+                            onNotification:(notification) {
+                              final extent = notification.metrics.maxScrollExtent;
+                              if(_hoverScrollNotifier.value) return false;
+                              if(extent > 0) {
+                                _hoverScrollNotifier.value = true;
+                              }
+                              return false;
+                            },
+                            child: Stack(
+                              children: [
+                                Positioned(
+                                  top: 0,
+                                  bottom: 0,
+                                  right: 0,
+                                  width: 7,
+                                  child: MouseRegion(
+                                    cursor: SystemMouseCursors.resizeLeftRight,
+                                    child: GestureDetector(
+                                      onHorizontalDragUpdate: (details) {
+                                        hoverWidthNotifier.value =  (
+                                          (hoverWidthNotifier.value.$1 ?? width)
+                                          + details.delta.dx,
+                                          true
+                                        );
+                                      },
+                                      onHorizontalDragEnd: (_) {
+                                        hoverWidthNotifier.value = (
+                                          hoverWidthNotifier.value.$1,
+                                          false
+                                        );
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 3),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: .circular(5),
+                                            color: hoverWidth.$2 
+                                              ? Colors.blue
+                                              : Colors.transparent
                                           ),
-                                          PreConfig(
-                                            language:
-                                                _controller
-                                                    .lspConfig
-                                                    ?.languageId
-                                                    .toLowerCase() ??
-                                                "dart",
-                                            theme: _editorTheme,
-                                            textStyle: TextStyle(
-                                              fontFamily: 'monospace',
-                                              fontSize: _hoverDetailsStyle
-                                                  .textStyle
-                                                  .fontSize,
-                                            ),
-                                            styleNotMatched: TextStyle(
-                                              color:
-                                                  _editorTheme['root']!.color,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _editorTheme['root']!
-                                                  .backgroundColor!,
-                                              borderRadius: BorderRadius.zero,
-                                              border: Border.all(
-                                                width: 0.2,
-                                                color:
-                                                    _editorTheme['root']!
-                                                        .color ??
-                                                    Colors.grey,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
+                                ValueListenableBuilder(
+                                  valueListenable: _hoverScrollNotifier,
+                                  builder: (_, hasScroll, _) {
+                                    if(hasScroll){
+                                      return Positioned(
+                                        bottom: 0,
+                                        left: 0,
+                                        right: 0,
+                                        height: 7,
+                                        child: MouseRegion(
+                                          cursor: SystemMouseCursors.resizeUpDown,
+                                          child: GestureDetector(
+                                            onVerticalDragUpdate: (details) {
+                                              hoverHeightNotifier.value =  (
+                                                hoverHeightNotifier.value.$1
+                                                + details.delta.dy,
+                                                true
+                                              );
+                                            },
+                                            onVerticalDragEnd: (_) {
+                                              hoverHeightNotifier.value = (
+                                                hoverHeightNotifier.value.$1,
+                                                false
+                                              );
+                                            },
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 3),
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius: .circular(5),
+                                                  color: hoverHeight.$2
+                                                    ? Colors.blue
+                                                    : Colors.transparent
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      );
+                                    }
+                                    return SizedBox.shrink();
+                                  }
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (diagnosticMessage.isNotEmpty)
+                                      Card(
+                                        surfaceTintColor: diagnosticColor,
+                                        color: _hoverDetailsStyle.backgroundColor,
+                                        shape: BeveledRectangleBorder(
+                                          side: BorderSide(
+                                            color: diagnosticColor,
+                                            width: 0.2,
+                                          ),
+                                        ),
+                                        margin: EdgeInsets.only(
+                                          bottom: hoverMessage.isNotEmpty ? 4 : 0,
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(8.0),
+                                          child: RawScrollbar(
+                                            controller: errorSCrollController,
+                                            thumbVisibility: true,
+                                            thumbColor: _editorTheme['root']!.color!
+                                                .withAlpha(100),
+                                            child: SingleChildScrollView(
+                                              scrollDirection: Axis.horizontal,
+                                              controller: errorSCrollController,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Icon(
+                                                    diagnosticIcon,
+                                                    color: diagnosticColor,
+                                                    size: 16,
+                                                  ),
+                                                  SizedBox(width: 8),
+                                                  Text(
+                                                    diagnosticMessage,
+                                                    style: _hoverDetailsStyle.textStyle,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                        
+                                    if (hoverMessage.isNotEmpty)
+                                      Flexible(
+                                        child: Card(
+                                          color: _hoverDetailsStyle.backgroundColor,
+                                          shape: _hoverDetailsStyle.shape,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(8.0),
+                                            child: RawScrollbar(
+                                              controller: hoverScrollController,
+                                              thumbVisibility: true,
+                                              thumbColor: _editorTheme['root']!.color!
+                                                  .withAlpha(100),
+                                              child: SingleChildScrollView(
+                                                controller: hoverScrollController,
+                                                child: SelectableRegion(
+                                                  selectionControls: materialTextSelectionControls,
+                                                  contextMenuBuilder: (_, state) {
+                                                    return AdaptiveTextSelectionToolbar(
+                                                      anchors: state.contextMenuAnchors,
+                                                      children: [],
+                                                    );
+                                                  },
+                                                  child: MarkdownBlock(
+                                                    selectable: false,
+                                                    data: hoverMessage,
+                                                    config: MarkdownConfig.darkConfig.copy(
+                                                      configs: [
+                                                        PConfig(
+                                                          textStyle:
+                                                              _hoverDetailsStyle.textStyle,
+                                                        ),
+                                                        PreConfig(
+                                                          language:
+                                                              _controller
+                                                                  .lspConfig
+                                                                  ?.languageId
+                                                                  .toLowerCase() ??
+                                                              "dart",
+                                                          theme: _editorTheme,
+                                                          textStyle: TextStyle(
+                                                            fontWeight: .w600,
+                                                            fontFamily: 'monospace',
+                                                            fontSize: _hoverDetailsStyle
+                                                                .textStyle
+                                                                .fontSize,
+                                                          ),
+                                                          styleNotMatched: TextStyle(
+                                                            color:
+                                                                _editorTheme['root']!.color,
+                                                          ),
+                                                          decoration: BoxDecoration(
+                                                            color: _editorTheme['root']!
+                                                                .backgroundColor!,
+                                                            borderRadius: BorderRadius.zero,
+                                                            border: Border.all(
+                                                              width: 0.2,
+                                                              color:
+                                                                  _editorTheme['root']!
+                                                                      .color ??
+                                                                  Colors.grey,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                    ],
+                        );
+                      },
+                    ),
                   ),
                 );
-              },
-            ),
-          ),
+              }
+            );
+          }
         );
       },
     );
@@ -4149,7 +4272,7 @@ class _CodeForgeState extends State<CodeForge> with TickerProviderStateMixin {
                   ),
                   ValueListenableBuilder<Offset?>(
                     valueListenable: _aiOffsetNotifier,
-                    builder: (context, offvalue, child) {
+                    builder: (_, offvalue, _) {
                       return _isMobile &&
                               _aiNotifier.value != null &&
                               offvalue != null &&
@@ -12088,14 +12211,7 @@ class _CodeFieldRenderer extends RenderBox implements MouseTrackerAnnotation {
     );
     final textOffset = _getTextOffsetFromPosition(contentPosition);
 
-    if (event is PointerHoverEvent) {
-      if (hoverNotifier.value == null) {
-        _hoverTimer?.cancel();
-      }
-      if (!(hoverNotifier.value != null && isHoveringPopup.value)) {
-        hoverNotifier.value = null;
-      }
-
+    if (event is PointerHoverEvent && controller.lspConfig != null) {
       if ((hoverNotifier.value == null || !isHoveringPopup.value) &&
           _isOffsetOverWord(textOffset)) {
         _hoverTimer?.cancel();

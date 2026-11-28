@@ -575,4 +575,4 @@ This release establishes **CodeForge** as a powerful, production-ready code edit
 ## 12.0.0
   - FIX: Block quotes closing issue.
   - FEATURE: Add background opacity parameter
-  TODO: Resizable overlay
+  TODO: Resizable hover overlay on mobile
